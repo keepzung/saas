@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.local
+.DS_Store
+*.log
+docs/har/
+PROGRESS.md
