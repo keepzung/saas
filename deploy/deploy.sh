@@ -17,7 +17,7 @@ PM2_APP="${PM2_APP:-saas-api}"
 cd "$APP_DIR"
 
 echo "==> [1/7] 拉取最新代码（${BRANCH}）"
-sudo -n git fetch origin "$BRANCH" 2>/dev/null || git fetch origin "$BRANCH"
+git fetch origin "$BRANCH"
 git reset --hard "origin/${BRANCH}"
 
 echo "==> [2/7] 后端依赖"
