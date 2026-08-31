@@ -26,7 +26,10 @@ apt-get install -y curl git nginx postgresql postgresql-contrib ufw
 
 if [ -z "$DB_PASSWORD" ]; then
   DB_PASSWORD="$(openssl rand -hex 16)"
-  echo "（已自动生成数据库密码，请记录：见下方摘要）"
+  echo "================================================"
+  echo " 已自动生成数据库密码（请立即记录）："
+  echo " ${DB_PASSWORD}"
+  echo "================================================"
 fi
 
 echo "==> [2/8] 安装 Node.js 22 LTS（NodeSource）"
