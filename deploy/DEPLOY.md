@@ -151,6 +151,7 @@ pm2 logs saas-api --lines 100
 | 刷新 404 | Nginx 缺 `try_files`（核对 sites-available/saas） |
 | API 404 且带 Nginx 字样 | `location /api/` 未生效，`nginx -t && systemctl reload nginx` |
 | 前端更新不生效 | 强刷（Ctrl+F5）；核对 `/var/www/saas-web/assets` 文件时间戳 |
+| 发版后白屏 / 点菜单跳回欢迎页 | 浏览器缓存了旧 index.html，引用的分片已被新发布删除 → 404。强刷（Ctrl+Shift+R）恢复；根治：站点配置含 `location = /index.html { add_header Cache-Control "no-cache"; }`（本仓库 nginx 模板已内置，老站点需手动补） |
 | 端口被占 | `ss -ltnp \| grep 3000`，`pm2 delete saas-api && pm2 start dist/main.js --name saas-api` |
 
 ---

@@ -166,6 +166,11 @@ server {
     location / {
         try_files $uri $uri/ /index.html;
     }
+
+    # index.html 禁缓存：避免发版后旧分片 404 白屏
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
 }
 NGINX
 
