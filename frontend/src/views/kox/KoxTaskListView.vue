@@ -213,7 +213,7 @@ const columns = [
   { key: 'time_range', title: '开始和结束时间', dataIndex: 'time_range', width: 200 },
   { key: 'status', title: '任务状态', width: 100 },
   { key: 'progress', title: '完成进度', width: 140 },
-  { key: 'created_user', title: '任务创建人', dataIndex: 'created_user', width: 100 },
+  { key: 'created_user', title: '任务创建人', dataIndex: 'created_user', width: 120 },
   { key: 'action', title: '操作', width: 140 },
 ];
 

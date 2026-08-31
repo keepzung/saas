@@ -272,12 +272,12 @@ function renderChart() {
   const trend = ov.value.trend ?? [];
   chart.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['内容量', '曝光量', '互动量', '负面内容'] },
-    grid: { left: 60, right: 60, top: 40, bottom: 30 },
+    legend: { data: ['内容量', '曝光量', '互动量', '负面内容'], top: 8 },
+    grid: { left: 60, right: 60, top: 64, bottom: 30 },
     xAxis: { type: 'category', data: trend.map((t) => t.date.slice(5)) },
     yAxis: [
-      { type: 'value', name: '内容量' },
-      { type: 'value', name: '曝光/互动', axisLabel: { formatter: (v) => `${Math.round(v / 10000)}w` } },
+      { type: 'value' },
+      { type: 'value', axisLabel: { formatter: (v) => `${Math.round(v / 10000)}w` } },
     ],
     series: [
       { name: '内容量', type: 'bar', data: trend.map((t) => t.content_cnt), itemStyle: { color: '#3456E6' } },
