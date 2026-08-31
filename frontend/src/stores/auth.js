@@ -1,16 +1,6 @@
 import { defineStore } from 'pinia';
 import request from '../api/request';
-
-function sha1(text) {
-  const bytes = new TextEncoder().encode(text);
-  return crypto.subtle
-    .digest('SHA-1', bytes)
-    .then((buf) =>
-      Array.from(new Uint8Array(buf))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join(''),
-    );
-}
+import { sha1Hex } from '../utils/sha1';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -33,7 +23,7 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     async login(phone, password) {
-      const hashed = await sha1(password);
+      const hashed = sha1Hex(password);
       const data = await request.post('/login', {
         username: phone,
         password: hashed,
