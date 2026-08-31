@@ -134,6 +134,10 @@ const MODULE_TREE = [
         name: '订单管理',
         features: [{ name: '订单列表', path: '/orders' }],
       },
+      {
+        name: '系统管理',
+        features: [{ name: '用户管理', path: '/users/manage' }],
+      },
     ],
   },
 ];

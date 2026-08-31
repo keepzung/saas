@@ -39,6 +39,11 @@ const routes = [
         meta: { title: '订单列表' },
       },
       {
+        path: '/users/manage',
+        component: () => import('../views/system/UserManageView.vue'),
+        meta: { title: '用户管理' },
+      },
+      {
         path: '/project/manage/list',
         component: () => import('../views/project/ProjectListView.vue'),
         meta: { title: '项目列表' },
@@ -138,6 +143,21 @@ router.beforeEach((to) => {
   }
   if (to.path === '/login' && auth.isLoggedIn) {
     return { path: '/welcome' };
+  }
+  if (to.path !== '/welcome' && to.meta.public === undefined) {
+    if (auth.moduleTree.length > 0) {
+      const allowed = new Set(['/welcome']);
+      const walk = (nodes) => {
+        for (const n of nodes ?? []) {
+          if (n.children) walk(n.children);
+          else if (n.path) allowed.add(n.path);
+        }
+      };
+      walk(auth.moduleTree);
+      if (!allowed.has(to.path)) {
+        return { path: '/welcome' };
+      }
+    }
   }
   return true;
 });

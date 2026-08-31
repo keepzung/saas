@@ -136,8 +136,8 @@ pm2 logs saas-api --lines 100
 # root 身份配置每日 03:00 备份，保留 30 天
 (crontab -l 2>/dev/null; echo '0 3 * * * /bin/bash /opt/saas/deploy/backup.sh >> /var/log/saas-backup.log 2>&1') | crontab -
 
-# 恢复示例：
-# sudo -u postgres pg_restore -d saas_prod --clean --if-exists /var/backups/saas/saas_prod_<时间戳>.dump
+# 恢复示例（管道法：root 读文件、postgres 读标准输入，绕开备份文件权限限制）：
+# cat /var/backups/saas/saas_prod_<时间戳>.dump | sudo -u postgres pg_restore -d saas_prod --clean --if-exists
 ```
 
 建议：另配 `scp`/`rclone` 将 `/var/backups/saas` 异地同步（OSS/S3）。

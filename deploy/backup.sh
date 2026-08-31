@@ -25,7 +25,8 @@ if [ "$(id -un)" = "root" ]; then
 else
   pg_dump -Fc "$DB_NAME" > "$FILE"
 fi
-chmod 600 "$FILE"
+chown root:postgres "$FILE" 2>/dev/null || true
+chmod 640 "$FILE"
 echo "[$(date '+%F %T')] 备份完成：$(du -h "$FILE" | cut -f1)"
 
 # 清理过期备份

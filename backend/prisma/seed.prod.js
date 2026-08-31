@@ -161,6 +161,10 @@ const MODULE_TREE = [
         name: '订单管理',
         features: [{ name: '订单列表', path: '/orders' }],
       },
+      {
+        name: '系统管理',
+        features: [{ name: '用户管理', path: '/users/manage' }],
+      },
     ],
   },
 ];
@@ -182,49 +186,63 @@ const ADMIN_ACTIONS = [
 ];
 
 async function seedModuleTree() {
-  const existing = await prisma.moduleNode.count();
-  if (existing > 0) {
-    console.log('[seed:prod] 模块树已存在（%d 节点），跳过', existing);
-    return;
-  }
-  let sort = 0;
+  let catSort = 0;
   for (const category of MODULE_TREE) {
-    const cat = await prisma.moduleNode.create({
-      data: {
+    const cat = await prisma.moduleNode.upsert({
+      where: { key: category.key },
+      update: {
+        name: category.name,
+        icon: category.icon,
+        type: 'category',
+        sort: catSort,
+      },
+      create: {
         key: category.key,
         name: category.name,
         icon: category.icon,
         type: 'category',
-        sort: sort++,
+        sort: catSort,
       },
     });
+    catSort += 1;
+
     let groupSort = 0;
     for (const group of category.children) {
-      const grp = await prisma.moduleNode.create({
-        data: {
-          key: `${category.key}_g${groupSort}`,
+      const groupKey = `${category.key}_g${groupSort}`;
+      const grp = await prisma.moduleNode.upsert({
+        where: { key: groupKey },
+        update: { name: group.name, type: 'group', parentId: cat.id, sort: groupSort },
+        create: {
+          key: groupKey,
           name: group.name,
           type: 'group',
           parentId: cat.id,
-          sort: groupSort++,
+          sort: groupSort,
         },
       });
+      groupSort += 1;
+
       let featureSort = 0;
       for (const feature of group.features) {
-        await prisma.moduleNode.create({
-          data: {
-            key: `${grp.key}_f${featureSort}`,
+        const featureKey = `${groupKey}_f${featureSort}`;
+        await prisma.moduleNode.upsert({
+          where: { key: featureKey },
+          update: { name: feature.name, path: feature.path, type: 'feature', parentId: grp.id, sort: featureSort },
+          create: {
+            key: featureKey,
             name: feature.name,
             type: 'feature',
             path: feature.path,
             parentId: grp.id,
-            sort: featureSort++,
+            sort: featureSort,
           },
         });
+        featureSort += 1;
       }
     }
   }
-  console.log('[seed:prod] 模块树创建完成');
+  const total = await prisma.moduleNode.count();
+  console.log(`[seed:prod] 模块树已同步（共 ${total} 节点，按 key upsert 保留既有 ID）`);
 }
 
 async function main() {
@@ -248,7 +266,12 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { phone: ADMIN_PHONE },
-    update: { actions: ADMIN_ACTIONS, role: 'ADMIN', adminFlag: 1 },
+    update: {
+      actions: ADMIN_ACTIONS,
+      role: 'ADMIN',
+      adminFlag: 1,
+      passwordHash: bcrypt.hashSync(sha1(ADMIN_PASSWORD), 10),
+    },
     create: {
       phone: ADMIN_PHONE,
       passwordHash: bcrypt.hashSync(sha1(ADMIN_PASSWORD), 10),
