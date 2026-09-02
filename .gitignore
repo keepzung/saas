@@ -6,3 +6,8 @@ dist/
 *.log
 docs/har/
 PROGRESS.md
+
+*.xlsx
+*.xls
+~$*
+data-import/*.xlsx
