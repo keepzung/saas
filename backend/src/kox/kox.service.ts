@@ -33,6 +33,16 @@ export interface TaskDto {
   accountIds?: number[];
 }
 
+export interface ImportAccountRow {
+  authorId?: string | number;
+  accountType?: string;
+  region?: string;
+  province?: string;
+  city?: string;
+  storeName?: string;
+  authorUrl?: string;
+}
+
 const num = (v: unknown): number => {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -47,7 +57,13 @@ export class KoxService {
     accountType?: string;
     status?: string;
     keyword?: string;
+    page?: string;
+    page_size?: string;
+    sort?: string;
+    order?: string;
   }) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.page_size ?? 20) || 20));
     const where: Prisma.KosAccountWhereInput = {};
     if (query.platform) where.platform = query.platform;
     if (query.accountType) where.accountType = query.accountType;
@@ -57,12 +73,22 @@ export class KoxService {
         { nickname: { contains: query.keyword, mode: 'insensitive' } },
         { storeName: { contains: query.keyword, mode: 'insensitive' } },
         { operatorName: { contains: query.keyword, mode: 'insensitive' } },
+        { authorId: { contains: query.keyword, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.kosAccount.findMany({
-      where,
-      orderBy: { id: 'asc' },
-    });
+    const SORT_FIELDS = ['id', 'nickname', 'fans', 'storeName', 'createdAt'];
+    const sort = SORT_FIELDS.includes(query.sort ?? '') ? query.sort! : 'id';
+    const order: Prisma.SortOrder = query.order === 'desc' ? 'desc' : 'asc';
+
+    const [total, rows] = await Promise.all([
+      this.prisma.kosAccount.count({ where }),
+      this.prisma.kosAccount.findMany({
+        where,
+        orderBy: { [sort]: order },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
     return {
       list: rows.map((a) => ({
         id: a.id,
@@ -80,7 +106,9 @@ export class KoxService {
         status: a.status,
         add_time: a.createdAt,
       })),
-      total: rows.length,
+      total,
+      page,
+      page_size: pageSize,
     };
   }
 
@@ -453,5 +481,68 @@ export class KoxService {
         }))
         .sort((a, b) => b.month.localeCompare(a.month)),
     };
+  }
+
+  async importAccounts(rows: ImportAccountRow[]) {
+    let added = 0;
+    let updated = 0;
+    const errors: { row: number; msg: string }[] = [];
+    const seen = new Set<string>();
+
+    const clean = (v?: unknown) => {
+      const s = (v ?? '').toString().trim();
+      return s && s !== '无' ? s : null;
+    };
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      const authorId = (r.authorId ?? '').toString().trim();
+      const rowNo = i + 2;
+      if (!authorId) {
+        errors.push({ row: rowNo, msg: '缺少账号UID' });
+        continue;
+      }
+      if (seen.has(authorId)) {
+        errors.push({ row: rowNo, msg: '文件内UID重复，已跳过' });
+        continue;
+      }
+      seen.add(authorId);
+
+      const type = (r.accountType ?? '').toString().trim().toUpperCase();
+      if (type && !['KOS', 'KOB', 'KOC'].includes(type)) {
+        errors.push({ row: rowNo, msg: `账号类型非法：${type}` });
+        continue;
+      }
+
+      const area =
+        [clean(r.region), clean(r.province), clean(r.city)]
+          .filter(Boolean)
+          .join('·') || null;
+      const storeName = clean(r.storeName);
+
+      const data = {
+        nickname: storeName ?? authorId,
+        accountType: type || 'KOS',
+        areaName: area,
+        storeName,
+        authorUrl: (r.authorUrl ?? '').toString().trim() || null,
+        platform: 'xhs',
+      };
+
+      const existing = await this.prisma.kosAccount.findUnique({
+        where: { authorId },
+      });
+      if (existing) {
+        await this.prisma.kosAccount.update({ where: { authorId }, data });
+        updated += 1;
+      } else {
+        await this.prisma.kosAccount.create({
+          data: { authorId, ...data },
+        });
+        added += 1;
+      }
+    }
+
+    return { total: rows.length, added, updated, errors };
   }
 }

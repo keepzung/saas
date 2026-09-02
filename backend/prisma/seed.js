@@ -219,11 +219,11 @@ async function main() {
   console.log('Seeded company:', company.name);
 
   const admin = await prisma.user.upsert({
-    where: { phone: '18519236161' },
+    where: { phone: '18600104701' },
     update: { actions: ADMIN_ACTIONS },
     create: {
-      phone: '18519236161',
-      passwordHash: bcrypt.hashSync(sha1('Agent@666'), 10),
+      phone: '18600104701',
+      passwordHash: bcrypt.hashSync(sha1('yoyo0508'), 10),
       name: '管理员',
       nickname: 'mark',
       role: 'ADMIN',

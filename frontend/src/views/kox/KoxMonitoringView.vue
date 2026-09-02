@@ -11,7 +11,7 @@
             { value: 'douyin', label: '抖音' },
             { value: 'xhs', label: '小红书' },
           ]"
-          @change="reload"
+          @change="() => reload(true)"
         />
         <a-select
           v-model:value="accountType"
@@ -23,16 +23,19 @@
             { value: 'KOB', label: 'KOB' },
             { value: 'KOC', label: 'KOC' },
           ]"
-          @change="reload"
+          @change="() => reload(true)"
         />
         <a-input-search
           v-model:value="keyword"
-          placeholder="账号 / 代理商 / 运营人"
-          style="width: 220px"
+          placeholder="账号 / UID / 代理商 / 运营人"
+          style="width: 240px"
           allow-clear
-          @search="reload"
+          @search="() => reload(true)"
         />
         <template #actions>
+          <a-button @click="importOpen = true">
+            <FileExcelOutlined /> Excel 导入
+          </a-button>
           <a-button type="primary" @click="addOpen = true">
             <PlusOutlined /> 添加监测账号
           </a-button>
@@ -45,8 +48,15 @@
         :columns="columns"
         :data-source="list"
         :loading="loading"
-        :pagination="{ total, pageSize: 20, showSizeChanger: false, size: 'small' }"
+        :pagination="{
+          total,
+          current: page,
+          pageSize: PAGE_SIZE,
+          showSizeChanger: false,
+          size: 'small',
+        }"
         row-key="id"
+        @change="onTableChange"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'account'">
@@ -59,9 +69,26 @@
                     {{ record.account_type }}
                   </a-tag>
                 </div>
-                <a class="muted mini" @click="copyUrl(record)">复制主页链接</a>
+                <div class="muted mini">
+                  <a
+                    v-if="record.author_url"
+                    :href="record.author_url"
+                    target="_blank"
+                    rel="noopener"
+                  >跳转主页</a>
+                  <template v-if="record.author_url">
+                    <a-divider type="vertical" />
+                    <a @click="copyUrl(record)">复制链接</a>
+                  </template>
+                </div>
               </div>
             </div>
+          </template>
+          <template v-else-if="column.key === 'author_id'">
+            <a-tooltip v-if="record.author_id" :title="record.author_id">
+              <span class="mono">{{ record.author_id }}</span>
+            </a-tooltip>
+            <span v-else>-</span>
           </template>
           <template v-else-if="column.key === 'platform'">
             <a-tag :color="record.platform === 'douyin' ? 'blue' : 'red'">
@@ -117,13 +144,8 @@
         <a-form-item label="粉丝数">
           <a-input-number v-model:value="addForm.fans" :min="0" style="width: 100%" />
         </a-form-item>
-        <a-form-item label="所属大区">
-          <a-select
-            v-model:value="addForm.areaName"
-            :options="areaOptions"
-            placeholder="选择大区"
-            allow-clear
-          />
+        <a-form-item label="所属地域">
+          <a-input v-model:value="addForm.areaName" placeholder="如：华南·广东·广州" />
         </a-form-item>
         <a-form-item label="代理商名称">
           <a-input v-model:value="addForm.storeName" />
@@ -186,13 +208,67 @@
         </a-row>
       </a-form>
     </a-modal>
+
+    <a-modal
+      v-model:open="importOpen"
+      title="Excel 批量导入账号"
+      width="720px"
+      :confirm-loading="importing"
+      ok-text="确认导入"
+      cancel-text="取消"
+      @ok="doImport"
+    >
+      <a-upload-dragger
+        :file-list="importFileList"
+        :before-upload="onImportFile"
+        :max-count="1"
+        accept=".xlsx,.xls"
+        @remove="clearImportFile"
+      >
+        <p class="ant-upload-drag-icon"><FileExcelOutlined /></p>
+        <p class="ant-upload-text">点击或拖入 Excel 文件</p>
+        <p class="ant-upload-hint">
+          表头需含：账号UID / 账号类型 / 大区（可选）/ 省份 / 城市 / 门店名称 / 主页地址
+        </p>
+      </a-upload-dragger>
+
+      <template v-if="importRows.length">
+        <a-alert
+          type="success"
+          show-icon
+          :message="`已解析 ${importRows.length} 条账号（展示前 10 条）`"
+          style="margin-top: 12px"
+        />
+        <a-table
+          size="small"
+          :columns="importPreviewColumns"
+          :data-source="importRows.slice(0, 10)"
+          :pagination="false"
+          row-key="authorId"
+          style="margin-top: 8px"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'area'">
+              {{ [record.region, record.province, record.city].filter(Boolean).join('·') || '-' }}
+            </template>
+          </template>
+        </a-table>
+      </template>
+      <a-alert
+        v-if="importErrors.length"
+        type="warning"
+        show-icon
+        :message="importErrors.join('；')"
+        style="margin-top: 12px"
+      />
+    </a-modal>
   </PageWrapper>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
+import { FileExcelOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
@@ -200,22 +276,81 @@ import {
   createKoxAccount,
   deleteKoxAccount,
   getKoxAccounts,
+  importKoxAccounts,
   updateKoxAccount,
 } from '../../api/kox';
+import { parseAccountWorkbook } from '../../utils/xlsx-import';
+
+const importOpen = ref(false);
+const importing = ref(false);
+const importFileList = ref([]);
+const importRows = ref([]);
+const importErrors = ref([]);
+const importPreviewColumns = [
+  { title: 'UID', dataIndex: 'authorId', width: 210, ellipsis: true },
+  { title: '类型', dataIndex: 'accountType', width: 70 },
+  { title: '地区', key: 'area', width: 130 },
+  { title: '门店', dataIndex: 'storeName', ellipsis: true },
+];
+
+function clearImportFile() {
+  importFileList.value = [];
+  importRows.value = [];
+  importErrors.value = [];
+}
+
+async function onImportFile(file) {
+  try {
+    const { accounts, errors } = await parseAccountWorkbook(file);
+    importRows.value = accounts;
+    importErrors.value = errors;
+    importFileList.value = [{ uid: '-1', name: file.name, status: 'done' }];
+    if (!accounts.length) message.warning('未解析到有效账号行');
+  } catch (e) {
+    message.error(e.message || '文件解析失败');
+    importFileList.value = [];
+  }
+  return false;
+}
+
+async function doImport() {
+  if (!importRows.value.length) {
+    message.warning('请先选择文件');
+    return;
+  }
+  importing.value = true;
+  try {
+    const res = await importKoxAccounts(importRows.value);
+    message.success(
+      `导入完成：新增 ${res.added}，更新 ${res.updated}` +
+        (res.errors.length ? `，失败 ${res.errors.length} 行` : ''),
+    );
+    importOpen.value = false;
+    clearImportFile();
+    reload(true);
+  } catch (e) {
+    message.error(e.message || '导入失败');
+  } finally {
+    importing.value = false;
+  }
+}
 
 const typeColor = { KOS: 'blue', KOB: 'purple', KOC: 'cyan' };
 
+const SORT_MAP = { fans: 'fans', add_time: 'createdAt' };
+
 const columns = [
   { key: 'account', title: '账号' },
+  { key: 'author_id', title: 'UID', dataIndex: 'author_id', width: 160, ellipsis: true },
   { key: 'platform', title: '平台', width: 90 },
   { key: 'account_type', title: '账号类型', dataIndex: 'account_type', width: 100 },
-  { key: 'fans', title: '粉丝数', width: 110 },
-  { key: 'area_name', title: '大区', dataIndex: 'area_name', width: 100 },
-  { key: 'store_name', title: '代理商', dataIndex: 'store_name' },
+  { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 110, sorter: true },
+  { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 130, ellipsis: true },
+  { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', ellipsis: true },
   { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 110 },
   { key: 'operator_name', title: '运营人', dataIndex: 'operator_name', width: 90 },
   { key: 'operator_mobile', title: '运营人手机号', dataIndex: 'operator_mobile', width: 130 },
-  { key: 'add_time', title: '添加时间', width: 110 },
+  { key: 'add_time', title: '添加时间', dataIndex: 'add_time', width: 120, sorter: true },
   { key: 'operation', title: '运营', width: 90 },
   { key: 'action', title: '操作', width: 130 },
 ];
@@ -226,6 +361,10 @@ const loading = ref(false);
 const platform = ref(undefined);
 const accountType = ref(undefined);
 const keyword = ref('');
+const page = ref(1);
+const PAGE_SIZE = 20;
+const sortField = ref(undefined);
+const sortOrder = ref(undefined);
 
 const addOpen = ref(false);
 const saving = ref(false);
@@ -250,18 +389,18 @@ const manageForm = reactive({
   account_tag: '',
 });
 
-const areaOptions = computed(() => {
-  const set = new Set(list.value.map((a) => a.area_name).filter(Boolean));
-  return [...set].map((v) => ({ value: v, label: v }));
-});
-
-async function reload() {
+async function reload(resetPage = false) {
+  if (resetPage) page.value = 1;
   loading.value = true;
   try {
     const res = await getKoxAccounts({
       platform: platform.value || undefined,
       accountType: accountType.value || undefined,
       keyword: keyword.value || undefined,
+      page: page.value,
+      page_size: PAGE_SIZE,
+      sort: sortField.value,
+      order: sortOrder.value,
     });
     list.value = res.list.map((r) => ({
       ...r,
@@ -273,6 +412,14 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+}
+
+function onTableChange(pag, _filters, sorter) {
+  page.value = pag.current ?? 1;
+  sortField.value = sorter?.field && SORT_MAP[sorter.field] ? SORT_MAP[sorter.field] : undefined;
+  sortOrder.value =
+    sorter?.order === 'descend' ? 'desc' : sorter?.order === 'ascend' ? 'asc' : undefined;
+  reload();
 }
 
 function copyUrl(record) {
@@ -301,7 +448,7 @@ async function saveAdd() {
       storeName: '',
       authorUrl: '',
     });
-    reload();
+    reload(true);
   } catch (e) {
     message.error(e.message || '添加失败');
   } finally {
@@ -373,6 +520,10 @@ onMounted(reload);
 
 .mini {
   font-size: 12px;
+}
+
+.mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 }
 
 .muted {

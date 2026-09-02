@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BatchTaskDto,
+  ImportProductsDto,
   MaterialDto,
   MaterialUpdateDto,
   MoveProductDto,
@@ -556,5 +557,59 @@ export class ContentService {
       data: { status: 'cancelled' },
     });
     return { id, status: 'cancelled' };
+  }
+
+  async importProducts(dto: ImportProductsDto, brandId = 1) {
+    let category = await this.prisma.product.findFirst({
+      where: { name: dto.categoryName, parentId: null, brandId },
+    });
+    if (!category) {
+      category = await this.prisma.product.create({
+        data: { name: dto.categoryName, configType: 'category', brandId },
+      });
+    }
+
+    let added = 0;
+    const skipped: string[] = [];
+    const errors: { row: number; msg: string }[] = [];
+
+    for (let i = 0; i < dto.products.length; i += 1) {
+      const row = dto.products[i];
+      const name = row.name?.trim();
+      if (!name) {
+        errors.push({ row: i + 1, msg: '缺少产品名称' });
+        continue;
+      }
+      const dup = await this.prisma.product.findFirst({
+        where: { parentId: category.id, name, brandId },
+        select: { id: true },
+      });
+      if (dup) {
+        skipped.push(name);
+        continue;
+      }
+      await this.prisma.product.create({
+        data: {
+          name,
+          displayName: row.displayName?.trim() || null,
+          description: row.description?.trim() || null,
+          knowledge: row.knowledge?.trim() || null,
+          faq: row.faq?.trim() || null,
+          parentId: category.id,
+          configType: 'product',
+          brandId,
+          sort: i,
+        },
+      });
+      added += 1;
+    }
+
+    return {
+      categoryId: category.id,
+      categoryName: category.name,
+      added,
+      skipped,
+      errors,
+    };
   }
 }

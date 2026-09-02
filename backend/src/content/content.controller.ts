@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ContentService } from './content.service';
 import {
   BatchTaskDto,
+  ImportProductsDto,
   MaterialDto,
   MaterialUpdateDto,
   MoveProductDto,
@@ -38,6 +39,11 @@ export class ContentController {
   @Post('products')
   createProduct(@Body() dto: ProductDto) {
     return this.contentService.createProduct(dto);
+  }
+
+  @Post('products/import')
+  importProducts(@Body() dto: ImportProductsDto) {
+    return this.contentService.importProducts(dto);
   }
 
   @Put('products/:id')

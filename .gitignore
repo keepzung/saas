@@ -11,3 +11,4 @@ PROGRESS.md
 *.xls
 ~$*
 data-import/*.xlsx
+data-import/*.sql

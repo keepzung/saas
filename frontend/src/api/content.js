@@ -4,6 +4,9 @@ export const getProducts = () => request.get('/products');
 
 export const createProduct = (data) => request.post('/products', data);
 
+export const importProducts = (data) =>
+  request.post('/products/import', data);
+
 export const updateProduct = (id, data) => request.put(`/products/${id}`, data);
 
 export const deleteProduct = (id) => request.delete(`/products/${id}`);

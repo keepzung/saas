@@ -1,12 +1,15 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
   IsArray,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class ProductDto {
@@ -142,4 +145,38 @@ export class BatchMoveDto {
   @Type(() => Number)
   @IsInt()
   packageId?: number;
+}
+
+export class ImportProductRowDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  knowledge?: string;
+
+  @IsOptional()
+  @IsString()
+  faq?: string;
+}
+
+export class ImportProductsDto {
+  @IsString()
+  @IsNotEmpty()
+  categoryName: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => ImportProductRowDto)
+  products: ImportProductRowDto[];
 }

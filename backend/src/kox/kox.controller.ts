@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { KoxService } from './kox.service';
+import { ImportAccountRow, KoxService } from './kox.service';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -23,7 +24,16 @@ export class KoxController {
   @Get('kox/accounts')
   accounts(
     @Query()
-    query: { platform?: string; accountType?: string; status?: string; keyword?: string },
+    query: {
+      platform?: string;
+      accountType?: string;
+      status?: string;
+      keyword?: string;
+      page?: string;
+      page_size?: string;
+      sort?: string;
+      order?: string;
+    },
   ) {
     return this.koxService.accounts(query);
   }
@@ -31,6 +41,14 @@ export class KoxController {
   @Post('kox/accounts')
   createAccount(@Body() dto: { nickname: string } & Record<string, unknown>) {
     return this.koxService.createAccount(dto as never);
+  }
+
+  @Post('kox/accounts/import')
+  importAccounts(@Body() dto: { accounts: ImportAccountRow[] }) {
+    if (!Array.isArray(dto.accounts) || dto.accounts.length === 0) {
+      throw new BadRequestException('accounts 不能为空');
+    }
+    return this.koxService.importAccounts(dto.accounts);
   }
 
   @Put('kox/accounts/:id')
