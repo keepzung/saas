@@ -13,23 +13,33 @@ export const useAuthStore = defineStore('auth', {
     brands: [],
     brandRoles: [],
     initialized: false,
+    currentBrandId: Number(localStorage.getItem('current_brand_id')) || null,
   }),
 
   getters: {
     isLoggedIn: (state) => !!state.token,
     systemName: (state) =>
       state.companySourceConfig?.system_name ?? '智能商业营销系统',
+    currentBrand: (state) =>
+      state.brands.find((b) => b.id === state.currentBrandId) ?? null,
   },
 
   actions: {
-    async login(phone, password) {
+    async login(phone, password, mainCompanyId) {
       const hashed = sha1Hex(password);
       const data = await request.post('/login', {
         username: phone,
         password: hashed,
+        ...(mainCompanyId ? { main_company_id: String(mainCompanyId) } : {}),
       });
       this.token = data.token;
       localStorage.setItem('token', data.token);
+    },
+
+    setCurrentBrand(brandId) {
+      this.currentBrandId = brandId ?? null;
+      if (brandId) localStorage.setItem('current_brand_id', String(brandId));
+      else localStorage.removeItem('current_brand_id');
     },
 
     async initWorkspace() {
@@ -45,6 +55,16 @@ export const useAuthStore = defineStore('auth', {
       this.moduleTree = Array.isArray(modules) ? modules : [];
       this.actions = actionList?.actions ?? [];
       this.brands = brands?.list ?? [];
+
+      if (
+        this.currentBrandId &&
+        !this.brands.some((b) => b.id === this.currentBrandId)
+      ) {
+        this.setCurrentBrand(this.brands[0]?.id ?? null);
+      }
+      if (!this.currentBrandId && this.brands.length > 0) {
+        this.setCurrentBrand(this.brands[0].id);
+      }
 
       if (this.brands.length > 0) {
         this.brandRoles = await request.get('/brandMember/myRole');

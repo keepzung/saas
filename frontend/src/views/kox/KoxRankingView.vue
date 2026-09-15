@@ -202,7 +202,7 @@ const metricOptions = Object.entries(METRIC_MAP).map(([value, label]) => ({
 }));
 
 const dimension = ref('region');
-const brandId = ref(authStore.brands?.[0]?.id);
+const brandId = ref(authStore.currentBrandId ?? authStore.brands?.[0]?.id);
 const accountType = ref(undefined);
 const metric = ref('view_sum');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);

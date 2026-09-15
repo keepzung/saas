@@ -71,6 +71,75 @@
       <div class="login-footer"></div>
     </div>
   </div>
+
+  <transition name="modal">
+    <div
+      v-if="selectorVisible"
+      class="company-selector-overlay"
+      @click="selectorVisible = false"
+    >
+      <div class="company-selector-modal" @click.stop>
+        <div class="selector-header">
+          <h3 class="selector-title">选择工作系统</h3>
+          <p class="selector-subtitle">请选择要登录的工作系统</p>
+        </div>
+        <div class="companies-grid">
+          <div
+            v-for="c in companies"
+            :key="c.main_company_id"
+            class="company-card"
+            :class="{ selected: selectedCompanyId === c.main_company_id }"
+            @click="selectedCompanyId = c.main_company_id"
+          >
+            <svg
+              v-if="selectedCompanyId === c.main_company_id"
+              class="card-check"
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+            >
+              <circle cx="7" cy="7" r="7" fill="#1890ff" />
+              <path
+                d="M3.5 7.2 6 9.5 10.5 4.5"
+                stroke="#fff"
+                stroke-width="1.6"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <div class="card-avatar">
+              {{ (c.company_name || '工').charAt(0) }}
+            </div>
+            <div class="card-body">
+              <div class="card-name">{{ c.company_name }}</div>
+              <div class="card-meta">
+                <span class="meta-tag" :class="{ admin: c.admin_flag === 1 }">
+                  {{ c.admin_flag_text }}
+                </span>
+                <span class="meta-nickname">{{ c.nickname_text }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="selector-actions">
+          <button class="action-btn action-cancel" @click="selectorVisible = false">
+            重新登录
+          </button>
+          <button
+            class="action-btn action-confirm"
+            :class="{ disabled: !selectedCompanyId }"
+            :disabled="!selectedCompanyId || confirming"
+            @click="confirmCompany"
+          >
+            <span v-if="confirming" class="btn-loading"></span>
+            确认选择
+          </button>
+        </div>
+      </div>
+    </div>
+  </transition>
 </template>
 
 <script setup>
@@ -78,12 +147,14 @@ import { onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { useAuthStore } from '../stores/auth';
+import { getCompaniesByUserId } from '../api/auth';
 
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 
 const REMEMBER_KEY = 'remembered_username';
+const REMEMBER_PW_KEY = 'remembered_password';
 
 const form = reactive({
   phone: localStorage.getItem(REMEMBER_KEY) || '',
@@ -92,23 +163,67 @@ const form = reactive({
 const remember = ref(!!localStorage.getItem(REMEMBER_KEY));
 const loading = ref(false);
 
+const selectorVisible = ref(false);
+const companies = ref([]);
+const selectedCompanyId = ref(null);
+const confirming = ref(false);
+
 onMounted(() => {
   document.title = `${auth.systemName}`;
 });
+
+function saveRemembered() {
+  if (remember.value) {
+    localStorage.setItem(REMEMBER_KEY, form.phone);
+    localStorage.setItem(REMEMBER_PW_KEY, form.password);
+  } else {
+    localStorage.removeItem(REMEMBER_KEY);
+    localStorage.removeItem(REMEMBER_PW_KEY);
+  }
+}
 
 async function handleSubmit() {
   if (!form.phone || !form.password) return;
   loading.value = true;
   try {
     await auth.login(form.phone, form.password);
-    if (remember.value) localStorage.setItem(REMEMBER_KEY, form.phone);
-    else localStorage.removeItem(REMEMBER_KEY);
+    saveRemembered();
     message.success('登录成功');
     router.push(route.query.redirect || '/welcome');
   } catch (e) {
-    message.error(e.message || '登录失败');
+    if (e.code === 10015) {
+      try {
+        companies.value = await getCompaniesByUserId(e.data?.user_id);
+        selectedCompanyId.value =
+          companies.value.length === 1 ? companies.value[0].main_company_id : null;
+        selectorVisible.value = true;
+      } catch (err) {
+        message.error(err.message || '获取公司列表失败，请重试');
+      }
+    } else {
+      message.error(e.message || '登录失败');
+    }
   } finally {
     loading.value = false;
+  }
+}
+
+async function confirmCompany() {
+  if (!selectedCompanyId.value) {
+    message.warning('请选择一个工作系统');
+    return;
+  }
+  confirming.value = true;
+  try {
+    await auth.login(form.phone, form.password, selectedCompanyId.value);
+    auth.setCurrentBrand(selectedCompanyId.value);
+    saveRemembered();
+    message.success('登录成功');
+    router.push(route.query.redirect || '/welcome');
+  } catch (e) {
+    message.error(e.message || '选择公司后登录失败，请重试');
+  } finally {
+    confirming.value = false;
   }
 }
 </script>
@@ -528,6 +643,277 @@ async function handleSubmit() {
 
   .btn-donate:after {
     animation: none;
+  }
+}
+
+.company-selector-overlay {
+  position: fixed;
+  inset: 0;
+  background: #0000002e;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.company-selector-modal {
+  width: 480px;
+  max-height: 80vh;
+  background: #ffffffb8;
+  backdrop-filter: blur(40px) saturate(1.8);
+  -webkit-backdrop-filter: blur(40px) saturate(1.8);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 24px 80px #00000014, 0 0 0 0.5px #fff9 inset;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-enter-active {
+  transition: opacity 0.25s ease;
+}
+
+.modal-enter-active .company-selector-modal {
+  transition:
+    transform 0.3s cubic-bezier(0.34, 1.4, 0.64, 1),
+    opacity 0.2s ease;
+}
+
+.modal-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.modal-leave-active .company-selector-modal {
+  transition:
+    transform 0.2s ease,
+    opacity 0.15s ease;
+}
+
+.modal-enter-from {
+  opacity: 0;
+}
+
+.modal-enter-from .company-selector-modal {
+  opacity: 0;
+  transform: scale(0.92) translateY(12px);
+}
+
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-leave-to .company-selector-modal {
+  opacity: 0;
+  transform: scale(0.96) translateY(6px);
+}
+
+.selector-header {
+  padding: 28px 28px 4px;
+  text-align: center;
+}
+
+.selector-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.selector-subtitle {
+  font-size: 13px;
+  color: #0006;
+  margin: 0;
+}
+
+.companies-grid {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-content: start;
+}
+
+.companies-grid::-webkit-scrollbar {
+  width: 4px;
+}
+
+.companies-grid::-webkit-scrollbar-thumb {
+  background: #00000014;
+  border-radius: 2px;
+}
+
+.company-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(0, 0, 0, 0.04);
+  background: #ffffff8c;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.company-card:hover {
+  background: #ffffffd9;
+  border-color: #1890ff40;
+  box-shadow: 0 4px 16px #0000000f;
+}
+
+.company-card.selected {
+  background: #e8f4ffcc;
+  border-color: #1890ff80;
+  box-shadow: 0 0 0 1px #1890ff26;
+}
+
+.card-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
+}
+
+.card-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1890ff1a, #1890ff2e);
+  color: #1890ff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.company-card.selected .card-avatar {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+  color: #fff;
+  box-shadow: 0 3px 10px #1890ff4d;
+}
+
+.card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.meta-tag {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #0000000a;
+  color: #0006;
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.meta-tag.admin {
+  background: #d4a0171f;
+  color: #b8860b;
+}
+
+.meta-nickname {
+  font-size: 11px;
+  color: #0000004d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selector-actions {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px 22px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.action-btn {
+  flex: 1;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.action-cancel {
+  background: #0000000a;
+  color: #0000008c;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.action-cancel:hover {
+  background: #00000014;
+  color: #000000bf;
+}
+
+.action-confirm {
+  background: #1890ff;
+  color: #fff;
+}
+
+.action-confirm:hover {
+  background: #40a9ff;
+}
+
+.action-confirm.disabled {
+  background: #0000000f;
+  color: #00000040;
+  cursor: not-allowed;
+}
+
+.btn-loading {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  .company-selector-modal {
+    width: calc(100% - 32px);
+    max-height: 85vh;
   }
 }
 </style>

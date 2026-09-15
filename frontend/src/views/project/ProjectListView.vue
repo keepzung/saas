@@ -266,7 +266,7 @@ import ProjectFormModal from '../../components/project/ProjectFormModal.vue';
 const auth = useAuthStore();
 const store = useProjectStore();
 
-const brandId = ref(1);
+const brandId = ref(auth.currentBrandId ?? 1);
 const brands = ref([]);
 const keyword = ref('');
 const statusFilter = ref(null);
@@ -351,7 +351,9 @@ async function loadBrands() {
   const data = await getWorkspaces();
   brands.value = data.list ?? [];
   if (brands.value.length > 0 && !brands.value.find((b) => b.id === brandId.value)) {
-    brandId.value = brands.value[0].id;
+    brandId.value = brands.value.find((b) => b.id === auth.currentBrandId)
+      ? auth.currentBrandId
+      : brands.value[0].id;
   }
 }
 

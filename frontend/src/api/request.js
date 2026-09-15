@@ -19,7 +19,10 @@ request.interceptors.response.use(
     const body = response.data;
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code !== 100) {
-        return Promise.reject(new Error(body.msg || '请求失败'));
+        const err = new Error(body.msg || '请求失败');
+        err.code = body.code;
+        err.data = body.data;
+        return Promise.reject(err);
       }
       return body.data;
     }
