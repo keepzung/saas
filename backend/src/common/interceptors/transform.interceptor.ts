@@ -13,6 +13,14 @@ export interface Envelope<T> {
   msg: string;
 }
 
+export class EnvelopeResponse<T> {
+  constructor(
+    public readonly code: number,
+    public readonly data: T,
+    public readonly msg = 'success',
+  ) {}
+}
+
 @Injectable()
 export class TransformInterceptor<T> implements NestInterceptor<T, Envelope<T>> {
   intercept(
@@ -20,11 +28,16 @@ export class TransformInterceptor<T> implements NestInterceptor<T, Envelope<T>> 
     next: CallHandler<any>,
   ): Observable<Envelope<any>> {
     return next.handle().pipe(
-      map((data: any) => ({
-        code: 100,
-        data: data ?? null,
-        msg: 'success',
-      })),
+      map((data: any) => {
+        if (data instanceof EnvelopeResponse) {
+          return { code: data.code, data: data.data ?? null, msg: data.msg };
+        }
+        return {
+          code: 100,
+          data: data ?? null,
+          msg: 'success',
+        };
+      }),
     );
   }
 }
