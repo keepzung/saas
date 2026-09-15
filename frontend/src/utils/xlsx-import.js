@@ -14,7 +14,7 @@ const pick = (row, keyword) => {
 };
 
 /**
- * 解析「格力账号导入表」：表头含 账号UID / 账号类型 / 省份 / 城市 / 门店名称 / 主页地址
+ * 解析「KOS 账号导入表」：表头含 账号UID / 账号类型 / 大区（或汇总区域）/ 销售区域 / 省份 / 城市 / 门店名称 / 主页地址
  */
 export async function parseAccountWorkbook(file) {
   const buf = await file.arrayBuffer();
@@ -32,10 +32,14 @@ export async function parseAccountWorkbook(file) {
       errors.push(`第 ${idx + 2} 行：缺少账号UID`);
       return;
     }
+    const region = clean(pick(r, '大区'));
+    const summaryRegion = clean(pick(r, '汇总区域'));
     accounts.push({
       authorId,
       accountType: clean(pick(r, '账号类型')) || 'KOS',
-      region: clean(pick(r, '大区')),
+      regionName: region || summaryRegion,
+      saleArea: clean(pick(r, '销售区域')),
+      region,
       province: clean(pick(r, '省份')),
       city: clean(pick(r, '城市')),
       storeName: clean(pick(r, '门店')),

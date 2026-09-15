@@ -7,6 +7,8 @@ export interface AccountDto {
   platform?: string;
   accountType?: string;
   fans?: number;
+  regionName?: string;
+  saleArea?: string;
   areaName?: string;
   storeName?: string;
   accountTag?: string;
@@ -17,6 +19,8 @@ export interface AccountDto {
 
 export interface AccountManageDto {
   accountType?: string;
+  regionName?: string;
+  saleArea?: string;
   storeName?: string;
   operatorName?: string;
   operatorMobile?: string;
@@ -36,6 +40,8 @@ export interface TaskDto {
 export interface ImportAccountRow {
   authorId?: string | number;
   accountType?: string;
+  regionName?: string;
+  saleArea?: string;
   region?: string;
   province?: string;
   city?: string;
@@ -56,6 +62,8 @@ export class KoxService {
     platform?: string;
     accountType?: string;
     status?: string;
+    regionName?: string;
+    saleArea?: string;
     keyword?: string;
     page?: string;
     page_size?: string;
@@ -68,6 +76,8 @@ export class KoxService {
     if (query.platform) where.platform = query.platform;
     if (query.accountType) where.accountType = query.accountType;
     if (query.status) where.status = query.status;
+    if (query.regionName) where.regionName = query.regionName;
+    if (query.saleArea) where.saleArea = query.saleArea;
     if (query.keyword) {
       where.OR = [
         { nickname: { contains: query.keyword, mode: 'insensitive' } },
@@ -80,7 +90,7 @@ export class KoxService {
     const sort = SORT_FIELDS.includes(query.sort ?? '') ? query.sort! : 'id';
     const order: Prisma.SortOrder = query.order === 'desc' ? 'desc' : 'asc';
 
-    const [total, rows] = await Promise.all([
+    const [total, rows, regionFacets] = await Promise.all([
       this.prisma.kosAccount.count({ where }),
       this.prisma.kosAccount.findMany({
         where,
@@ -88,6 +98,13 @@ export class KoxService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
+      this.prisma.kosAccount.groupBy({ by: ['regionName'] }).then(
+        (g) =>
+          g
+            .map((x) => x.regionName)
+            .filter((x): x is string => !!x)
+            .sort((a, b) => a.localeCompare(b, 'zh')),
+      ),
     ]);
     return {
       list: rows.map((a) => ({
@@ -97,6 +114,8 @@ export class KoxService {
         platform: a.platform,
         account_type: a.accountType,
         fans: a.fans,
+        region_name: a.regionName,
+        sale_area: a.saleArea,
         area_name: a.areaName,
         store_name: a.storeName,
         account_tag: a.accountTag,
@@ -109,6 +128,7 @@ export class KoxService {
       total,
       page,
       page_size: pageSize,
+      region_facets: regionFacets,
     };
   }
 
@@ -117,9 +137,11 @@ export class KoxService {
       data: {
         authorId: `kos_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
         nickname: dto.nickname,
-        platform: dto.platform ?? 'douyin',
+        platform: dto.platform ?? 'xhs',
         accountType: dto.accountType ?? 'KOS',
         fans: dto.fans ?? 0,
+        regionName: dto.regionName,
+        saleArea: dto.saleArea,
         areaName: dto.areaName,
         storeName: dto.storeName,
         accountTag: dto.accountTag,
@@ -138,6 +160,8 @@ export class KoxService {
       where: { id },
       data: {
         ...(dto.accountType !== undefined ? { accountType: dto.accountType } : {}),
+        ...(dto.regionName !== undefined ? { regionName: dto.regionName } : {}),
+        ...(dto.saleArea !== undefined ? { saleArea: dto.saleArea } : {}),
         ...(dto.storeName !== undefined ? { storeName: dto.storeName } : {}),
         ...(dto.operatorName !== undefined ? { operatorName: dto.operatorName } : {}),
         ...(dto.operatorMobile !== undefined ? { operatorMobile: dto.operatorMobile } : {}),
@@ -313,7 +337,7 @@ export class KoxService {
     const task = await this.prisma.koxTask.create({
       data: {
         taskTitle: dto.taskTitle,
-        platform: dto.platform ?? 'douyin',
+        platform: dto.platform ?? 'xhs',
         taskAccountType: dto.taskAccountType ?? 'KOS',
         startTime: new Date(dto.startTime),
         endTime: new Date(dto.endTime),
@@ -341,6 +365,7 @@ export class KoxService {
               select: {
                 nickname: true,
                 accountType: true,
+                regionName: true,
                 areaName: true,
                 storeName: true,
               },
@@ -365,7 +390,7 @@ export class KoxService {
       }
     >();
     for (const rec of task.authors) {
-      const region = rec.account.areaName ?? '未知';
+      const region = rec.account.regionName ?? rec.account.areaName ?? '未知';
       const cur =
         regionMap.get(region) ??
         {
@@ -389,7 +414,7 @@ export class KoxService {
     }
     const dealerSet = new Map<string, Set<string>>();
     for (const rec of task.authors) {
-      const region = rec.account.areaName ?? '未知';
+      const region = rec.account.regionName ?? rec.account.areaName ?? '未知';
       const dealer = rec.account.storeName ?? '未知';
       if (!dealerSet.has(region)) dealerSet.set(region, new Set());
       dealerSet.get(region)!.add(dealer);
@@ -483,6 +508,265 @@ export class KoxService {
     };
   }
 
+  async ranking(query: {
+    dimension?: string;
+    start?: string;
+    end?: string;
+    accountType?: string;
+    platform?: string;
+    brandId?: string;
+    metric?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const DIMENSIONS = ['region', 'saleArea', 'store', 'account'];
+    const dimension = DIMENSIONS.includes(query.dimension ?? '')
+      ? query.dimension!
+      : 'region';
+    const METRICS = [
+      'item_cnt',
+      'exposure_sum',
+      'view_sum',
+      'interaction_sum',
+      'digg_sum',
+      'follow_sum',
+      'pm_leads',
+    ] as const;
+    type MetricKey = (typeof METRICS)[number];
+    const metric: MetricKey = (METRICS as readonly string[]).includes(
+      query.metric ?? '',
+    )
+      ? (query.metric as MetricKey)
+      : 'view_sum';
+
+    const end = query.end ? new Date(query.end) : new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = query.start
+      ? new Date(query.start)
+      : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
+    start.setHours(0, 0, 0, 0);
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
+    );
+    const prevEnd = new Date(start.getTime() - 1);
+    prevEnd.setHours(23, 59, 59, 999);
+    const prevStart = new Date(prevEnd.getTime() - (days - 1) * 86400000);
+    prevStart.setHours(0, 0, 0, 0);
+
+    const accountWhere: Prisma.KosAccountWhereInput = {};
+    if (query.accountType) accountWhere.accountType = query.accountType;
+    if (query.platform) accountWhere.platform = query.platform;
+    if (query.brandId) accountWhere.brandId = Number(query.brandId);
+
+    const [curRows, prevRows] = await Promise.all([
+      this.prisma.koxAccountDailyStat.findMany({
+        where: { statDate: { gte: start, lte: end }, account: accountWhere },
+        include: {
+          account: {
+            select: {
+              id: true,
+              authorId: true,
+              nickname: true,
+              accountType: true,
+              regionName: true,
+              saleArea: true,
+              areaName: true,
+              storeName: true,
+            },
+          },
+        },
+      }),
+      this.prisma.koxAccountDailyStat.findMany({
+        where: {
+          statDate: { gte: prevStart, lte: prevEnd },
+          account: accountWhere,
+        },
+        include: {
+          account: {
+            select: {
+              id: true,
+              nickname: true,
+              regionName: true,
+              saleArea: true,
+              areaName: true,
+              storeName: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const dimOf = (a: {
+      nickname: string;
+      regionName: string | null;
+      saleArea: string | null;
+      areaName: string | null;
+      storeName: string | null;
+    }): string => {
+      switch (dimension) {
+        case 'saleArea':
+          return a.saleArea ?? a.areaName ?? '未知区域';
+        case 'store':
+          return a.storeName ?? '未知店铺';
+        case 'account':
+          return a.nickname;
+        default:
+          return a.regionName ?? a.areaName ?? '未知大区';
+      }
+    };
+
+    type Agg = {
+      name: string;
+      accountIds: Set<number>;
+      storeNames: Set<string>;
+      item_cnt: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_sum: number;
+      digg_sum: number;
+      follow_sum: number;
+      pm_leads: number;
+    };
+    const newAgg = (name: string): Agg => ({
+      name,
+      accountIds: new Set(),
+      storeNames: new Set(),
+      item_cnt: 0,
+      exposure_sum: 0,
+      view_sum: 0,
+      interaction_sum: 0,
+      digg_sum: 0,
+      follow_sum: 0,
+      pm_leads: 0,
+    });
+    const addRow = (
+      map: Map<string, Agg>,
+      account: {
+        id: number;
+        nickname: string;
+        regionName: string | null;
+        saleArea: string | null;
+        areaName: string | null;
+        storeName: string | null;
+      },
+      s: {
+        itemCnt: number;
+        exposureSum: number;
+        viewSum: number;
+        interactionSum: number;
+        diggSum: number;
+        followCountSum: number;
+        pmLeads: number;
+      },
+    ) => {
+      const key = dimOf(account);
+      const agg = map.get(key) ?? newAgg(key);
+      agg.accountIds.add(account.id);
+      if (account.storeName) agg.storeNames.add(account.storeName);
+      agg.item_cnt += s.itemCnt;
+      agg.exposure_sum += s.exposureSum;
+      agg.view_sum += s.viewSum;
+      agg.interaction_sum += s.interactionSum;
+      agg.digg_sum += s.diggSum;
+      agg.follow_sum += s.followCountSum;
+      agg.pm_leads += s.pmLeads;
+      map.set(key, agg);
+    };
+
+    const curMap = new Map<string, Agg>();
+    for (const r of curRows) addRow(curMap, r.account, r);
+    const prevMap = new Map<string, Agg>();
+    for (const r of prevRows) addRow(prevMap, r.account, r);
+
+    const accountInfo = new Map<
+      string,
+      {
+        author_id: string;
+        account_type: string;
+        store_name: string | null;
+        region_name: string | null;
+        sale_area: string | null;
+      }
+    >();
+    if (dimension === 'account') {
+      for (const r of curRows) {
+        accountInfo.set(r.account.nickname, {
+          author_id: r.account.authorId,
+          account_type: r.account.accountType,
+          store_name: r.account.storeName,
+          region_name: r.account.regionName,
+          sale_area: r.account.saleArea,
+        });
+      }
+    }
+
+    const growth = (cur: number, prev: number): number | null => {
+      if (!prev) return null;
+      return Math.round(((cur - prev) / prev) * 1000) / 10;
+    };
+
+    const groups = [...curMap.values()]
+      .map((g) => {
+        const prev = prevMap.get(g.name);
+        const base = {
+          name: g.name,
+          account_num: g.accountIds.size,
+          store_num: g.storeNames.size,
+          item_cnt: g.item_cnt,
+          exposure_sum: g.exposure_sum,
+          view_sum: g.view_sum,
+          interaction_sum: g.interaction_sum,
+          digg_sum: g.digg_sum,
+          follow_sum: g.follow_sum,
+          pm_leads: g.pm_leads,
+          growth: growth(g[metric], prev ? prev[metric] : 0),
+          ...(dimension === 'account' ? accountInfo.get(g.name) ?? {} : {}),
+        };
+        return base;
+      })
+      .sort((a, b) => (b[metric] as number) - (a[metric] as number));
+
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.page_size ?? 20) || 20));
+
+    const summary = groups.reduce(
+      (acc, g) => ({
+        account_num: acc.account_num + g.account_num,
+        item_cnt: acc.item_cnt + g.item_cnt,
+        exposure_sum: acc.exposure_sum + g.exposure_sum,
+        view_sum: acc.view_sum + g.view_sum,
+        interaction_sum: acc.interaction_sum + g.interaction_sum,
+        pm_leads: acc.pm_leads + g.pm_leads,
+      }),
+      {
+        account_num: 0,
+        item_cnt: 0,
+        exposure_sum: 0,
+        view_sum: 0,
+        interaction_sum: 0,
+        pm_leads: 0,
+      },
+    );
+    const accountTotal = new Set(
+      curRows.map((r) => r.account.id),
+    ).size;
+
+    return {
+      dimension,
+      metric,
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+      summary: { ...summary, account_num: accountTotal, group_num: groups.length },
+      list: groups
+        .slice((page - 1) * pageSize, page * pageSize)
+        .map((g, i) => ({ rank: (page - 1) * pageSize + i + 1, ...g })),
+      total: groups.length,
+      page,
+      page_size: pageSize,
+    };
+  }
+
   async importAccounts(rows: ImportAccountRow[]) {
     let added = 0;
     let updated = 0;
@@ -518,11 +802,15 @@ export class KoxService {
         [clean(r.region), clean(r.province), clean(r.city)]
           .filter(Boolean)
           .join('·') || null;
+      const regionName = clean(r.regionName) ?? clean(r.region);
+      const saleArea = clean(r.saleArea);
       const storeName = clean(r.storeName);
 
       const data = {
         nickname: storeName ?? authorId,
         accountType: type || 'KOS',
+        regionName,
+        saleArea,
         areaName: area,
         storeName,
         authorUrl: (r.authorUrl ?? '').toString().trim() || null,

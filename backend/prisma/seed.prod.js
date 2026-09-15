@@ -115,7 +115,12 @@ const MODULE_TREE = [
         name: '运营分析',
         features: [
           { name: '运营总览', path: '/kox_df/operation-analysis/overview' },
+          { name: '排行榜单', path: '/kox_df/operation-analysis/ranking' },
+          { name: '热门内容', path: '/kox_df/operation-analysis/note-ranking' },
           { name: '车型销量', path: '/kox_df/operation-analysis/model-sales' },
+          { name: '经销商运营', path: '/kox_df/operation-analysis/dealer' },
+          { name: '反馈分析', path: '/kox_df/operation-analysis/feedback' },
+          { name: 'AI简报', path: '/kox_df/operation-analysis/ai-briefing' },
         ],
       },
       {

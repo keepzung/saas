@@ -10,8 +10,10 @@ const XLSX = frontendRequire('xlsx');
 const { PrismaClient } = backendRequire('@prisma/client');
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const NO_STATS = process.argv.includes('--no-stats');
 const SKU_FILE = path.join(__dirname, '(Star5)格力SKU产品信息收集表(1).xlsx');
 const ACCOUNT_FILE = path.join(__dirname, '格力账号导入表.xlsx');
+const BRAND_ID = Number(process.env.BRAND_ID || 3);
 
 const envPath = path.join(ROOT, 'backend', '.env');
 if (fs.existsSync(envPath)) {
@@ -119,8 +121,8 @@ function parseSkuWorkbook(wb) {
     knowledge,
     salesPolicy: findByLabel('价格')?.value || null,
     faq: findByLabel('常见疑问')?.value || findByLabel('FAQ')?.value || null,
-    configType: 'product',
-    brandId: 1,
+      configType: 'product',
+      brandId: BRAND_ID,
   };
 }
 
@@ -143,24 +145,28 @@ function parseAccountWorkbook(wb) {
       storeName: store || null,
       authorUrl: url || null,
       status: 'enabled',
-      brandId: 1,
+      brandId: BRAND_ID,
     });
   }
   return out;
 }
 
 async function main() {
-  const skuWb = XLSX.readFile(SKU_FILE);
   const accountWb = XLSX.readFile(ACCOUNT_FILE);
-  const product = parseSkuWorkbook(skuWb);
   const accounts = parseAccountWorkbook(accountWb);
+  const skipSku = process.argv.includes('--accounts-only') || !fs.existsSync(SKU_FILE);
+  const product = skipSku ? null : parseSkuWorkbook(XLSX.readFile(SKU_FILE));
 
   const dupUids = accounts.map((a) => a.authorId).filter((v, i, arr) => arr.indexOf(v) !== i);
 
   console.log('=== 解析结果 ===');
-  console.log(`[Product] name=${product.name} displayName=${product.displayName}`);
-  console.log(`  description ${product.description.length} 字 | knowledge ${product.knowledge.length} 字 | salesPolicy=${product.salesPolicy ? '有' : '无'} | faq=${product.faq ? '有' : '无'}`);
-  console.log('  description 预览:', product.description.slice(0, 200).replace(/\n/g, ' ⏎ '));
+  if (product) {
+    console.log(`[Product] name=${product.name} displayName=${product.displayName}`);
+    console.log(`  description ${product.description.length} 字 | knowledge ${product.knowledge.length} 字 | salesPolicy=${product.salesPolicy ? '有' : '无'} | faq=${product.faq ? '有' : '无'}`);
+    console.log('  description 预览:', product.description.slice(0, 200).replace(/\n/g, ' ⏎ '));
+  } else {
+    console.log('[Product] SKU 文件缺失或指定 --accounts-only，跳过产品导入');
+  }
   console.log(`[KosAccount] 共 ${accounts.length} 条`);
   console.log('  样例:', JSON.stringify(accounts.slice(0, 2), null, 0));
   if (dupUids.length) console.log(`  ⚠ 文件内重复 UID: ${[...new Set(dupUids)].join(', ')}`);
@@ -174,15 +180,17 @@ async function main() {
   let created = 0;
   let updated = 0;
   try {
-    const existingProduct = await prisma.product.findFirst({ where: { name: product.name } });
-    if (existingProduct) {
-      await prisma.product.update({ where: { id: existingProduct.id }, data: product });
-      updated++;
-    } else {
-      await prisma.product.create({ data: product });
-      created++;
+    if (product) {
+      const existingProduct = await prisma.product.findFirst({ where: { name: product.name } });
+      if (existingProduct) {
+        await prisma.product.update({ where: { id: existingProduct.id }, data: product });
+        updated++;
+      } else {
+        await prisma.product.create({ data: product });
+        created++;
+      }
+      console.log(`\n[Product] ${existingProduct ? '更新' : '创建'}: ${product.name} (id=${existingProduct ? existingProduct.id : 'new'})`);
     }
-    console.log(`\n[Product] ${existingProduct ? '更新' : '创建'}: ${product.name} (id=${existingProduct ? existingProduct.id : 'new'})`);
 
     let accCreated = 0;
     let accUpdated = 0;
@@ -192,6 +200,56 @@ async function main() {
       exist ? accUpdated++ : accCreated++;
     }
     console.log(`[KosAccount] 新建 ${accCreated} 条 / 更新 ${accUpdated} 条`);
+
+    if (!NO_STATS) {
+      const uids = accounts.map((a) => a.authorId);
+      const imported = await prisma.kosAccount.findMany({
+        where: { authorId: { in: uids } },
+        select: { id: true },
+      });
+      const haveStats = await prisma.koxAccountDailyStat.groupBy({
+        by: ['accountId'],
+        where: { accountId: { in: imported.map((x) => x.id) } },
+      });
+      const have = new Set(haveStats.map((g) => g.accountId));
+      const targets = imported.filter((x) => !have.has(x.id));
+      if (targets.length) {
+        const day = 24 * 60 * 60 * 1000;
+        const rand = (min, max) => min + Math.floor(Math.random() * (max - min));
+        let statCount = 0;
+        for (const acc of targets) {
+          const rows = [];
+          for (let i = 59; i >= 0; i--) {
+            const d = new Date(Date.now() - i * day);
+            d.setHours(0, 0, 0, 0);
+            const w = d.getDay();
+            const boost = w === 0 || w === 6 ? 1.3 : 1;
+            const growth = 1 + (59 - i) * 0.005;
+            const item = Math.max(0, Math.round(rand(0, 3) * boost * growth));
+            const view = item * rand(2200, 5200);
+            const digg = Math.floor(view * (rand(3, 9) / 100));
+            rows.push({
+              accountId: acc.id,
+              statDate: d,
+              itemCnt: item,
+              crazyItemCnt: item > 2 && Math.random() < 0.1 ? 1 : 0,
+              exposureSum: view * rand(8, 15),
+              viewSum: view,
+              diggSum: digg,
+              interactionSum: digg + Math.floor(digg / rand(4, 9)),
+              followCountSum: rand(10, 90),
+              pmLeads: Math.random() < 0.4 ? rand(1, 6) : 0,
+              toolClickCnt: Math.floor(view * 0.012),
+            });
+          }
+          await prisma.koxAccountDailyStat.createMany({ data: rows });
+          statCount += rows.length;
+        }
+        console.log(`[KoxAccountDailyStat] 生成占位统计 ${statCount} 条（${targets.length} 账号 × 60 天，星火接入后替换）`);
+      } else {
+        console.log('[KoxAccountDailyStat] 导入账号均有统计数据，跳过');
+      }
+    }
 
     const [pc, ac] = await Promise.all([prisma.product.count(), prisma.kosAccount.count()]);
     console.log(`\n=== 完成 === 当前库内 Product 总数=${pc}，KosAccount 总数=${ac}`);

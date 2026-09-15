@@ -6,6 +6,11 @@ export class BrandService {
   constructor(private prisma: PrismaService) {}
 
   async myBrands(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    const isSuperAdmin = !user || user.role === 'ADMIN';
     const brands = await this.prisma.brand.findMany({
       where: { status: 1 },
       orderBy: { id: 'asc' },
@@ -13,9 +18,12 @@ export class BrandService {
         members: { where: { userId } },
       },
     });
+    const visible = isSuperAdmin
+      ? brands
+      : brands.filter((b) => b.members.length > 0);
 
     return {
-      list: brands.map((brand) => ({
+      list: visible.map((brand) => ({
         id: brand.id,
         companyId: brand.companyId,
         name: brand.name,

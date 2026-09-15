@@ -32,13 +32,26 @@ export class UserService {
     return crypto.createHash('sha1').update(text, 'utf8').digest('hex');
   }
 
-  private async assertAdmin(userId: number) {
+  private async assertOperator(userId: number) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { role: true },
     });
-    if (!user || user.role !== 'ADMIN') {
-      throw new ForbiddenException('仅管理员可操作');
+    if (!user || !['ADMIN', 'MANAGER'].includes(user.role)) {
+      throw new ForbiddenException('仅管理员或项目管理员可操作');
+    }
+    return user.role;
+  }
+
+  private async assertCanTouch(operatorRole: string, targetId: number) {
+    if (operatorRole === 'ADMIN') return;
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+      select: { role: true },
+    });
+    if (!target) throw new NotFoundException('用户不存在');
+    if (target.role === 'ADMIN') {
+      throw new ForbiddenException('项目管理员不可操作超级管理员账号');
     }
   }
 
@@ -136,16 +149,24 @@ export class UserService {
   }
 
   async listUsers(operatorId: number) {
-    await this.assertAdmin(operatorId);
+    await this.assertOperator(operatorId);
     const users = await this.prisma.user.findMany({
       orderBy: { id: 'asc' },
-      select: USER_SELECT,
+      select: { ...USER_SELECT, brandMembers: { select: { brandId: true } } },
     });
-    return { list: users };
+    return {
+      list: users.map(({ brandMembers, ...u }) => ({
+        ...u,
+        brandIds: brandMembers.map((m) => m.brandId),
+      })),
+    };
   }
 
   async createUser(operatorId: number, dto: CreateUserDto) {
-    await this.assertAdmin(operatorId);
+    const operatorRole = await this.assertOperator(operatorId);
+    if (operatorRole !== 'ADMIN' && dto.role === 'ADMIN') {
+      throw new ForbiddenException('仅超级管理员可创建管理员账号');
+    }
     const exists = await this.prisma.user.findFirst({
       where: { phone: dto.phone },
       select: { id: true },
@@ -168,16 +189,20 @@ export class UserService {
   }
 
   async updateUser(operatorId: number, id: number, dto: UpdateUserDto) {
-    await this.assertAdmin(operatorId);
+    const operatorRole = await this.assertOperator(operatorId);
+    await this.assertCanTouch(operatorRole, id);
     const target = await this.prisma.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException('用户不存在');
-    if (id === operatorId && dto.role && dto.role !== 'ADMIN') {
-      throw new BadRequestException('不能取消自己的管理员角色');
+    if (id === operatorId && dto.role && dto.role !== target.role) {
+      throw new BadRequestException('不能修改自己的角色');
+    }
+    if (operatorRole !== 'ADMIN' && dto.role === 'ADMIN') {
+      throw new ForbiddenException('仅超级管理员可设置管理员角色');
     }
 
     const data: {
       nickname?: string;
-      role?: 'ADMIN' | 'SALES';
+      role?: 'ADMIN' | 'MANAGER' | 'SALES';
       moduleIds?: number[];
       adminFlag?: number;
     } = {};
@@ -188,11 +213,44 @@ export class UserService {
     }
     if (dto.moduleIds !== undefined) data.moduleIds = dto.moduleIds;
 
+    if (dto.brandIds !== undefined && dto.role !== 'ADMIN') {
+      await this.syncBrandMembers(id, dto.brandIds);
+    }
+
     return this.prisma.user.update({ where: { id }, data, select: USER_SELECT });
   }
 
+  private async syncBrandMembers(userId: number, brandIds: number[]) {
+    const next = new Set(brandIds);
+    const current = await this.prisma.brandMember.findMany({
+      where: { userId },
+    });
+    const managerKeys = ['agency_manager', 'brand_owner'];
+    const keep = new Set(
+      current.filter((m) => managerKeys.includes(m.roleKey)).map((m) => m.brandId),
+    );
+    for (const m of current) {
+      if (keep.has(m.brandId)) continue;
+      if (!next.has(m.brandId)) {
+        await this.prisma.brandMember.delete({ where: { id: m.id } });
+      }
+    }
+    for (const brandId of next) {
+      if (keep.has(brandId)) continue;
+      const exists = current.find(
+        (m) => m.brandId === brandId && m.roleKey === 'agency_executive',
+      );
+      if (!exists) {
+        await this.prisma.brandMember.create({
+          data: { brandId, userId, roleKey: 'agency_executive' },
+        });
+      }
+    }
+  }
+
   async resetPassword(operatorId: number, id: number, dto: ResetPasswordDto) {
-    await this.assertAdmin(operatorId);
+    const operatorRole = await this.assertOperator(operatorId);
+    await this.assertCanTouch(operatorRole, id);
     const target = await this.prisma.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException('用户不存在');
     await this.prisma.user.update({

@@ -88,7 +88,12 @@ const MODULE_TREE = [
         name: '运营分析',
         features: [
           { name: '运营总览', path: '/kox_df/operation-analysis/overview' },
+          { name: '排行榜单', path: '/kox_df/operation-analysis/ranking' },
+          { name: '热门内容', path: '/kox_df/operation-analysis/note-ranking' },
           { name: '车型销量', path: '/kox_df/operation-analysis/model-sales' },
+          { name: '经销商运营', path: '/kox_df/operation-analysis/dealer' },
+          { name: '反馈分析', path: '/kox_df/operation-analysis/feedback' },
+          { name: 'AI简报', path: '/kox_df/operation-analysis/ai-briefing' },
         ],
       },
       {
@@ -262,6 +267,49 @@ async function main() {
     },
   });
   console.log('Seeded brand:', brand.name);
+
+  const brandNames = { 2: '东风', 3: '格力', 4: '大众' };
+  for (const [id, name] of Object.entries(brandNames)) {
+    await prisma.brand.upsert({
+      where: { id: Number(id) },
+      update: {},
+      create: {
+        id: Number(id),
+        companyId: company.id,
+        name: `${name}项目工作区`,
+        description: `${name}品牌项目`,
+        status: 1,
+      },
+    });
+  }
+  console.log('Seeded project workspaces:', Object.values(brandNames).join(' / '));
+
+  const perry = await prisma.user.upsert({
+    where: { phone: '13900000001' },
+    update: {},
+    create: {
+      phone: '13900000001',
+      passwordHash: bcrypt.hashSync(sha1('Manager@123'), 10),
+      name: '项目管理员',
+      nickname: 'Perry',
+      role: 'MANAGER',
+      adminFlag: 0,
+      companyId: company.id,
+      moduleIds: [],
+    },
+  });
+  await prisma.brandMember.upsert({
+    where: {
+      brandId_userId_roleKey: {
+        brandId: 2,
+        userId: perry.id,
+        roleKey: 'agency_manager',
+      },
+    },
+    update: {},
+    create: { brandId: 2, userId: perry.id, roleKey: 'agency_manager' },
+  });
+  console.log('Seeded manager (Perry):', perry.phone);
 
   await prisma.brandMember.upsert({
     where: {
@@ -889,34 +937,38 @@ async function main() {
     const day = 24 * 60 * 60 * 1000;
 
     const accounts = [
-      ['华帝·广州天河旗舰店', 'KOS', 52000, '华南大区', '广州天河经销商', '金牌导购', '陈志强', '13811110001'],
-      ['华帝·深圳南山专卖店', 'KOS', 34000, '华南大区', '深圳南山经销商', '金牌导购', '林晓彤', '13811110002'],
-      ['华帝·佛山顺德卖场店', 'KOB', 21000, '华南大区', '佛山顺德经销商', '门店官号', '黄敏华', '13811110003'],
-      ['华帝·上海徐汇体验店', 'KOS', 61000, '华东大区', '上海徐汇经销商', '金牌导购', '王佳琪', '13811110004'],
-      ['华帝·杭州西湖门店', 'KOS', 28000, '华东大区', '杭州西湖经销商', '新锐主播', '周雨桐', '13811110005'],
-      ['华帝·南京鼓楼卖场店', 'KOB', 19000, '华东大区', '南京鼓楼经销商', '门店官号', '吴倩文', '13811110006'],
-      ['华帝·北京朝阳旗舰店', 'KOS', 73000, '华北大区', '北京朝阳经销商', '金牌导购', '赵天宇', '13811110007'],
-      ['华帝·天津和平门店', 'KOS', 25000, '华北大区', '天津和平经销商', '直播达人', '孙梦瑶', '13811110008'],
-      ['华帝·成都锦江体验店', 'KOS', 47000, '西南大区', '成都锦江经销商', '金牌导购', '何嘉玲', '13811110009'],
-      ['华帝·重庆渝中门店', 'KOB', 16000, '西南大区', '重庆渝中经销商', '门店官号', '罗小珊', '13811110010'],
-      ['家电测评君阿凯', 'KOC', 132000, '华南大区', null, '头部达人', null, null],
-      ['厨房好物研究所', 'KOC', 89000, '华东大区', null, '腰部达人', null, null],
+      ['华帝·广州天河旗舰店', 'KOS', 52000, '华南大区', '广东区域', '广州天河经销商', '金牌导购', '陈志强', '13811110001'],
+      ['华帝·深圳南山专卖店', 'KOS', 34000, '华南大区', '广东区域', '深圳南山经销商', '金牌导购', '林晓彤', '13811110002'],
+      ['华帝·佛山顺德卖场店', 'KOB', 21000, '华南大区', '广东区域', '佛山顺德经销商', '门店官号', '黄敏华', '13811110003'],
+      ['华帝·上海徐汇体验店', 'KOS', 61000, '华东大区', '江浙沪区域', '上海徐汇经销商', '金牌导购', '王佳琪', '13811110004'],
+      ['华帝·杭州西湖门店', 'KOS', 28000, '华东大区', '江浙沪区域', '杭州西湖经销商', '新锐主播', '周雨桐', '13811110005'],
+      ['华帝·南京鼓楼卖场店', 'KOB', 19000, '华东大区', '江浙沪区域', '南京鼓楼经销商', '门店官号', '吴倩文', '13811110006'],
+      ['华帝·北京朝阳旗舰店', 'KOS', 73000, '华北大区', '京津区域', '北京朝阳经销商', '金牌导购', '赵天宇', '13811110007'],
+      ['华帝·天津和平门店', 'KOS', 25000, '华北大区', '京津区域', '天津和平经销商', '直播达人', '孙梦瑶', '13811110008'],
+      ['华帝·成都锦江体验店', 'KOS', 47000, '西南大区', '川渝区域', '成都锦江经销商', '金牌导购', '何嘉玲', '13811110009'],
+      ['华帝·重庆渝中门店', 'KOB', 16000, '西南大区', '川渝区域', '重庆渝中经销商', '门店官号', '罗小珊', '13811110010'],
+      ['家电测评君阿凯', 'KOC', 132000, '华南大区', '广东区域', null, '头部达人', null, null],
+      ['厨房好物研究所', 'KOC', 89000, '华东大区', '江浙沪区域', null, '腰部达人', null, null],
     ];
     const accountRows = await prisma.kosAccount.createMany({
-      data: accounts.map(([nickname, type, fans, area, store, tag, op, mobile], i) => ({
-        authorId: `kos_seed_${i + 1}`,
-        nickname,
-        platform: i % 3 === 2 ? 'xhs' : 'douyin',
-        accountType: type,
-        fans,
-        areaName: area,
-        storeName: store,
-        accountTag: tag,
-        operatorName: op,
-        operatorMobile: mobile,
-        authorUrl: `https://www.douyin.com/user/kos_seed_${i + 1}`,
-        createdAt: new Date(Date.now() - (90 - i * 3) * day),
-      })),
+      data: accounts.map(
+        ([nickname, type, fans, region, saleArea, store, tag, op, mobile], i) => ({
+          authorId: `kos_seed_${i + 1}`,
+          nickname,
+          platform: i % 3 === 2 ? 'xhs' : 'douyin',
+          accountType: type,
+          fans,
+          regionName: region,
+          saleArea,
+          areaName: region,
+          storeName: store,
+          accountTag: tag,
+          operatorName: op,
+          operatorMobile: mobile,
+          authorUrl: `https://www.douyin.com/user/kos_seed_${i + 1}`,
+          createdAt: new Date(Date.now() - (90 - i * 3) * day),
+        }),
+      ),
     });
 
     const allAccounts = await prisma.kosAccount.findMany({
@@ -1042,6 +1094,40 @@ async function main() {
     }
     await prisma.koxDailyStat.createMany({ data: stats });
 
+    // 账号级日统计（排行榜数据源，星火采集接入后替换为真实数据）
+    const accountStats = [];
+    for (const acc of allAccounts) {
+      const weight = (acc.fans || 10000) / 50000 + 0.4;
+      for (let i = 59; i >= 0; i--) {
+        const d = new Date(Date.now() - i * day);
+        d.setHours(0, 0, 0, 0);
+        const w = d.getDay();
+        const weekendBoost = w === 0 || w === 6 ? 1.3 : 1;
+        const growth = 1 + (59 - i) * 0.005;
+        const item = Math.max(0, Math.round(rand(0, 3) * weekendBoost * growth * weight));
+        const view = item * rand(2200, 5200);
+        const digg = Math.floor(view * (rand(3, 9) / 100));
+        accountStats.push({
+          accountId: acc.id,
+          statDate: d,
+          itemCnt: item,
+          crazyItemCnt: item > 2 && Math.random() < 0.1 ? 1 : 0,
+          exposureSum: view * rand(8, 15),
+          viewSum: view,
+          diggSum: digg,
+          interactionSum: digg + Math.floor(digg / rand(4, 9)),
+          followCountSum: rand(10, 90),
+          pmLeads: Math.random() < 0.4 ? rand(1, 6) : 0,
+          toolClickCnt: Math.floor(view * 0.012),
+        });
+      }
+    }
+    for (let i = 0; i < accountStats.length; i += 500) {
+      await prisma.koxAccountDailyStat.createMany({
+        data: accountStats.slice(i, i + 500),
+      });
+    }
+
     const monthNow = new Date().toISOString().slice(0, 7);
     const prev = new Date(Date.now() - 30 * day);
     const monthPrev = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
@@ -1072,8 +1158,65 @@ async function main() {
     await prisma.koxDealerSales.createMany({ data: salesRows });
 
     console.log(
-      `Seeded KOX: ${accountRows.count} accounts + 3 tasks + ${stats.length} daily stats + ${salesRows.length} dealer sales`,
+      `Seeded KOX: ${accountRows.count} accounts + 3 tasks + ${stats.length} daily stats + ${accountStats.length} account daily stats + ${salesRows.length} dealer sales`,
     );
+  }
+
+  // 兼容已有数据：补齐 regionName 并生成账号级日统计（排行榜数据源）
+  {
+    const legacy = await prisma.kosAccount.findMany({
+      where: { regionName: null, areaName: { not: null } },
+      select: { id: true, areaName: true },
+    });
+    for (const acc of legacy) {
+      await prisma.kosAccount.update({
+        where: { id: acc.id },
+        data: { regionName: acc.areaName },
+      });
+    }
+    if (legacy.length) {
+      console.log(`Backfilled regionName for ${legacy.length} accounts`);
+    }
+
+    const statCount = await prisma.koxAccountDailyStat.count();
+    if (statCount === 0) {
+      const day = 24 * 60 * 60 * 1000;
+      const rand = (min, max) => min + Math.floor(Math.random() * (max - min));
+      const allAccounts = await prisma.kosAccount.findMany();
+      const accountStats = [];
+      for (const acc of allAccounts) {
+        const weight = (acc.fans || 10000) / 50000 + 0.4;
+        for (let i = 59; i >= 0; i--) {
+          const d = new Date(Date.now() - i * day);
+          d.setHours(0, 0, 0, 0);
+          const w = d.getDay();
+          const weekendBoost = w === 0 || w === 6 ? 1.3 : 1;
+          const growth = 1 + (59 - i) * 0.005;
+          const item = Math.max(0, Math.round(rand(0, 3) * weekendBoost * growth * weight));
+          const view = item * rand(2200, 5200);
+          const digg = Math.floor(view * (rand(3, 9) / 100));
+          accountStats.push({
+            accountId: acc.id,
+            statDate: d,
+            itemCnt: item,
+            crazyItemCnt: item > 2 && Math.random() < 0.1 ? 1 : 0,
+            exposureSum: view * rand(8, 15),
+            viewSum: view,
+            diggSum: digg,
+            interactionSum: digg + Math.floor(digg / rand(4, 9)),
+            followCountSum: rand(10, 90),
+            pmLeads: Math.random() < 0.4 ? rand(1, 6) : 0,
+            toolClickCnt: Math.floor(view * 0.012),
+          });
+        }
+      }
+      for (let i = 0; i < accountStats.length; i += 500) {
+        await prisma.koxAccountDailyStat.createMany({
+          data: accountStats.slice(i, i + 500),
+        });
+      }
+      console.log(`Seeded ${accountStats.length} account daily stats (ranking source)`);
+    }
   }
 
   const existingInsight = await prisma.insightContent.count();

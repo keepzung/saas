@@ -262,7 +262,7 @@ const createOpen = ref(false);
 const creating = ref(false);
 const form = reactive({
   taskTitle: '',
-  platform: 'douyin',
+  platform: 'xhs',
   taskAccountType: 'KOS',
   range: [dayjs(), dayjs().add(30, 'day')],
   accountIds: [],
@@ -321,7 +321,7 @@ async function saveCreate() {
     createOpen.value = false;
     Object.assign(form, {
       taskTitle: '',
-      platform: 'douyin',
+      platform: 'xhs',
       taskAccountType: 'KOS',
       range: [dayjs(), dayjs().add(30, 'day')],
       accountIds: [],

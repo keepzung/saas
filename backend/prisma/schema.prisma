@@ -434,9 +434,11 @@ model KosAccount {
   authorId       String   @unique
   nickname       String
   avatar         String?
-  platform       String   @default("douyin")
+  platform       String   @default("xhs")
   accountType    String   @default("KOS")
   fans           Int      @default(0)
+  regionName     String?
+  saleArea       String?
   areaName       String?
   storeName      String?
   accountTag     String?
@@ -449,16 +451,41 @@ model KosAccount {
   updatedAt      DateTime @updatedAt
 
   taskRecords    KoxTaskAuthor[]
+  dailyStats     KoxAccountDailyStat[]
 
   @@index([platform])
   @@index([accountType])
   @@index([brandId])
+  @@index([regionName])
+  @@index([saleArea])
+  @@index([storeName])
+}
+
+model KoxAccountDailyStat {
+  id             Int      @id @default(autoincrement())
+  accountId      Int
+  account        KosAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  statDate       DateTime
+  itemCnt        Int      @default(0)
+  crazyItemCnt   Int      @default(0)
+  exposureSum    Int      @default(0)
+  viewSum        Int      @default(0)
+  diggSum        Int      @default(0)
+  interactionSum Int      @default(0)
+  followCountSum Int      @default(0)
+  pmLeads        Int      @default(0)
+  toolClickCnt   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@unique([accountId, statDate])
+  @@index([statDate])
+  @@index([accountId, statDate])
 }
 
 model KoxTask {
   id              Int      @id @default(autoincrement())
   taskTitle       String
-  platform        String   @default("douyin")
+  platform        String   @default("xhs")
   taskAccountType String   @default("KOS")
   startTime       DateTime
   endTime         DateTime

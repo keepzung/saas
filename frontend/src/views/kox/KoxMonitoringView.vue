@@ -32,6 +32,14 @@
           allow-clear
           @search="() => reload(true)"
         />
+        <a-select
+          v-model:value="regionName"
+          style="width: 130px"
+          allow-clear
+          placeholder="大区"
+          :options="regionOptions"
+          @change="() => reload(true)"
+        />
         <template #actions>
           <a-button @click="importOpen = true">
             <FileExcelOutlined /> Excel 导入
@@ -144,6 +152,12 @@
         <a-form-item label="粉丝数">
           <a-input-number v-model:value="addForm.fans" :min="0" style="width: 100%" />
         </a-form-item>
+        <a-form-item label="所属大区">
+          <a-input v-model:value="addForm.regionName" placeholder="如：华东" />
+        </a-form-item>
+        <a-form-item label="销售区域">
+          <a-input v-model:value="addForm.saleArea" placeholder="如：江苏区域" />
+        </a-form-item>
         <a-form-item label="所属地域">
           <a-input v-model:value="addForm.areaName" placeholder="如：华南·广东·广州" />
         </a-form-item>
@@ -166,7 +180,8 @@
       <a-descriptions size="small" :column="2" class="mg-sec" bordered>
         <a-descriptions-item label="账号">{{ manageRow?.nickname }}</a-descriptions-item>
         <a-descriptions-item label="粉丝数">{{ manageRow?.fans?.toLocaleString() }}</a-descriptions-item>
-        <a-descriptions-item label="大区">{{ manageRow?.area_name || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="大区">{{ manageRow?.region_name || manageRow?.area_name || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="销售区域">{{ manageRow?.sale_area || '-' }}</a-descriptions-item>
         <a-descriptions-item label="主页">
           <a :href="manageRow?.author_url" target="_blank" class="mini">打开主页</a>
         </a-descriptions-item>
@@ -188,6 +203,16 @@
           <a-col :span="12">
             <a-form-item label="账号标签">
               <a-input v-model:value="manageForm.account_tag" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="所属大区" required>
+              <a-input v-model:value="manageForm.region_name" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="销售区域">
+              <a-input v-model:value="manageForm.sale_area" />
             </a-form-item>
           </a-col>
           <a-col :span="12">
@@ -228,7 +253,7 @@
         <p class="ant-upload-drag-icon"><FileExcelOutlined /></p>
         <p class="ant-upload-text">点击或拖入 Excel 文件</p>
         <p class="ant-upload-hint">
-          表头需含：账号UID / 账号类型 / 大区（可选）/ 省份 / 城市 / 门店名称 / 主页地址
+          表头需含：账号UID / 账号类型 / 大区（或汇总区域）/ 销售区域（可选）/ 省份 / 城市 / 门店名称 / 主页地址
         </p>
       </a-upload-dragger>
 
@@ -250,6 +275,9 @@
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'area'">
               {{ [record.region, record.province, record.city].filter(Boolean).join('·') || '-' }}
+            </template>
+            <template v-else-if="column.key === 'regionName'">
+              {{ record.regionName || record.region || '-' }}
             </template>
           </template>
         </a-table>
@@ -289,7 +317,9 @@ const importErrors = ref([]);
 const importPreviewColumns = [
   { title: 'UID', dataIndex: 'authorId', width: 210, ellipsis: true },
   { title: '类型', dataIndex: 'accountType', width: 70 },
-  { title: '地区', key: 'area', width: 130 },
+  { title: '大区', key: 'regionName', width: 90 },
+  { title: '销售区域', dataIndex: 'saleArea', width: 100, ellipsis: true },
+  { title: '地区', key: 'area', width: 120 },
   { title: '门店', dataIndex: 'storeName', ellipsis: true },
 ];
 
@@ -345,11 +375,11 @@ const columns = [
   { key: 'platform', title: '平台', width: 90 },
   { key: 'account_type', title: '账号类型', dataIndex: 'account_type', width: 100 },
   { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 110, sorter: true },
-  { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 130, ellipsis: true },
+  { key: 'region_name', title: '大区', dataIndex: 'region_name', width: 100, ellipsis: true },
+  { key: 'sale_area', title: '销售区域', dataIndex: 'sale_area', width: 110, ellipsis: true },
+  { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 120, ellipsis: true },
   { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', ellipsis: true },
-  { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 110 },
   { key: 'operator_name', title: '运营人', dataIndex: 'operator_name', width: 90 },
-  { key: 'operator_mobile', title: '运营人手机号', dataIndex: 'operator_mobile', width: 130 },
   { key: 'add_time', title: '添加时间', dataIndex: 'add_time', width: 120, sorter: true },
   { key: 'operation', title: '运营', width: 90 },
   { key: 'action', title: '操作', width: 130 },
@@ -361,6 +391,8 @@ const loading = ref(false);
 const platform = ref(undefined);
 const accountType = ref(undefined);
 const keyword = ref('');
+const regionName = ref(undefined);
+const regionOptions = ref([]);
 const page = ref(1);
 const PAGE_SIZE = 20;
 const sortField = ref(undefined);
@@ -370,9 +402,11 @@ const addOpen = ref(false);
 const saving = ref(false);
 const addForm = reactive({
   nickname: '',
-  platform: 'douyin',
+  platform: 'xhs',
   accountType: 'KOS',
   fans: 0,
+  regionName: undefined,
+  saleArea: undefined,
   areaName: undefined,
   storeName: '',
   authorUrl: '',
@@ -383,6 +417,8 @@ const managing = ref(false);
 const manageRow = ref(null);
 const manageForm = reactive({
   account_type: 'KOS',
+  region_name: '',
+  sale_area: '',
   store_name: '',
   operator_name: '',
   operator_mobile: '',
@@ -397,6 +433,7 @@ async function reload(resetPage = false) {
       platform: platform.value || undefined,
       accountType: accountType.value || undefined,
       keyword: keyword.value || undefined,
+      regionName: regionName.value || undefined,
       page: page.value,
       page_size: PAGE_SIZE,
       sort: sortField.value,
@@ -407,6 +444,9 @@ async function reload(resetPage = false) {
       add_time: dayjs(r.add_time).format('YYYY-MM-DD'),
     }));
     total.value = res.total;
+    if (Array.isArray(res.region_facets)) {
+      regionOptions.value = res.region_facets.map((x) => ({ label: x, value: x }));
+    }
   } catch (e) {
     message.error(e.message || '加载失败');
   } finally {
@@ -441,9 +481,11 @@ async function saveAdd() {
     addOpen.value = false;
     Object.assign(addForm, {
       nickname: '',
-      platform: 'douyin',
+      platform: 'xhs',
       accountType: 'KOS',
       fans: 0,
+      regionName: undefined,
+      saleArea: undefined,
       areaName: undefined,
       storeName: '',
       authorUrl: '',
@@ -460,6 +502,8 @@ function openManage(record) {
   manageRow.value = record;
   Object.assign(manageForm, {
     account_type: record.account_type,
+    region_name: record.region_name ?? '',
+    sale_area: record.sale_area ?? '',
     store_name: record.store_name ?? '',
     operator_name: record.operator_name ?? '',
     operator_mobile: record.operator_mobile ?? '',
@@ -471,7 +515,15 @@ function openManage(record) {
 async function saveManage() {
   managing.value = true;
   try {
-    await updateKoxAccount(manageRow.value.id, { ...manageForm });
+    await updateKoxAccount(manageRow.value.id, {
+      accountType: manageForm.account_type,
+      regionName: manageForm.region_name,
+      saleArea: manageForm.sale_area,
+      storeName: manageForm.store_name,
+      operatorName: manageForm.operator_name,
+      operatorMobile: manageForm.operator_mobile,
+      accountTag: manageForm.account_tag,
+    });
     message.success('修改成功');
     manageOpen.value = false;
     reload();

@@ -9,6 +9,8 @@ import {
   MinLength,
 } from 'class-validator';
 
+type Role = 'ADMIN' | 'MANAGER' | 'SALES';
+
 export class CreateUserDto {
   @Matches(/^1\d{10}$/, { message: '手机号格式不正确' })
   phone: string;
@@ -23,8 +25,8 @@ export class CreateUserDto {
   @MaxLength(50)
   nickname?: string;
 
-  @IsIn(['ADMIN', 'SALES'])
-  role: 'ADMIN' | 'SALES';
+  @IsIn(['ADMIN', 'MANAGER', 'SALES'])
+  role: Role;
 
   @IsOptional()
   @IsArray()
@@ -39,13 +41,18 @@ export class UpdateUserDto {
   nickname?: string;
 
   @IsOptional()
-  @IsIn(['ADMIN', 'SALES'])
-  role?: 'ADMIN' | 'SALES';
+  @IsIn(['ADMIN', 'MANAGER', 'SALES'])
+  role?: Role;
 
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   moduleIds?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  brandIds?: number[];
 }
 
 export class ResetPasswordDto {

@@ -28,6 +28,8 @@ export class KoxController {
       platform?: string;
       accountType?: string;
       status?: string;
+      regionName?: string;
+      saleArea?: string;
       keyword?: string;
       page?: string;
       page_size?: string;
@@ -67,6 +69,24 @@ export class KoxController {
   @Get('kox/overview')
   overview(@Query() query: { start?: string; end?: string; platform?: string }) {
     return this.koxService.overview(query);
+  }
+
+  @Get('kox/ranking')
+  ranking(
+    @Query()
+    query: {
+      dimension?: string;
+      start?: string;
+      end?: string;
+      accountType?: string;
+      platform?: string;
+      brandId?: string;
+      metric?: string;
+      page?: string;
+      page_size?: string;
+    },
+  ) {
+    return this.koxService.ranking(query);
   }
 
   @Get('kox/tasks')

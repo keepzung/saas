@@ -27,3 +27,6 @@ export const stopKoxTask = (id) => request.post(`/kox/tasks/${id}/stop`);
 
 export const getModelSales = (params) =>
   request.get('/kox/model-sales', { params });
+
+export const getKoxRanking = (params) =>
+  request.get('/kox/ranking', { params });
