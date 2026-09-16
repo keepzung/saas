@@ -213,6 +213,7 @@ import {
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
+import { useAuthStore } from '../../stores/auth';
 import {
   cancelBatchTask,
   createBatchTask,
@@ -348,7 +349,12 @@ async function cancel(record) {
 onMounted(async () => {
   reload();
   try {
-    const [ps, pks] = await Promise.all([getProducts(), getPackages({ page: 1, pageSize: 100 })]);
+    const auth = useAuthStore();
+    const brandParam = { brandId: auth.currentBrandId ?? undefined };
+    const [ps, pks] = await Promise.all([
+      getProducts(brandParam),
+      getPackages({ page: 1, pageSize: 100, ...brandParam }),
+    ]);
     products.value = ps;
     packages.value = pks.list ?? [];
   } catch {

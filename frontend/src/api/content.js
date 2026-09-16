@@ -1,11 +1,12 @@
 import request from './request';
 
-export const getProducts = () => request.get('/products');
+export const getProducts = (params) => request.get('/products', { params });
 
-export const createProduct = (data) => request.post('/products', data);
+export const createProduct = (data, params) =>
+  request.post('/products', data, { params });
 
-export const importProducts = (data) =>
-  request.post('/products/import', data);
+export const importProducts = (data, params) =>
+  request.post('/products/import', data, { params });
 
 export const updateProduct = (id, data) => request.put(`/products/${id}`, data);
 
@@ -14,12 +15,13 @@ export const deleteProduct = (id) => request.delete(`/products/${id}`);
 export const moveProduct = (id, direction) =>
   request.patch(`/products/${id}/move`, { direction });
 
-export const getOverview = () => request.get('/overview');
+export const getOverview = (params) => request.get('/overview', { params });
 
 export const getPackages = (params) =>
   request.get('/campaign/packages', { params });
 
-export const createPackage = (data) => request.post('/campaign/packages', data);
+export const createPackage = (data, params) =>
+  request.post('/campaign/packages', data, { params });
 
 export const updatePackage = (id, data) =>
   request.put(`/campaign/packages/${id}`, data);

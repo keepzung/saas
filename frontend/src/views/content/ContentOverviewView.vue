@@ -183,6 +183,7 @@ import {
   SendOutlined,
 } from '@ant-design/icons-vue';
 import { getOverview, getPackages } from '../../api/content';
+import { useAuthStore } from '../../stores/auth';
 import PageWrapper from '../../components/PageWrapper.vue';
 import UsageGuideDrawer from './UsageGuideDrawer.vue';
 
@@ -198,6 +199,9 @@ const packages = ref([]);
 const loadingPackages = ref(true);
 const guideOpen = ref(false);
 const activeScenario = ref(0);
+const auth = useAuthStore();
+
+const brandParam = () => ({ brandId: auth.currentBrandId ?? undefined });
 
 const fmt = (v) => (v ?? 0).toLocaleString();
 
@@ -356,8 +360,8 @@ const currentScenario = computed(
 onMounted(async () => {
   try {
     const [overview, pkgRes] = await Promise.all([
-      getOverview(),
-      getPackages({ page: 1, pageSize: 100 }),
+      getOverview(brandParam()),
+      getPackages({ page: 1, pageSize: 100, ...brandParam() }),
     ]);
     ov.value = overview;
     packages.value = pkgRes.list ?? [];

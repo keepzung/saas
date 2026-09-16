@@ -240,6 +240,7 @@ import { PlusOutlined } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
+import { useAuthStore } from '../../stores/auth';
 import {
   addMaterial,
   approveMaterial,
@@ -288,6 +289,9 @@ const keyword = ref('');
 const page = ref(1);
 const pageSize = ref(12);
 const total = ref(0);
+const auth = useAuthStore();
+
+const brandParam = () => ({ brandId: auth.currentBrandId ?? undefined });
 
 const products = ref([]);
 const productOptions = computed(() =>
@@ -327,6 +331,7 @@ async function reload() {
       page: page.value,
       pageSize: pageSize.value,
       keyword: keyword.value || undefined,
+      ...brandParam(),
     });
     list.value = res.list;
     total.value = res.total;
@@ -375,12 +380,15 @@ async function savePkg() {
       });
       message.success('已更新');
     } else {
-      await createPackage({
-        name: form.name,
-        productId: form.productId,
-        workflowType: form.workflowType,
-        reviewMode: form.reviewMode,
-      });
+      await createPackage(
+        {
+          name: form.name,
+          productId: form.productId,
+          workflowType: form.workflowType,
+          reviewMode: form.reviewMode,
+        },
+        brandParam(),
+      );
       message.success('已创建');
     }
     formOpen.value = false;
@@ -537,7 +545,7 @@ async function saveMaterial() {
 onMounted(async () => {
   reload();
   try {
-    products.value = await getProducts();
+    products.value = await getProducts(brandParam());
   } catch {
     products.value = [];
   }

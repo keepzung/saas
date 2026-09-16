@@ -37,13 +37,19 @@ export class ContentController {
   }
 
   @Post('products')
-  createProduct(@Body() dto: ProductDto) {
-    return this.contentService.createProduct(dto);
+  createProduct(
+    @Body() dto: ProductDto,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.contentService.createProduct(dto, brandId ? Number(brandId) : 1);
   }
 
   @Post('products/import')
-  importProducts(@Body() dto: ImportProductsDto) {
-    return this.contentService.importProducts(dto);
+  importProducts(
+    @Body() dto: ImportProductsDto,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.contentService.importProducts(dto, brandId ? Number(brandId) : 1);
   }
 
   @Put('products/:id')
@@ -78,9 +84,17 @@ export class ContentController {
   }
 
   @Post('campaign/packages')
-  createPackage(@Body() dto: PackageDto, @Req() req: Request) {
+  createPackage(
+    @Body() dto: PackageDto,
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+  ) {
     const user = req.user as { id: number };
-    return this.contentService.createPackage(dto, user.id);
+    return this.contentService.createPackage(
+      dto,
+      user.id,
+      brandId ? Number(brandId) : 1,
+    );
   }
 
   @Put('campaign/packages/:id')

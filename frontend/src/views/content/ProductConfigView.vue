@@ -223,6 +223,7 @@ import {
   RedoOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
+import { useAuthStore } from '../../stores/auth';
 import {
   createProduct,
   deleteProduct,
@@ -246,6 +247,9 @@ const tree = ref([]);
 const loading = ref(false);
 const keyword = ref('');
 const selectedIds = ref(new Set());
+const auth = useAuthStore();
+
+const brandParam = () => ({ brandId: auth.currentBrandId ?? undefined });
 
 const detailOpen = ref(false);
 const detail = ref(null);
@@ -317,7 +321,7 @@ function toggleAll() {
 async function reload() {
   loading.value = true;
   try {
-    const data = await getProducts();
+    const data = await getProducts(brandParam());
     tree.value = data;
     const next = new Set(selectedIds.value);
     for (const id of [...next]) {
@@ -405,17 +409,20 @@ async function save() {
       });
       message.success('已更新');
     } else {
-      await createProduct({
-        parentId: parentOf.value?.id ?? null,
-        name: form.name,
-        displayName: form.displayName,
-        configType: form.configType,
-        description: form.description,
-        knowledge: form.knowledge,
-        salesPolicy: form.salesPolicy,
-        faq: form.faq,
-        coverUrl: form.coverUrl,
-      });
+      await createProduct(
+        {
+          parentId: parentOf.value?.id ?? null,
+          name: form.name,
+          displayName: form.displayName,
+          configType: form.configType,
+          description: form.description,
+          knowledge: form.knowledge,
+          salesPolicy: form.salesPolicy,
+          faq: form.faq,
+          coverUrl: form.coverUrl,
+        },
+        brandParam(),
+      );
       message.success('已创建');
     }
     formOpen.value = false;
