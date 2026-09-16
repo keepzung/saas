@@ -278,10 +278,11 @@ async function confirmCompany() {
 
 .header-row {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 20px;
   width: auto;
   min-width: fit-content;
   max-width: none;
@@ -293,8 +294,7 @@ async function confirmCompany() {
   justify-content: center;
   padding: 0;
   flex-shrink: 0;
-  height: 1em;
-  font-size: 36px;
+  height: 44px;
 }
 
 .system-name {
@@ -315,7 +315,7 @@ async function confirmCompany() {
 
 .system-info {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
   width: 100%;
 }
 
@@ -339,8 +339,8 @@ async function confirmCompany() {
 
 .logo-img {
   width: auto;
-  height: 1em;
-  max-width: 100%;
+  height: 100%;
+  max-width: 240px;
   object-fit: contain;
   margin: 0;
   padding: 0;
