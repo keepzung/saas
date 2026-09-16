@@ -21,14 +21,18 @@ async function main() {
   try {
     const company = await prisma.company.findFirst({ orderBy: { id: 'asc' } });
     if (!company) throw new Error('no company row found');
+    let maxId = 0;
+    const all = await prisma.brand.findMany({ select: { id: true, name: true } });
+    for (const b of all) maxId = Math.max(maxId, b.id);
     for (const name of WORKSPACES) {
-      const exist = await prisma.brand.findFirst({ where: { name } });
+      const exist = all.find((b) => b.name === name);
       if (exist) {
         console.log('brand exists:', exist.id, name);
         continue;
       }
+      maxId += 1;
       const created = await prisma.brand.create({
-        data: { name, companyId: company.id, status: 1 },
+        data: { id: maxId, name, companyId: company.id, status: 1 },
       });
       console.log('brand created:', created.id, name);
     }
