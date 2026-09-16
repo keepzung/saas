@@ -89,3 +89,12 @@ input::-ms-clear,
 input::-ms-reveal {
   display: none;
 }
+
+.ant-table-thead > tr > th {
+  background: #f8fafc !important;
+  font-weight: 600;
+}
+
+.ant-table-pagination.ant-pagination {
+  justify-content: center !important;
+}

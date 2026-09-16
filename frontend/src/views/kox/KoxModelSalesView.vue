@@ -10,31 +10,31 @@
       />
     </template>
 
-    <a-row :gutter="12">
-      <a-col :span="8">
-        <a-card :bordered="false" size="small">
-          <a-statistic
-            title="本月总销量"
-            :value="monthSummary.total_sales"
-            :value-style="{ color: '#3456E6' }"
-          />
-        </a-card>
-      </a-col>
-      <a-col :span="8">
-        <a-card :bordered="false" size="small">
-          <a-statistic
-            title="本月线索数"
-            :value="monthSummary.leads_count"
-            :value-style="{ color: '#16a34a' }"
-          />
-        </a-card>
-      </a-col>
-      <a-col :span="8">
-        <a-card :bordered="false" size="small">
-          <a-statistic title="上榜代理商" :value="list.length" />
-        </a-card>
-      </a-col>
-    </a-row>
+    <NoticeBar>数据说明：销量与线索数据为代理商月度上报口径，排行按当月总销量降序。</NoticeBar>
+
+    <div class="overview-blocks">
+      <div class="ob-card">
+        <div class="ob-label">本月总销量</div>
+        <div class="ob-value">{{ monthSummary.total_sales.toLocaleString() }}</div>
+      </div>
+      <div class="ob-card">
+        <div class="ob-label">本月线索数</div>
+        <div class="ob-value green">{{ monthSummary.leads_count.toLocaleString() }}</div>
+      </div>
+      <div class="ob-card">
+        <div class="ob-label">上榜代理商</div>
+        <div class="ob-value">{{ list.length }}</div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <a-card :bordered="false" size="small" title="月度销量 & 线索趋势" class="chart-card">
+        <div ref="trendEl" class="echart-area" />
+      </a-card>
+      <a-card :bordered="false" size="small" title="代理商销量 TOP10" class="chart-card chart-card-rank">
+        <div ref="rankEl" class="echart-area" />
+      </a-card>
+    </div>
 
     <a-card :bordered="false">
       <a-table
@@ -66,9 +66,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
+import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
+import NoticeBar from '../../components/NoticeBar.vue';
 import { getModelSales } from '../../api/kox';
 
 const columns = [
@@ -104,6 +106,7 @@ async function reload() {
     list.value = res.list;
     months.value = res.months;
     month.value = res.month;
+    nextTick(renderCharts);
   } catch (e) {
     message.error(e.message || '加载失败');
   } finally {
@@ -111,10 +114,154 @@ async function reload() {
   }
 }
 
-onMounted(reload);
+const trendEl = ref(null);
+const rankEl = ref(null);
+let trendChart = null;
+let rankChart = null;
+
+function renderCharts() {
+  if (trendEl.value) {
+    if (!trendChart) trendChart = echarts.init(trendEl.value);
+    const ms = [...months.value].reverse();
+    trendChart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['总销量', '线索数'] },
+      grid: { left: 60, right: 40, top: 40, bottom: 30 },
+      xAxis: { type: 'category', data: ms.map((m) => m.month) },
+      yAxis: [
+        { type: 'value', name: '销量' },
+        { type: 'value', name: '线索' },
+      ],
+      series: [
+        {
+          name: '总销量',
+          type: 'bar',
+          data: ms.map((m) => m.total_sales),
+          itemStyle: { color: '#5087ec', borderRadius: [4, 4, 0, 0] },
+          barMaxWidth: 28,
+        },
+        {
+          name: '线索数',
+          type: 'line',
+          smooth: true,
+          yAxisIndex: 1,
+          data: ms.map((m) => m.leads_count),
+          itemStyle: { color: '#36b37e' },
+        },
+      ],
+    });
+  }
+  if (rankEl.value) {
+    if (!rankChart) rankChart = echarts.init(rankEl.value);
+    const top10 = [...list.value]
+      .sort((a, b) => b.total_sales - a.total_sales)
+      .slice(0, 10)
+      .reverse();
+    rankChart.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 120, right: 40, top: 16, bottom: 30 },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: top10.map((r) => r.dealer_name),
+        axisLabel: { width: 110, overflow: 'truncate' },
+      },
+      series: [
+        {
+          name: '总销量',
+          type: 'bar',
+          data: top10.map((r) => r.total_sales),
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: '#5087ec' },
+              { offset: 1, color: '#8cc8ff' },
+            ]),
+            borderRadius: [0, 4, 4, 0],
+          },
+          barMaxWidth: 16,
+          label: { show: true, position: 'right', fontSize: 11, color: '#64748b' },
+        },
+      ],
+    });
+  }
+}
+
+function onResize() {
+  trendChart?.resize();
+  rankChart?.resize();
+}
+
+onMounted(() => {
+  reload();
+  window.addEventListener('resize', onResize);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize);
+  trendChart?.dispose();
+  rankChart?.dispose();
+});
 </script>
 
 <style scoped>
+.overview-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.ob-card {
+  min-height: 100px;
+  background: linear-gradient(135deg, #f0f8ff, #fff);
+  border-radius: 12px;
+  border: 1px solid rgba(80, 135, 236, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px;
+}
+
+.ob-card:first-child {
+  background: linear-gradient(135deg, #eff6ff, #fff);
+}
+
+.ob-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.ob-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #1e293b;
+}
+
+.ob-value.green {
+  color: #16a34a;
+}
+
+.charts-row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.chart-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.chart-card-rank {
+  flex: 0 0 380px;
+}
+
+.echart-area {
+  height: 320px;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;

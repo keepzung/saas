@@ -9,21 +9,38 @@
       <a-range-picker v-model:value="range" size="small" @change="reload" />
     </template>
 
-    <a-card :bordered="false" class="num-card">
-      <a-row :gutter="16">
-        <a-col :span="6">
-          <a-statistic title="覆盖门店数" :value="ov.store_num" />
-        </a-col>
-        <a-col :span="6">
-          <a-statistic title="KOS 账号" :value="ov.kos_num" :value-style="{ color: '#3456E6' }" />
-        </a-col>
-        <a-col :span="6">
-          <a-statistic title="KOB 账号" :value="ov.kob_num" :value-style="{ color: '#7c3aed' }" />
-        </a-col>
-        <a-col :span="6">
-          <a-statistic title="KOC 账号" :value="ov.koc_num" :value-style="{ color: '#0d9488' }" />
-        </a-col>
-      </a-row>
+    <a-card :bordered="false" class="hero-card">
+      <div class="hero-banner">
+        <div class="hero-item">
+          <div class="hero-label">覆盖门店数</div>
+          <div class="hero-value">{{ fmt(ov.store_num) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">KOS 账号</div>
+          <div class="hero-value primary">{{ fmt(ov.kos_num) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">KOB 账号</div>
+          <div class="hero-value violet">{{ fmt(ov.kob_num) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">KOC 账号</div>
+          <div class="hero-value green">{{ fmt(ov.koc_num) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">内容数</div>
+          <div class="hero-value">{{ fmt(ov.publish?.item_cnt) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">阅读量</div>
+          <div class="hero-value">{{ fmt(ov.publish?.view_sum) }}</div>
+        </div>
+      </div>
     </a-card>
 
     <a-row :gutter="12">
@@ -163,6 +180,54 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.hero-banner {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 4px 8px;
+  flex-wrap: wrap;
+}
+
+.hero-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hero-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.hero-value {
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: #1e293b;
+  font-family: 'DIN Alternate', 'Bahnschrift', -apple-system, sans-serif;
+}
+
+.hero-value.primary {
+  color: #2563eb;
+}
+
+.hero-value.violet {
+  color: #7c3aed;
+}
+
+.hero-value.green {
+  color: #16a34a;
+}
+
+.hero-divider {
+  width: 1px;
+  height: 36px;
+  background: #e2e8f0;
+  flex-shrink: 0;
+}
+
 .kv-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

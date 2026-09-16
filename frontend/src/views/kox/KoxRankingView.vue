@@ -47,6 +47,8 @@
       </FilterTopbar>
     </template>
 
+    <NoticeBar>榜单说明：统计周期内账号发布内容的曝光 / 阅读 / 互动 / 线索等指标汇总排行，环比对比等长上一周期。</NoticeBar>
+
     <a-card :bordered="false" size="small" class="sum-card">
       <a-row :gutter="16">
         <a-col :span="4">
@@ -177,6 +179,7 @@ import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
+import NoticeBar from '../../components/NoticeBar.vue';
 import { getKoxRanking } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
@@ -391,10 +394,10 @@ onMounted(reload);
 }
 
 .up {
-  color: #16a34a;
+  color: #ff4d4f;
 }
 
 .down {
-  color: #dc2626;
+  color: #52c41a;
 }
 </style>
