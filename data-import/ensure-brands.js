@@ -14,7 +14,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const WORKSPACES = ['荣威项目工作区', '格力项目工作区', '大众项目工作区'];
+const WORKSPACES = ['荣威项目工作区', '格力项目工作区', '大众项目工作区', 'Morgandada项目工作区'];
 
 async function main() {
   const prisma = new PrismaClient();

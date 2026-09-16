@@ -268,7 +268,7 @@ async function main() {
   });
   console.log('Seeded brand:', brand.name);
 
-  const brandNames = { 2: '荣威', 3: '格力', 4: '大众' };
+  const brandNames = { 2: '荣威', 3: '格力', 4: '大众', 5: 'Morgandada' };
   for (const [id, name] of Object.entries(brandNames)) {
     await prisma.brand.upsert({
       where: { id: Number(id) },
