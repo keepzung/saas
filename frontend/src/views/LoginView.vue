@@ -17,7 +17,7 @@
       <div class="login-form-wrapper">
         <a-form class="login-form" :model="form" @finish="handleSubmit">
           <a-form-item
-            name="username"
+            name="phone"
             :rules="[{ required: true, message: '请输入账号' }]"
           >
             <a-input
