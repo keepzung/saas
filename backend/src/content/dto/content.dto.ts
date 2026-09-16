@@ -46,6 +46,11 @@ export class ProductDto {
   @IsOptional()
   @IsString()
   faq?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  coverUrl?: string;
 }
 
 export class MoveProductDto {

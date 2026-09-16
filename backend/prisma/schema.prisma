@@ -357,6 +357,7 @@ model Product {
   knowledge   String?   @db.Text
   salesPolicy String?   @db.Text
   faq         String?   @db.Text
+  coverUrl    String?
   brandId     Int       @default(1)
   sort        Int       @default(0)
   createdAt   DateTime  @default(now())

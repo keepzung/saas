@@ -26,6 +26,7 @@ function mapProduct(p: any, depth = 0): Record<string, unknown> {
     parent_id: p.parentId,
     description: p.description,
     knowledge: p.knowledge,
+    cover_url: p.coverUrl,
     basic_info: {
       knowledge: p.knowledge,
       sales_policy: p.salesPolicy,
@@ -77,6 +78,7 @@ export class ContentService {
         knowledge: dto.knowledge,
         salesPolicy: dto.salesPolicy,
         faq: dto.faq,
+        coverUrl: dto.coverUrl,
         brandId,
         sort: (maxSort._max.sort ?? 0) + 1,
       },
@@ -96,6 +98,7 @@ export class ContentService {
         ...(dto.knowledge !== undefined ? { knowledge: dto.knowledge } : {}),
         ...(dto.salesPolicy !== undefined ? { salesPolicy: dto.salesPolicy } : {}),
         ...(dto.faq !== undefined ? { faq: dto.faq } : {}),
+        ...(dto.coverUrl !== undefined ? { coverUrl: dto.coverUrl } : {}),
         ...(dto.configType !== undefined ? { configType: dto.configType } : {}),
       },
     });

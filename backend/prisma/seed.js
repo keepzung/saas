@@ -767,6 +767,7 @@ async function main() {
         knowledge: '烟灶套装核心卖点：22m³大吸力、一键自清洁、烟灶联动。目标人群为新房装修家庭。',
         salesPolicy: '套装直降 800 元，赠安装与 5 年质保',
         faq: 'Q: 自清洁需要多久一次？A: 建议 15 天一次，30 秒完成。',
+        coverUrl: '/images/products/product-1.webp',
         sort: 1,
       },
     });
@@ -826,6 +827,7 @@ async function main() {
         configType: 'product',
         description: '嵌入式蒸烤一体机，主打健康蒸烤',
         knowledge: '蒸烤一体机卖点：双直喷蒸汽、AI 温控曲线。人群为烘焙爱好者和宝妈。',
+        coverUrl: '/images/products/product-2.webp',
         sort: 2,
       },
     });
