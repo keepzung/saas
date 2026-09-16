@@ -105,22 +105,22 @@ const routes = [
       },
       {
         path: '/kox_df/operation-analysis/note-ranking',
-        component: () => import('../views/kox/KoxPlaceholderView.vue'),
+        component: () => import('../views/kox/KoxNoteRankingView.vue'),
         meta: { title: '热门内容' },
       },
       {
         path: '/kox_df/operation-analysis/dealer',
-        component: () => import('../views/kox/KoxPlaceholderView.vue'),
+        component: () => import('../views/kox/KoxDealerOperationView.vue'),
         meta: { title: '经销商运营' },
       },
       {
         path: '/kox_df/operation-analysis/feedback',
-        component: () => import('../views/kox/KoxPlaceholderView.vue'),
+        component: () => import('../views/kox/KoxFeedbackAnalysisView.vue'),
         meta: { title: '反馈分析' },
       },
       {
         path: '/kox_df/operation-analysis/ai-briefing',
-        component: () => import('../views/kox/KoxPlaceholderView.vue'),
+        component: () => import('../views/kox/KoxAiBriefingView.vue'),
         meta: { title: 'AI简报' },
       },
       {
