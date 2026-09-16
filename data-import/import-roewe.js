@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// 东风 KOS 账号导入脚本（约 790 账号，含大区 / 销售区域 / 店名）
+// 荣威 KOS 账号导入脚本（约 790 账号，含大区 / 销售区域 / 店名）
 // 用法:
-//   node import-dongfeng.js --file 东风账号导入表.xlsx --dry-run
-//   node import-dongfeng.js --file 东风账号导入表.xlsx            （导入 + 生成占位排行数据）
-//   node import-dongfeng.js --file 东风账号导入表.xlsx --no-stats （仅导入账号）
+//   node import-roewe.js --file 荣威账号清单.xlsx --dry-run
+//   node import-roewe.js --file 荣威账号清单.xlsx            （导入 + 生成占位排行数据）
+//   node import-roewe.js --file 荣威账号清单.xlsx --no-stats （仅导入账号）
 // 表头自动识别（支持常见命名），未识别列将打印表头供确认。
 
 const path = require('path');
@@ -22,9 +22,9 @@ const fileArgIdx = process.argv.indexOf('--file');
 const FILE =
   fileArgIdx > -1 && process.argv[fileArgIdx + 1]
     ? path.resolve(process.argv[fileArgIdx + 1])
-    : path.join(__dirname, '东风账号导入表.xlsx');
+    : path.join(__dirname, '荣威账号清单.xlsx');
 
-const BRAND_ID = Number(process.env.BRAND_ID || 2); // 东风品牌
+const BRAND_ID = Number(process.env.BRAND_ID || 2); // 荣威品牌
 const PLATFORM_DEFAULT = 'xhs';
 
 const envPath = path.join(ROOT, 'backend', '.env');
@@ -142,7 +142,7 @@ function parseWorkbook(wb) {
 async function main() {
   if (!fs.existsSync(FILE)) {
     console.error(`文件不存在: ${FILE}`);
-    console.error('请将东风账号表放入 data-import/ 并用 --file 指定路径。');
+    console.error('请将荣威账号表放入 data-import/ 并用 --file 指定路径。');
     process.exit(1);
   }
   const wb = XLSX.readFile(FILE);
