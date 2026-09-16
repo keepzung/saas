@@ -5,6 +5,7 @@ dist/
 .DS_Store
 *.log
 docs/har/
+docs/har-extracted/
 PROGRESS.md
 
 *.xlsx
