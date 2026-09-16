@@ -308,6 +308,9 @@ import {
   updateKoxAccount,
 } from '../../api/kox';
 import { parseAccountWorkbook } from '../../utils/xlsx-import';
+import { useAuthStore } from '../../stores/auth';
+
+const auth = useAuthStore();
 
 const importOpen = ref(false);
 const importing = ref(false);
@@ -434,6 +437,7 @@ async function reload(resetPage = false) {
       accountType: accountType.value || undefined,
       keyword: keyword.value || undefined,
       regionName: regionName.value || undefined,
+      brandId: auth.currentBrandId ?? undefined,
       page: page.value,
       page_size: PAGE_SIZE,
       sort: sortField.value,

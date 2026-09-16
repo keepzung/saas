@@ -116,6 +116,9 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { getKoxOverview } from '../../api/kox';
+import { useAuthStore } from '../../stores/auth';
+
+const auth = useAuthStore();
 
 const ov = ref({});
 const platform = ref('all');
@@ -130,7 +133,7 @@ const fmt = (n) => (n ?? 0).toLocaleString();
 
 async function reload() {
   try {
-    const params = { platform: platform.value };
+    const params = { platform: platform.value, brandId: auth.currentBrandId ?? undefined };
     if (range.value?.[0]) {
       params.start = range.value[0].format('YYYY-MM-DD');
       params.end = range.value[1].format('YYYY-MM-DD');

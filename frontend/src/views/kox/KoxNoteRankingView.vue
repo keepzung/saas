@@ -583,7 +583,7 @@ function detect() {
 async function loadAccounts() {
   try {
     const res = await getKoxAccounts({
-      brand_id: auth.currentBrandId ?? undefined,
+      brandId: auth.currentBrandId ?? undefined,
       page_size: 200,
     });
     accounts.value = res.list ?? [];

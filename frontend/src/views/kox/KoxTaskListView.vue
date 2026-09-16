@@ -190,6 +190,9 @@ import {
   getKoxTasks,
   stopKoxTask,
 } from '../../api/kox';
+import { useAuthStore } from '../../stores/auth';
+
+const auth = useAuthStore();
 
 const statusLabel = {
   ongoing: '进行中',
@@ -356,7 +359,10 @@ async function stop(record) {
 onMounted(async () => {
   reload();
   try {
-    const res = await getKoxAccounts({});
+    const res = await getKoxAccounts({
+      brandId: auth.currentBrandId ?? undefined,
+      page_size: 200,
+    });
     accounts.value = res.list;
   } catch {
     /* ignore */

@@ -31,6 +31,7 @@ export class KoxController {
       regionName?: string;
       saleArea?: string;
       keyword?: string;
+      brandId?: string;
       page?: string;
       page_size?: string;
       sort?: string;
@@ -67,7 +68,9 @@ export class KoxController {
   }
 
   @Get('kox/overview')
-  overview(@Query() query: { start?: string; end?: string; platform?: string }) {
+  overview(
+    @Query() query: { start?: string; end?: string; platform?: string; brandId?: string },
+  ) {
     return this.koxService.overview(query);
   }
 

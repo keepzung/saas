@@ -65,6 +65,7 @@ export class KoxService {
     regionName?: string;
     saleArea?: string;
     keyword?: string;
+    brandId?: string;
     page?: string;
     page_size?: string;
     sort?: string;
@@ -78,6 +79,7 @@ export class KoxService {
     if (query.status) where.status = query.status;
     if (query.regionName) where.regionName = query.regionName;
     if (query.saleArea) where.saleArea = query.saleArea;
+    if (query.brandId) where.brandId = Number(query.brandId);
     if (query.keyword) {
       where.OR = [
         { nickname: { contains: query.keyword, mode: 'insensitive' } },
@@ -98,7 +100,7 @@ export class KoxService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.kosAccount.groupBy({ by: ['regionName'] }).then(
+      this.prisma.kosAccount.groupBy({ by: ['regionName'], where }).then(
         (g) =>
           g
             .map((x) => x.regionName)
@@ -179,21 +181,32 @@ export class KoxService {
     return { id };
   }
 
-  async overview(query: { start?: string; end?: string; platform?: string }) {
+  async overview(query: {
+    start?: string;
+    end?: string;
+    platform?: string;
+    brandId?: string;
+  }) {
     const end = query.end ? new Date(query.end) : new Date();
     const start = query.start
       ? new Date(query.start)
       : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
     const platform = query.platform || 'all';
+    const brandId = query.brandId ? Number(query.brandId) : undefined;
 
     const where: Prisma.KoxDailyStatWhereInput = {
       platform,
       statDate: { gte: start, lte: end },
+      ...(brandId !== undefined ? { brandId } : {}),
     };
+    const accountWhere: Prisma.KosAccountWhereInput = brandId
+      ? { brandId }
+      : {};
     const [rows, accountAgg] = await Promise.all([
       this.prisma.koxDailyStat.findMany({ where, orderBy: { statDate: 'asc' } }),
       this.prisma.kosAccount.groupBy({
         by: ['accountType'],
+        where: accountWhere,
         _count: { _all: true },
       }),
     ]);
@@ -223,7 +236,7 @@ export class KoxService {
     return {
       store_num: await this.prisma.kosAccount.groupBy({
         by: ['storeName'],
-        where: { storeName: { not: null } },
+        where: { storeName: { not: null }, ...accountWhere },
       }).then((g) => g.length),
       kos_num: typeCount('KOS'),
       kob_num: typeCount('KOB'),
