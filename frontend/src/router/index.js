@@ -104,14 +104,44 @@ const routes = [
         meta: { title: '排行榜单' },
       },
       {
+        path: '/kox_df/operation-analysis/region-ranking',
+        component: () => import('../views/kox/KoxRankingView.vue'),
+        meta: { title: '区域排行', fixedDimension: 'region' },
+      },
+      {
+        path: '/kox_df/operation-analysis/author-ranking',
+        component: () => import('../views/kox/KoxRankingView.vue'),
+        meta: { title: '账号排行', fixedDimension: 'account' },
+      },
+      {
         path: '/kox_df/operation-analysis/note-ranking',
         component: () => import('../views/kox/KoxNoteRankingView.vue'),
-        meta: { title: '热门内容' },
+        meta: { title: '笔记排行' },
+      },
+      {
+        path: '/kox_df/operation-analysis/dealer-ranking',
+        component: () => import('../views/kox/KoxDealerOperationView.vue'),
+        meta: { title: '经销商排行' },
       },
       {
         path: '/kox_df/operation-analysis/dealer',
         component: () => import('../views/kox/KoxDealerOperationView.vue'),
         meta: { title: '经销商运营' },
+      },
+      {
+        path: '/kox_df/campaign-analysis/plans',
+        component: () => import('../views/kox/KoxCampaignPlansView.vue'),
+        meta: { title: '投放计划' },
+      },
+      {
+        path: '/kox_df/campaign-analysis/project-reports',
+        component: () => import('../views/kox/KoxProjectReportsView.vue'),
+        meta: { title: '项目报表' },
+      },
+      {
+        path: '/kox_df/campaign-analysis/add',
+        component: () => import('../views/kox/KoxCampaignAddView.vue'),
+        meta: { title: '新增项目' },
       },
       {
         path: '/kox_df/operation-analysis/feedback',

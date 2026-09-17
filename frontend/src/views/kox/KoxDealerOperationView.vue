@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="经销商运营" subtitle="代理商运营健康度与转化漏斗">
+  <PageWrapper title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
     <template #extra>
       <a-radio-group v-model:value="days" size="small" @change="reload">
         <a-radio-button :value="7">近7天</a-radio-button>

@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="热门内容" subtitle="笔记内容表现排行与关键词洞察">
+  <PageWrapper title="笔记排行" subtitle="笔记内容表现排行与关键词洞察">
     <template #filters>
       <FilterTopbar>
         <a-select

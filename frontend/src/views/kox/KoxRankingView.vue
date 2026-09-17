@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="排行榜单" subtitle="大区 / 销售区域 / 店铺 / 账号 多维度运营排行">
+  <PageWrapper :title="pageTitle" :subtitle="pageSubtitle">
     <template #filters>
       <FilterTopbar>
         <a-select
@@ -10,6 +10,7 @@
           @change="() => reload(true)"
         />
         <a-radio-group
+          v-if="!fixedDimension"
           v-model:value="dimension"
           size="small"
           button-style="solid"
@@ -175,6 +176,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -204,7 +206,24 @@ const metricOptions = Object.entries(METRIC_MAP).map(([value, label]) => ({
   label: `按${label}`,
 }));
 
-const dimension = ref('region');
+const route = useRoute();
+const fixedDimension = route.meta.fixedDimension || null;
+const DIMENSION_TITLE = {
+  region: '区域排行',
+  saleArea: '销售区域排行',
+  store: '店铺排行',
+  account: '账号排行',
+};
+const pageTitle = computed(() =>
+  fixedDimension ? DIMENSION_TITLE[fixedDimension] ?? '排行榜单' : '排行榜单',
+);
+const pageSubtitle = computed(() =>
+  fixedDimension
+    ? `${({ region: '大区', account: '账号' })[fixedDimension] ?? ''}维度运营指标排行`
+    : '大区 / 销售区域 / 店铺 / 账号 多维度运营排行',
+);
+
+const dimension = ref(fixedDimension || 'region');
 const brandId = ref(authStore.currentBrandId ?? authStore.brands?.[0]?.id);
 const accountType = ref(undefined);
 const metric = ref('view_sum');

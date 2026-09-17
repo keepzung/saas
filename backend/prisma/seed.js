@@ -88,12 +88,18 @@ const MODULE_TREE = [
         name: '运营分析',
         features: [
           { name: '运营总览', path: '/kox_df/operation-analysis/overview' },
-          { name: '排行榜单', path: '/kox_df/operation-analysis/ranking' },
-          { name: '热门内容', path: '/kox_df/operation-analysis/note-ranking' },
-          { name: '车型销量', path: '/kox_df/operation-analysis/model-sales' },
-          { name: '经销商运营', path: '/kox_df/operation-analysis/dealer' },
-          { name: '反馈分析', path: '/kox_df/operation-analysis/feedback' },
-          { name: 'AI简报', path: '/kox_df/operation-analysis/ai-briefing' },
+          { name: '区域排行', path: '/kox_df/operation-analysis/region-ranking' },
+          { name: '经销商排行', path: '/kox_df/operation-analysis/dealer-ranking' },
+          { name: '账号排行', path: '/kox_df/operation-analysis/author-ranking' },
+          { name: '笔记排行', path: '/kox_df/operation-analysis/note-ranking' },
+        ],
+      },
+      {
+        name: '投放分析',
+        features: [
+          { name: '投放计划', path: '/kox_df/campaign-analysis/plans' },
+          { name: '项目报表', path: '/kox_df/campaign-analysis/project-reports' },
+          { name: '新增项目', path: '/kox_df/campaign-analysis/add' },
         ],
       },
       {
