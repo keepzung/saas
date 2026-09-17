@@ -7,9 +7,27 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 type Role = 'ADMIN' | 'MANAGER' | 'SALES';
+
+export const BRAND_ROLE_KEYS = [
+  'agency_manager',
+  'agency_executive',
+  'brand_owner',
+  'content_supplier',
+  'media_partner',
+] as const;
+
+export class BrandRoleDto {
+  @IsInt()
+  brandId: number;
+
+  @IsIn(BRAND_ROLE_KEYS)
+  roleKey: string;
+}
 
 export class CreateUserDto {
   @Matches(/^1\d{10}$/, { message: '手机号格式不正确' })
@@ -53,6 +71,12 @@ export class UpdateUserDto {
   @IsArray()
   @IsInt({ each: true })
   brandIds?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BrandRoleDto)
+  brandRoles?: BrandRoleDto[];
 }
 
 export class ResetPasswordDto {

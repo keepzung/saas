@@ -145,7 +145,32 @@
             :options="brandOptions"
             placeholder="选择可见品牌"
             :max-tag-count="6"
+            @change="onPermBrandsChange"
           />
+        </a-form-item>
+        <a-form-item v-if="permBrandIds.length">
+          <template #label>
+            品牌角色
+            <span class="muted small">（该用户在各品牌工作区内的身份）</span>
+          </template>
+          <div class="brand-role-list">
+            <div v-for="bid in permBrandIds" :key="bid" class="brand-role-row">
+              <a-tooltip
+                :title="BRAND_ROLE_META[permRoleByBrand[bid] || 'agency_executive']?.desc"
+              >
+                <span class="brand-role-name">
+                  {{ brandNameMap.get(bid) ?? `#${bid}` }}
+                </span>
+              </a-tooltip>
+              <a-select
+                :value="permRoleByBrand[bid] || 'agency_executive'"
+                :options="brandRoleOptions"
+                size="small"
+                class="brand-role-select"
+                @change="(v) => (permRoleByBrand[bid] = v)"
+              />
+            </div>
+          </div>
         </a-form-item>
         <a-button type="primary" block :loading="permSaving" @click="savePermission">
           保存权限
@@ -194,6 +219,39 @@ const ROLE_META = {
   SALES: { label: '普通用户', color: 'blue' },
 };
 
+const BRAND_ROLE_META = {
+  agency_manager: {
+    label: '运营主管',
+    color: 'purple',
+    desc: '品牌工作区负责人，可管理协作成员、审核规则与内容流转',
+  },
+  agency_executive: {
+    label: '运营执行',
+    color: 'blue',
+    desc: '负责内容生产、内容包管理、运营审核与内容领用',
+  },
+  brand_owner: {
+    label: '品牌方',
+    color: 'green',
+    desc: '品牌侧审核人，负责联合审核通过/驳回与结果查看',
+  },
+  content_supplier: {
+    label: '内容供应商',
+    color: 'orange',
+    desc: '外部内容供给方，仅可向被授权内容包上传内容',
+  },
+  media_partner: {
+    label: '媒介服务商',
+    color: 'cyan',
+    desc: '分发执行方，可领用内容并回填发布链接或截图',
+  },
+};
+
+const brandRoleOptions = Object.entries(BRAND_ROLE_META).map(([value, m]) => ({
+  label: m.label,
+  value,
+}));
+
 const drawerOpen = ref(false);
 const editing = ref(null);
 const saving = ref(false);
@@ -209,6 +267,7 @@ const permRow = ref(null);
 const permSaving = ref(false);
 const permCheckedKeys = ref([]);
 const permBrandIds = ref([]);
+const permRoleByBrand = reactive({});
 
 const resetOpen = ref(false);
 const resetting = ref(null);
@@ -278,10 +337,20 @@ const moduleNames = (record) =>
     .map((id) => featureNameMap.value.get(id) ?? `#${id}`)
     .join('、') || '（无）';
 
-const brandNames = (record) =>
-  (record.brandIds ?? [])
-    .map((id) => brandNameMap.value.get(id) ?? `#${id}`)
-    .join('、') || '（无）';
+const brandNames = (record) => {
+  const roles =
+    record.brandRoles ??
+    (record.brandIds ?? []).map((brandId) => ({ brandId }));
+  return (
+    roles
+      .map((r) => {
+        const name = brandNameMap.value.get(r.brandId) ?? `#${r.brandId}`;
+        const role = BRAND_ROLE_META[r.roleKey];
+        return role ? `${name} · ${role.label}` : name;
+      })
+      .join('、') || '（无）'
+  );
+};
 
 const fmtDateTime = (d) => (d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-');
 
@@ -319,7 +388,22 @@ function openPermission(record) {
   permRow.value = record;
   permCheckedKeys.value = (record.moduleIds ?? []).map(String);
   permBrandIds.value = [...(record.brandIds ?? [])];
+  for (const k of Object.keys(permRoleByBrand)) delete permRoleByBrand[k];
+  for (const r of record.brandRoles ?? []) {
+    permRoleByBrand[r.brandId] = r.roleKey;
+  }
+  onPermBrandsChange(permBrandIds.value);
   permOpen.value = true;
+}
+
+function onPermBrandsChange(vals) {
+  const keep = new Set(vals);
+  for (const k of Object.keys(permRoleByBrand)) {
+    if (!keep.has(Number(k))) delete permRoleByBrand[k];
+  }
+  for (const v of vals) {
+    if (!permRoleByBrand[v]) permRoleByBrand[v] = 'agency_executive';
+  }
 }
 
 async function save() {
@@ -367,7 +451,10 @@ async function savePermission() {
       .map(Number);
     await updateUser(permRow.value.id, {
       moduleIds,
-      brandIds: permBrandIds.value,
+      brandRoles: permBrandIds.value.map((id) => ({
+        brandId: id,
+        roleKey: permRoleByBrand[id] || 'agency_executive',
+      })),
     });
     message.success('权限已更新');
     permOpen.value = false;
@@ -424,5 +511,34 @@ onMounted(load);
   padding: 8px 12px;
   max-height: 320px;
   overflow: auto;
+}
+
+.brand-role-list {
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brand-role-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand-role-name {
+  font-size: 13px;
+  color: var(--color-text-primary, #1e293b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-role-select {
+  width: 140px;
+  flex-shrink: 0;
 }
 </style>

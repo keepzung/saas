@@ -152,12 +152,19 @@ export class UserService {
     await this.assertOperator(operatorId);
     const users = await this.prisma.user.findMany({
       orderBy: { id: 'asc' },
-      select: { ...USER_SELECT, brandMembers: { select: { brandId: true } } },
+      select: {
+        ...USER_SELECT,
+        brandMembers: { select: { brandId: true, roleKey: true } },
+      },
     });
     return {
       list: users.map(({ brandMembers, ...u }) => ({
         ...u,
         brandIds: brandMembers.map((m) => m.brandId),
+        brandRoles: brandMembers.map((m) => ({
+          brandId: m.brandId,
+          roleKey: m.roleKey,
+        })),
       })),
     };
   }
@@ -213,36 +220,43 @@ export class UserService {
     }
     if (dto.moduleIds !== undefined) data.moduleIds = dto.moduleIds;
 
-    if (dto.brandIds !== undefined && dto.role !== 'ADMIN') {
-      await this.syncBrandMembers(id, dto.brandIds);
+    if (dto.brandRoles !== undefined && dto.role !== 'ADMIN') {
+      await this.syncBrandMembers(id, dto.brandRoles);
+    } else if (dto.brandIds !== undefined && dto.role !== 'ADMIN') {
+      await this.syncBrandMembers(
+        id,
+        dto.brandIds.map((brandId) => ({
+          brandId,
+          roleKey: 'agency_executive',
+        })),
+      );
     }
 
     return this.prisma.user.update({ where: { id }, data, select: USER_SELECT });
   }
 
-  private async syncBrandMembers(userId: number, brandIds: number[]) {
-    const next = new Set(brandIds);
+  private async syncBrandMembers(
+    userId: number,
+    brandRoles: { brandId: number; roleKey: string }[],
+  ) {
+    const next = new Map(brandRoles.map((r) => [r.brandId, r.roleKey]));
     const current = await this.prisma.brandMember.findMany({
       where: { userId },
     });
-    const managerKeys = ['agency_manager', 'brand_owner'];
-    const keep = new Set(
-      current.filter((m) => managerKeys.includes(m.roleKey)).map((m) => m.brandId),
-    );
     for (const m of current) {
-      if (keep.has(m.brandId)) continue;
       if (!next.has(m.brandId)) {
+        await this.prisma.brandMember.delete({ where: { id: m.id } });
+      } else if (next.get(m.brandId) !== m.roleKey) {
         await this.prisma.brandMember.delete({ where: { id: m.id } });
       }
     }
-    for (const brandId of next) {
-      if (keep.has(brandId)) continue;
-      const exists = current.find(
-        (m) => m.brandId === brandId && m.roleKey === 'agency_executive',
+    for (const [brandId, roleKey] of next) {
+      const exists = current.some(
+        (m) => m.brandId === brandId && m.roleKey === roleKey,
       );
       if (!exists) {
         await this.prisma.brandMember.create({
-          data: { brandId, userId, roleKey: 'agency_executive' },
+          data: { brandId, userId, roleKey },
         });
       }
     }

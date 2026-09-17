@@ -217,7 +217,18 @@ const iconMap = {
   UserOutlined,
 };
 
-const categories = computed(() => auth.moduleTree);
+const BRAND_HIDDEN_MENUS = { 2: ['任务管理'] };
+
+const categories = computed(() => {
+  const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
+  if (!hidden || hidden.length === 0) return auth.moduleTree;
+  return auth.moduleTree
+    .map((cat) => ({
+      ...cat,
+      children: (cat.children ?? []).filter((g) => !hidden.includes(g.name)),
+    }))
+    .filter((cat) => (cat.children ?? []).length > 0);
+});
 
 const avatarText = computed(() => {
   const name = auth.user?.nickname || '?';

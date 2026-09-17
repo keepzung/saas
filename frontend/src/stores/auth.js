@@ -18,8 +18,15 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     isLoggedIn: (state) => !!state.token,
-    systemName: (state) =>
-      state.companySourceConfig?.system_name ?? '智能商业营销系统',
+    systemName: (state) => {
+      if (state.currentBrandId && state.currentBrandId !== 1) {
+        const brand = (state.brands ?? []).find(
+          (b) => b.id === state.currentBrandId,
+        );
+        if (brand) return brand.name;
+      }
+      return state.companySourceConfig?.system_name ?? '智能商业营销系统';
+    },
     currentBrand: (state) =>
       state.brands.find((b) => b.id === state.currentBrandId) ?? null,
   },
