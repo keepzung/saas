@@ -9,11 +9,20 @@
       :collapsed-width="60"
       class="sider"
     >
-      <div class="logo" @click="router.push('/welcome')">
-        <span class="logo-logo"></span>
-        <span v-if="!collapsed">{{ auth.systemName }}</span>
-        <span v-else>{{ auth.systemName.slice(0, 2) }}</span>
-      </div>
+<div class="logo" @click="router.push('/welcome')">
+          <span v-if="isRoewe && !collapsed" class="logo-brand-chip">
+            <img
+              class="logo-brand-img"
+              src="/images/login/roewe-logo.png"
+              alt="荣威"
+            />
+          </span>
+          <template v-else>
+            <span class="logo-logo"></span>
+            <span v-if="!collapsed">{{ auth.systemName }}</span>
+            <span v-else>{{ auth.systemName.slice(0, 2) }}</span>
+          </template>
+        </div>
       <a-menu
         v-model:selectedKeys="selectedKeys"
         v-model:openKeys="openKeys"
@@ -137,9 +146,20 @@
               }"
               @click="switchSelected = c.main_company_id"
             >
-              <span class="main-company-avatar">
-                {{ (c.company_name || '工').charAt(0) }}
-              </span>
+<span
+                  class="main-company-avatar"
+                  :class="{ 'is-logo': c.main_company_id === 2 }"
+                >
+                  <img
+                    v-if="c.main_company_id === 2"
+                    class="company-card-logo"
+                    src="/images/login/roewe-logo.png"
+                    alt="荣威"
+                  />
+                  <template v-else>
+                    {{ (c.company_name || '工').charAt(0) }}
+                  </template>
+                </span>
               <span class="main-company-body">
                 <span class="main-company-name">{{ c.company_name }}</span>
                 <span class="main-company-meta">
@@ -218,6 +238,8 @@ const iconMap = {
 };
 
 const BRAND_HIDDEN_MENUS = { 2: ['任务管理'] };
+
+const isRoewe = computed(() => auth.currentBrandId === 2);
 
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
@@ -399,13 +421,32 @@ onMounted(async () => {
 }
 
 .logo-logo {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: linear-gradient(135deg, #3456e6, #6683c3);
-  margin-right: 8px;
-  flex-shrink: 0;
-}
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #3456e6, #6683c3);
+    margin-right: 8px;
+    flex-shrink: 0;
+  }
+
+  .logo-brand-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border-radius: 6px;
+    padding: 3px 8px;
+    max-width: 152px;
+    flex-shrink: 0;
+  }
+
+  .logo-brand-img {
+    height: 24px;
+    width: auto;
+    max-width: 136px;
+    object-fit: contain;
+    display: block;
+  }
 
 .header {
   display: flex;
@@ -580,18 +621,31 @@ onMounted(async () => {
 }
 
 .main-company-avatar {
-  width: 42px;
-  height: 42px;
-  background: #eaf1ff;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #3b82f6;
-  font-size: 18px;
-  font-weight: 700;
-  flex: 0 0 auto;
-}
+    width: 42px;
+    height: 42px;
+    background: #eaf1ff;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #3b82f6;
+    font-size: 18px;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+
+  .main-company-avatar.is-logo {
+    width: auto;
+    min-width: 42px;
+    padding: 0 12px;
+  }
+
+  .company-card-logo {
+    height: 20px;
+    width: auto;
+    object-fit: contain;
+    display: block;
+  }
 
 .main-company-body {
   flex: 1;
