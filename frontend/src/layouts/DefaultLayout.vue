@@ -208,6 +208,7 @@ import {
   CarOutlined,
   GlobalOutlined,
   UserOutlined,
+  MessageOutlined,
   DownOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -235,9 +236,15 @@ const iconMap = {
   CarOutlined,
   GlobalOutlined,
   UserOutlined,
+  MessageOutlined,
 };
 
-const BRAND_HIDDEN_MENUS = { 2: ['任务管理'] };
+const BRAND_HIDDEN_MENUS = {
+  1: ['线索中心'],
+  2: ['任务管理', '线索中心'],
+  3: ['线索中心'],
+  4: ['线索中心'],
+};
 
 const isRoewe = computed(() => auth.currentBrandId === 2);
 

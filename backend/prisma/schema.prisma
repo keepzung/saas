@@ -621,3 +621,33 @@ model InsightReport {
 
   @@index([brandId])
 }
+
+model LaiguLead {
+  id                 Int       @id @default(autoincrement())
+  brandId            Int       @default(5)
+  sessionId          String    @unique
+  clientId           String?
+  clientName         String?
+  phone              String?
+  isResource         Boolean   @default(false)
+  source             String?
+  subSource          String?
+  chatEntry          String?
+  ipLocation         String?
+  clientAttrs        Json?
+  adInfo             Json?
+  messageCount       Int       @default(0)
+  clientMessageCount Int       @default(0)
+  firstMessageAt     DateTime?
+  lastMessageAt      DateTime?
+  lastClientContent  String?
+  sessionCreatedAt   DateTime?
+  sessionEndedAt     DateTime?
+  rawJson            Json
+  fetchedAt          DateTime  @updatedAt
+  createdAt          DateTime  @default(now())
+
+  @@index([brandId])
+  @@index([brandId, sessionEndedAt])
+  @@index([phone])
+}

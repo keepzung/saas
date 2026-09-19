@@ -12,6 +12,7 @@ import { ContentModule } from './content/content.module';
 import { KoxModule } from './kox/kox.module';
 import { InsightModule } from './insight/insight.module';
 import { CrmModule } from './crm/crm.module';
+import { LaiguModule } from './laigu/laigu.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CrmModule } from './crm/crm.module';
     KoxModule,
     InsightModule,
     CrmModule,
+    LaiguModule,
   ],
 })
 export class AppModule {}

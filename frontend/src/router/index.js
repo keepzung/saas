@@ -178,6 +178,11 @@ const routes = [
         component: () => import('../views/insight/InsightReportView.vue'),
         meta: { title: '报告中心' },
       },
+      {
+        path: '/laigu/leads',
+        component: () => import('../views/laigu/LaiguLeadView.vue'),
+        meta: { title: '私信线索' },
+      },
     ],
   },
   {
