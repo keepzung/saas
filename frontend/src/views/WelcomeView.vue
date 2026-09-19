@@ -3,7 +3,7 @@
     <div class="welcome-header">
       <div class="header-logo">
         <div class="company-logo">
-          <img src="/images/login/logo.png" alt="logo" />
+          <img :src="headerLogo" alt="logo" />
         </div>
         <span class="header-system-name">{{ systemName }}</span>
       </div>
@@ -121,6 +121,11 @@ const loading = ref(true);
 const activeCard = ref(null);
 
 const systemName = computed(() => auth.systemName);
+const headerLogo = computed(() =>
+  auth.currentBrandId === 2
+    ? '/images/login/roewe-logo.png'
+    : '/images/login/logo.png',
+);
 const categories = computed(() => auth.moduleTree);
 const isAdmin = computed(() => auth.user?.admin_flag === 1);
 const adminPath = '/users/manage';

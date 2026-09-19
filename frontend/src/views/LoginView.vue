@@ -5,13 +5,13 @@
     <div class="login-content">
       <div class="header-row">
         <div class="client-logo">
-          <img class="logo-img" src="/images/login/roewe-logo.png" alt="logo" />
+          <img class="logo-img" src="/images/login/logo.png" alt="logo" />
         </div>
-        <h1 class="system-name">{{ BRAND_TITLE }}</h1>
+        <h1 class="system-name">{{ auth.systemName }}</h1>
       </div>
 
       <div class="system-info">
-        <p class="system-desc">{{ BRAND_DESC }}</p>
+        <p class="system-desc">智能商业营销 · 数据驱动增长</p>
       </div>
 
       <div class="login-form-wrapper">
@@ -156,9 +156,6 @@ const auth = useAuthStore();
 const REMEMBER_KEY = 'remembered_username';
 const REMEMBER_PW_KEY = 'remembered_password';
 
-const BRAND_TITLE = '荣威项目工作区';
-const BRAND_DESC = '荣威 KOX 运营 · 数据驱动增长';
-
 const form = reactive({
   phone: localStorage.getItem(REMEMBER_KEY) || '',
   password: '',
@@ -172,7 +169,7 @@ const selectedCompanyId = ref(null);
 const confirming = ref(false);
 
 onMounted(() => {
-  document.title = `${BRAND_TITLE}`;
+  document.title = `${auth.systemName}`;
 });
 
 function saveRemembered() {
