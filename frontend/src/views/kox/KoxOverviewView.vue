@@ -103,7 +103,11 @@
       </a-col>
     </a-row>
 
-    <a-card size="small" title="发布 & 互动趋势">
+    <a-card size="small">
+      <a-tabs v-model:activeKey="trendTab" size="small" @change="onTabChange">
+        <a-tab-pane key="ad" tab="投放效率趋势" />
+        <a-tab-pane key="publish" tab="发布 & 互动趋势" />
+      </a-tabs>
       <div ref="chartEl" style="height: 320px" />
     </a-card>
   </PageWrapper>
@@ -128,6 +132,7 @@ const range = ref([
 ]);
 const chartEl = ref(null);
 let chart = null;
+const trendTab = ref('ad');
 
 const fmt = (n) => (n ?? 0).toLocaleString();
 
@@ -145,27 +150,66 @@ async function reload() {
   }
 }
 
+function onTabChange() {
+  nextTick(renderChart);
+}
+
 function renderChart() {
   if (!chartEl.value) return;
   if (!chart) chart = echarts.init(chartEl.value);
   const trend = ov.value.trend ?? [];
-  chart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['内容数', '阅读量', '互动量', '私信留资', '投放消耗'] },
-    grid: { left: 60, right: 60, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: trend.map((t) => t.date.slice(5)) },
-    yAxis: [
-      { type: 'value', name: '内容/留资' },
-      { type: 'value', name: '阅读/互动', axisLabel: { formatter: (v) => `${Math.round(v / 1000)}k` } },
-    ],
-    series: [
-      { name: '内容数', type: 'bar', data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' } },
-      { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
-      { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
-      { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
-      { name: '投放消耗', type: 'bar', data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#fb7185', opacity: 0.75 }, barGap: '-100%' },
-    ],
-  });
+  const dates = trend.map((t) => t.date.slice(5));
+
+  if (trendTab.value === 'ad') {
+    const ctr = trend.map((t) =>
+      t.ad_impression ? Math.round((t.ad_click / t.ad_impression) * 10000) / 100 : 0,
+    );
+    chart.setOption(
+      {
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['投放消耗', '曝光量', '点击量', 'CTR', '私信留资'] },
+        grid: { left: 60, right: 70, top: 40, bottom: 30 },
+        xAxis: { type: 'category', data: dates },
+        yAxis: [
+          { type: 'value', name: '消耗(元)/留资' },
+          {
+            type: 'value',
+            name: '曝光/点击',
+            axisLabel: { formatter: (v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : v) },
+          },
+        ],
+        series: [
+          { name: '投放消耗', type: 'bar', data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#3456E6' }, barMaxWidth: 26 },
+          { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.ad_msg_leads ?? 0), itemStyle: { color: '#7c3aed' } },
+          { name: '曝光量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_impression ?? 0), itemStyle: { color: '#16a34a' } },
+          { name: '点击量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_click ?? 0), itemStyle: { color: '#d97706' } },
+          { name: 'CTR', type: 'line', smooth: true, yAxisIndex: 1, data: ctr, itemStyle: { color: '#fb7185' }, tooltip: { valueFormatter: (v) => `${v}%` } },
+        ],
+      },
+      { notMerge: true },
+    );
+    return;
+  }
+
+  chart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['内容数', '阅读量', '互动量', '私信留资'] },
+      grid: { left: 60, right: 60, top: 40, bottom: 30 },
+      xAxis: { type: 'category', data: dates },
+      yAxis: [
+        { type: 'value', name: '内容/留资' },
+        { type: 'value', name: '阅读/互动', axisLabel: { formatter: (v) => `${Math.round(v / 1000)}k` } },
+      ],
+      series: [
+        { name: '内容数', type: 'bar', data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' } },
+        { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
+        { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
+        { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
+      ],
+    },
+    { notMerge: true },
+  );
 }
 
 function onResize() {

@@ -377,10 +377,19 @@ export class KoxService {
       },
       ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
       trend: (() => {
-        const feeByDate = new Map<string, number>();
+        const campByDate = new Map<
+          string,
+          { fee: number; impression: number; click: number; msg_leads: number }
+        >();
         for (const c of campaignRows) {
           const key = c.statDate.toISOString().slice(0, 10);
-          feeByDate.set(key, (feeByDate.get(key) ?? 0) + Number(c.fee));
+          const cur =
+            campByDate.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0 };
+          cur.fee += Number(c.fee);
+          cur.impression += c.impression;
+          cur.click += c.click;
+          cur.msg_leads += c.msgLeadsNum;
+          campByDate.set(key, cur);
         }
         const noteByDate = new Map<
           string,
@@ -398,37 +407,57 @@ export class KoxService {
         }
         const byDate = new Map<
           string,
-          { item_cnt: number; view_sum: number; interaction_sum: number; total_pm_leads: number; ad_cost: number }
+          {
+            item_cnt: number;
+            view_sum: number;
+            interaction_sum: number;
+            total_pm_leads: number;
+            ad_cost: number;
+            ad_impression: number;
+            ad_click: number;
+            ad_msg_leads: number;
+          }
         >();
         for (const r of rows) {
           const key = r.statDate.toISOString().slice(0, 10);
+          const camp = campByDate.get(key);
           byDate.set(key, {
             item_cnt: r.itemCnt,
             view_sum: r.viewSum,
             interaction_sum: r.interactionSum,
             total_pm_leads: r.totalPmLeads,
-            ad_cost: r2(feeByDate.get(key) ?? 0),
+            ad_cost: r2(camp?.fee ?? 0),
+            ad_impression: camp?.impression ?? 0,
+            ad_click: camp?.click ?? 0,
+            ad_msg_leads: camp?.msg_leads ?? 0,
           });
         }
         for (const [key, v] of noteByDate) {
           if (!byDate.has(key)) {
+            const camp = campByDate.get(key);
             byDate.set(key, {
               item_cnt: v.item_cnt,
               view_sum: v.view_sum,
               interaction_sum: v.interaction_sum,
               total_pm_leads: 0,
-              ad_cost: r2(feeByDate.get(key) ?? 0),
+              ad_cost: r2(camp?.fee ?? 0),
+              ad_impression: camp?.impression ?? 0,
+              ad_click: camp?.click ?? 0,
+              ad_msg_leads: camp?.msg_leads ?? 0,
             });
           }
         }
-        for (const [key, fee] of feeByDate) {
+        for (const [key, camp] of campByDate) {
           if (!byDate.has(key)) {
             byDate.set(key, {
               item_cnt: 0,
               view_sum: 0,
               interaction_sum: 0,
               total_pm_leads: 0,
-              ad_cost: r2(fee),
+              ad_cost: r2(camp.fee),
+              ad_impression: camp.impression,
+              ad_click: camp.click,
+              ad_msg_leads: camp.msg_leads,
             });
           }
         }
