@@ -202,12 +202,20 @@ export class KoxService {
     const accountWhere: Prisma.KosAccountWhereInput = brandId
       ? { brandId }
       : {};
-    const [rows, accountAgg] = await Promise.all([
+    const campaignWhere: Prisma.KoxCampaignDailyStatWhereInput = {
+      statDate: { gte: start, lte: end },
+      ...(brandId ? { brandId } : {}),
+    };
+    const [rows, accountAgg, campaignRows] = await Promise.all([
       this.prisma.koxDailyStat.findMany({ where, orderBy: { statDate: 'asc' } }),
       this.prisma.kosAccount.groupBy({
         by: ['accountType'],
         where: accountWhere,
         _count: { _all: true },
+      }),
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: campaignWhere,
+        orderBy: { statDate: 'asc' },
       }),
     ]);
 
@@ -232,6 +240,38 @@ export class KoxService {
       accountAgg.find((g) => g.accountType === t)?._count._all ?? 0;
 
     const r2 = (v: number) => Math.round(v * 100) / 100;
+
+    // 广告区块：星火投放真实数据（KoxCampaignDailyStat）优先，无数据时回退 KoxDailyStat
+    const campaignFee = campaignRows.reduce((acc, r) => acc + Number(r.fee), 0);
+    const campaignImp = campaignRows.reduce((acc, r) => acc + r.impression, 0);
+    const campaignClick = campaignRows.reduce((acc, r) => acc + r.click, 0);
+    const hasCampaign = campaignRows.length > 0;
+
+    const ad = hasCampaign
+      ? {
+          ad_cost: r2(campaignFee),
+          ad_view_sum: campaignImp,
+          ad_ctr: campaignImp ? r2((campaignClick / campaignImp) * 100) : 0,
+          ad_cpc: campaignClick ? r2(campaignFee / campaignClick) : 0,
+          ad_cpm: campaignImp ? r2((campaignFee / campaignImp) * 1000) : 0,
+          ad_conversions: campaignClick,
+          ad_conversion_cost: campaignClick ? r2(campaignFee / campaignClick) : 0,
+          ad_conversion_rate: campaignImp
+            ? r2((campaignClick / campaignImp) * 100)
+            : 0,
+        }
+      : {
+          ad_cost: r2(adCost),
+          ad_view_sum: adViewSum,
+          ad_ctr: adViewSum ? r2((adConversions / adViewSum) * 1000) / 10 : 0,
+          ad_cpc: adConversions ? r2(adCost / adConversions) : 0,
+          ad_cpm: adViewSum ? r2((adCost / adViewSum) * 1000) : 0,
+          ad_conversions: adConversions,
+          ad_conversion_cost: adConversions ? r2(adCost / adConversions) : 0,
+          ad_conversion_rate: adViewSum
+            ? r2((adConversions / adViewSum) * 10000) / 100
+            : 0,
+        };
 
     return {
       store_num: await this.prisma.kosAccount.groupBy({
@@ -263,18 +303,7 @@ export class KoxService {
           ? r2((sum((r) => r.totalPmLeads) / viewSum) * 10000) / 100
           : 0,
       },
-      ad: {
-        ad_cost: r2(adCost),
-        ad_view_sum: adViewSum,
-        ad_ctr: adViewSum ? r2((adConversions / adViewSum) * 1000) / 10 : 0,
-        ad_cpc: adConversions ? r2(adCost / adConversions) : 0,
-        ad_cpm: adViewSum ? r2((adCost / adViewSum) * 1000) : 0,
-        ad_conversions: adConversions,
-        ad_conversion_cost: adConversions ? r2(adCost / adConversions) : 0,
-        ad_conversion_rate: adViewSum
-          ? r2((adConversions / adViewSum) * 10000) / 100
-          : 0,
-      },
+      ad,
       live: {
         live_account_num: rows.length
           ? rows[rows.length - 1].liveAccountNum
@@ -295,13 +324,42 @@ export class KoxService {
         live_cost: r2(liveCost),
         live_conversion_cost: liveTotalLeads ? r2(liveCost / liveTotalLeads) : 0,
       },
-      trend: rows.map((r) => ({
-        date: r.statDate.toISOString().slice(0, 10),
-        item_cnt: r.itemCnt,
-        view_sum: r.viewSum,
-        interaction_sum: r.interactionSum,
-        total_pm_leads: r.totalPmLeads,
-      })),
+      ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
+      trend: (() => {
+        const feeByDate = new Map<string, number>();
+        for (const c of campaignRows) {
+          const key = c.statDate.toISOString().slice(0, 10);
+          feeByDate.set(key, (feeByDate.get(key) ?? 0) + Number(c.fee));
+        }
+        const byDate = new Map<
+          string,
+          { item_cnt: number; view_sum: number; interaction_sum: number; total_pm_leads: number; ad_cost: number }
+        >();
+        for (const r of rows) {
+          const key = r.statDate.toISOString().slice(0, 10);
+          byDate.set(key, {
+            item_cnt: r.itemCnt,
+            view_sum: r.viewSum,
+            interaction_sum: r.interactionSum,
+            total_pm_leads: r.totalPmLeads,
+            ad_cost: r2(feeByDate.get(key) ?? 0),
+          });
+        }
+        for (const [key, fee] of feeByDate) {
+          if (!byDate.has(key)) {
+            byDate.set(key, {
+              item_cnt: 0,
+              view_sum: 0,
+              interaction_sum: 0,
+              total_pm_leads: 0,
+              ad_cost: r2(fee),
+            });
+          }
+        }
+        return [...byDate.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([date, v]) => ({ date, ...v }));
+      })(),
     };
   }
 

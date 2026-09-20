@@ -151,7 +151,7 @@ function renderChart() {
   const trend = ov.value.trend ?? [];
   chart.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['内容数', '阅读量', '互动量', '私信留资'] },
+    legend: { data: ['内容数', '阅读量', '互动量', '私信留资', '投放消耗'] },
     grid: { left: 60, right: 60, top: 40, bottom: 30 },
     xAxis: { type: 'category', data: trend.map((t) => t.date.slice(5)) },
     yAxis: [
@@ -163,6 +163,7 @@ function renderChart() {
       { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
       { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
       { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
+      { name: '投放消耗', type: 'bar', data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#fb7185', opacity: 0.75 }, barGap: '-100%' },
     ],
   });
 }
