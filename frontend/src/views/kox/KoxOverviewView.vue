@@ -179,7 +179,7 @@ function renderChart() {
           },
         ],
         series: [
-          { name: '投放消耗', type: 'bar', data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#3456E6' }, barMaxWidth: 26 },
+          { name: '投放消耗', type: 'line', smooth: true, data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
           { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.ad_msg_leads ?? 0), itemStyle: { color: '#7c3aed' } },
           { name: '曝光量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_impression ?? 0), itemStyle: { color: '#16a34a' } },
           { name: '点击量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_click ?? 0), itemStyle: { color: '#d97706' } },
@@ -201,12 +201,12 @@ function renderChart() {
         { type: 'value', name: '内容/留资' },
         { type: 'value', name: '阅读/互动', axisLabel: { formatter: (v) => `${Math.round(v / 1000)}k` } },
       ],
-      series: [
-        { name: '内容数', type: 'bar', data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' } },
-        { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
-        { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
-        { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
-      ],
+        series: [
+          { name: '内容数', type: 'line', smooth: true, data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
+          { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
+          { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
+          { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
+        ],
     },
     { notMerge: true },
   );
