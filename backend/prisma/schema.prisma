@@ -607,6 +607,68 @@ model KoxDealerSales {
   @@index([month])
 }
 
+model KoxCampaignDailyStat {
+  id              Int      @id @default(autoincrement())
+  statDate        DateTime
+  virtualSellerId String
+  brandUserId     String?
+  brandUserName   String?
+  advertiserId    String?
+  accountKind     String   @default("brand")
+  agentName       String?
+  fee             Decimal  @default(0) @db.Decimal(14, 2)
+  impression      Int      @default(0)
+  click           Int      @default(0)
+  likeCnt         Int      @default(0)
+  commentCnt      Int      @default(0)
+  collectCnt      Int      @default(0)
+  shareCnt        Int      @default(0)
+  interaction     Int      @default(0)
+  msgLeadsNum     Int      @default(0)
+  leads           Int      @default(0)
+  brandId         Int      @default(2)
+  rawJson         Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([statDate, virtualSellerId])
+  @@index([statDate, brandId])
+  @@index([brandUserId])
+}
+
+model SparkAccount {
+  id              Int      @id @default(autoincrement())
+  virtualSellerId String   @unique
+  accountCode     String?
+  accountKind     String   @default("brand")
+  name            String
+  brandUserId     String?
+  agentName       String?
+  advertiserId    String?
+  lastConsumeDate String?
+  active          Boolean  @default(true)
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  brandId         Int      @default(2)
+
+  @@index([brandId, active])
+}
+
+model SparkSyncLog {
+  id              Int      @id @default(autoincrement())
+  syncType        String
+  statDate        String?
+  status          String   @default("success")
+  fetched         Int      @default(0)
+  upserted        Int      @default(0)
+  accountsAdded   Int      @default(0)
+  accountsRemoved Int      @default(0)
+  message         String?
+  createdAt       DateTime @default(now())
+
+  @@index([syncType, createdAt])
+}
+
 model InsightContent {
   id          Int       @id @default(autoincrement())
   platform    String    @default("douyin")

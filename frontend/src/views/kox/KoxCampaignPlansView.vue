@@ -3,6 +3,7 @@
     <template #filters>
       <FilterTopbar>
         <a-select
+          v-if="mode === 'demo'"
           v-model:value="model"
           style="width: 140px"
           allow-clear
@@ -13,20 +14,21 @@
         <a-input-search
           v-model:value="keyword"
           style="width: 220px"
-          placeholder="搜索视频 / 账号名称"
+          :placeholder="mode === 'real' ? '搜索账户 / 代理商 / 投放ID' : '搜索视频 / 账号名称'"
           allow-clear
-          @search="applyFilter"
+          @search="onSearch"
         />
         <a-range-picker
           v-model:value="range"
           size="small"
           :allow-clear="false"
-          @change="applyFilter"
+          @change="onRangeChange"
         />
       </FilterTopbar>
     </template>
 
-    <NoticeBar>数据说明：当前为演示数据，聚光平台授权接入后将替换为真实投放数据。</NoticeBar>
+    <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实投放数据。</NoticeBar>
+    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新，统计口径为账户维度消耗汇总。</NoticeBar>
 
     <div class="stat-grid">
       <div v-for="s in statCards" :key="s.label" class="stat-card">
@@ -35,17 +37,24 @@
       </div>
     </div>
 
-    <a-card :bordered="false" size="small" title="消耗 & 留资趋势（近 14 天）" class="chart-card">
+    <a-card :bordered="false" size="small" title="消耗 & 留资趋势" class="chart-card">
       <div ref="trendEl" class="echart-area" />
     </a-card>
 
-    <a-card :bordered="false">
+    <a-card :bordered="false" size="small">
       <a-table
-        :columns="columns"
-        :data-source="filteredList"
+        :columns="mode === 'real' ? realColumns : demoColumns"
+        :data-source="tableRows"
         :loading="loading"
-        :pagination="{ total: filteredList.length, pageSize: 10, size: 'small', showSizeChanger: false }"
-        row-key="id"
+        :pagination="{
+          total: tableTotal,
+          current: page,
+          pageSize: 10,
+          size: 'small',
+          showSizeChanger: false,
+        }"
+        row-key="virtual_seller_id"
+        @change="onTableChange"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
@@ -55,11 +64,27 @@
           <template v-else-if="column.key === 'model'">
             <a-tag color="blue">{{ record.model }}</a-tag>
           </template>
+          <template v-else-if="column.key === 'name'">
+            <div class="c-title">{{ record.name }}</div>
+            <div class="muted small">
+              {{ record.account_kind === 'agent_sub' ? '代理商子账户' : '品牌主账户' }}
+              <template v-if="record.agent_name"> · {{ record.agent_name }}</template>
+              <template v-if="record.advertiser_id"> · 投放ID {{ record.advertiser_id }}</template>
+            </div>
+          </template>
           <template v-else-if="column.key === 'cost'">
             <div class="bar-cell">
               <span class="bar-num">¥{{ fmt(record.cost) }}</span>
               <div class="bar-track">
                 <div class="bar-fill" :style="{ width: `${(record.cost / maxCost) * 100}%` }" />
+              </div>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'fee'">
+            <div class="bar-cell">
+              <span class="bar-num">¥{{ fmt(record.fee) }}</span>
+              <div class="bar-track">
+                <div class="bar-fill" :style="{ width: `${(record.fee / maxCost) * 100}%` }" />
               </div>
             </div>
           </template>
@@ -76,6 +101,10 @@ import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
+import { getSparkCampaignSummary, getSparkCampaignAccounts } from '../../api/spark';
+import { useAuthStore } from '../../stores/auth';
+
+const auth = useAuthStore();
 
 const rand = (seed) => {
   const x = Math.sin(seed * 127.1) * 43758.5453;
@@ -97,10 +126,15 @@ const model = ref(undefined);
 const keyword = ref('');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);
 const loading = ref(false);
+const mode = ref('loading'); // 'loading' | 'real' | 'demo'
+const page = ref(1);
+const metric = ref('fee');
+const realTotal = ref(0);
+const summaryData = ref(null);
 
 const modelOptions = MODELS.map((m) => ({ value: m, label: m }));
 
-const list = ref(
+const demoList = ref(
   Array.from({ length: 14 }, (_, i) => {
     const acc = ACCOUNTS[i % ACCOUNTS.length];
     const mdl = MODELS[Math.floor(rand(i + 1) * MODELS.length)];
@@ -132,8 +166,10 @@ const list = ref(
   }),
 );
 
+const realList = ref([]);
+
 const filteredList = computed(() =>
-  list.value.filter((r) => {
+  demoList.value.filter((r) => {
     if (model.value && r.model !== model.value) return false;
     if (keyword.value) {
       const kw = keyword.value.trim();
@@ -143,14 +179,35 @@ const filteredList = computed(() =>
   }),
 );
 
+const tableRows = computed(() =>
+  mode.value === 'real' ? realList.value : filteredList.value.slice((page.value - 1) * 10, page.value * 10),
+);
+const tableTotal = computed(() =>
+  mode.value === 'real' ? realTotal.value : filteredList.value.length,
+);
+
 const maxCost = computed(() =>
-  filteredList.value.reduce((mx, r) => Math.max(mx, r.cost), 1),
+  tableRows.value.reduce((mx, r) => Math.max(mx, Number(r.cost ?? r.fee ?? 0)), 1),
 );
 
 const sum = (f) => filteredList.value.reduce((acc, r) => acc + f(r), 0);
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
 const statCards = computed(() => {
+  if (mode.value === 'real' && summaryData.value) {
+    const s = summaryData.value.summary;
+    return [
+      { label: '投放账户数', value: fmt(s.account_num) },
+      { label: '有消耗天数', value: s.consume_days },
+      { label: '总消耗', value: `¥${fmt(s.fee)}`, cls: 'hl-blue' },
+      { label: '总曝光', value: fmt(s.impression) },
+      { label: '总点击', value: fmt(s.click) },
+      { label: '点击率', value: `${s.ctr}%` },
+      { label: '互动量', value: fmt(s.interaction) },
+      { label: '私信留资', value: fmt(s.msg_leads), cls: 'hl-green' },
+      { label: '留资成本', value: s.msg_leads ? `¥${s.msg_lead_cost}` : '-' },
+    ];
+  }
   const totalCost = sum((r) => r.cost);
   const totalLeads = sum((r) => r.pm_leads);
   return [
@@ -164,7 +221,7 @@ const statCards = computed(() => {
   ];
 });
 
-const columns = [
+const demoColumns = [
   { key: 'title', title: '视频名称 / 账号' },
   { key: 'model', title: '提及车型', width: 110 },
   { key: 'cost', title: '消耗', width: 170 },
@@ -178,12 +235,67 @@ const columns = [
   { title: '留资成本', dataIndex: 'lead_cost', width: 100 },
 ];
 
-function applyFilter() {
+const realColumns = [
+  { key: 'name', title: '账户名称 / 类型' },
+  { key: 'fee', title: '消耗', width: 170 },
+  { title: '消耗天数', dataIndex: 'consume_days', width: 90 },
+  { title: '展现量', dataIndex: 'impression', width: 100, sorter: (a, b) => a.impression - b.impression },
+  { title: '点击量', dataIndex: 'click', width: 90 },
+  { title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
+  { title: '互动量', dataIndex: 'interaction', width: 95, sorter: (a, b) => a.interaction - b.interaction },
+  { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
+  { title: '留资成本', dataIndex: 'msg_lead_cost', width: 100 },
+];
+
+function realParams(extra = {}) {
+  return {
+    brandId: auth.currentBrandId ?? 2,
+    start: range.value?.[0]?.format('YYYY-MM-DD'),
+    end: range.value?.[1]?.format('YYYY-MM-DD'),
+    ...(keyword.value ? { keyword: keyword.value.trim() } : {}),
+    ...extra,
+  };
+}
+
+async function loadReal() {
   loading.value = true;
-  setTimeout(() => {
+  try {
+    const [sumRes, listRes] = await Promise.all([
+      getSparkCampaignSummary(realParams()),
+      getSparkCampaignAccounts(realParams({ metric: metric.value, page: page.value, page_size: 10 })),
+    ]);
+    summaryData.value = sumRes;
+    realTotal.value = listRes.total ?? 0;
+    realList.value = listRes.list ?? [];
+    nextTick(renderChart);
+  } finally {
     loading.value = false;
-    renderChart();
-  }, 200);
+  }
+}
+
+function applyFilter() {
+  page.value = 1;
+  if (mode.value === 'real') loadReal();
+  else {
+    loading.value = true;
+    setTimeout(() => {
+      loading.value = false;
+      renderChart();
+    }, 200);
+  }
+}
+
+const onSearch = () => applyFilter();
+const onRangeChange = () => applyFilter();
+
+const SORT_METRIC = { click: 'click', impression: 'impression', interaction: 'interaction', msg_leads: 'msg_leads', ctr: 'fee' };
+
+function onTableChange(pag, _filters, sorter) {
+  page.value = pag.current ?? 1;
+  if (mode.value === 'real') {
+    if (sorter?.order) metric.value = SORT_METRIC[sorter.field] ?? 'fee';
+    loadReal();
+  }
 }
 
 const trendEl = ref(null);
@@ -192,11 +304,21 @@ let chart = null;
 function renderChart() {
   if (!trendEl.value) return;
   if (!chart) chart = echarts.init(trendEl.value);
-  const days = Array.from({ length: 14 }, (_, i) =>
-    dayjs().subtract(13 - i, 'day').format('MM/DD'),
-  );
-  const base = sum((r) => r.cost) / 14;
-  const baseLeads = Math.max(1, Math.round(sum((r) => r.pm_leads) / 14));
+  let days = [];
+  let feeData = [];
+  let leadsData = [];
+  if (mode.value === 'real' && summaryData.value) {
+    const trend = summaryData.value.trend ?? [];
+    days = trend.map((t) => dayjs(t.date).format('MM/DD'));
+    feeData = trend.map((t) => t.fee);
+    leadsData = trend.map((t) => t.msg_leads);
+  } else {
+    days = Array.from({ length: 14 }, (_, i) => dayjs().subtract(13 - i, 'day').format('MM/DD'));
+    const base = sum((r) => r.cost) / 14;
+    const baseLeads = Math.max(1, Math.round(sum((r) => r.pm_leads) / 14));
+    feeData = days.map((_, i) => Math.round(base * (0.6 + rand(i + 3) * 0.9)));
+    leadsData = days.map((_, i) => Math.max(1, Math.round(baseLeads * (0.5 + rand(i + 41) * 1.1))));
+  }
   chart.setOption({
     grid: { left: 48, right: 48, top: 32, bottom: 28 },
     tooltip: { trigger: 'axis' },
@@ -211,7 +333,7 @@ function renderChart() {
         name: '消耗',
         type: 'line',
         smooth: true,
-        data: days.map((_, i) => Math.round(base * (0.6 + rand(i + 3) * 0.9))),
+        data: feeData,
         itemStyle: { color: '#3456E6' },
         areaStyle: { color: 'rgba(52,86,230,0.08)' },
       },
@@ -220,7 +342,7 @@ function renderChart() {
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
-        data: days.map((_, i) => Math.max(1, Math.round(baseLeads * (0.5 + rand(i + 41) * 1.1)))),
+        data: leadsData,
         itemStyle: { color: '#16a34a' },
       },
     ],
@@ -229,9 +351,32 @@ function renderChart() {
 
 const onResize = () => chart?.resize();
 
-onMounted(() => {
-  nextTick(renderChart);
-  window.addEventListener('resize', onResize);
+onMounted(async () => {
+  loading.value = true;
+  try {
+    const probe = await getSparkCampaignSummary({
+      brandId: auth.currentBrandId ?? 2,
+      start: range.value[0].format('YYYY-MM-DD'),
+      end: range.value[1].format('YYYY-MM-DD'),
+    });
+    if ((probe.total ?? 0) > 0) {
+      mode.value = 'real';
+      summaryData.value = probe;
+      const listRes = await getSparkCampaignAccounts(
+        realParams({ metric: 'fee', page: 1, page_size: 10 }),
+      );
+      realTotal.value = listRes.total ?? 0;
+      realList.value = listRes.list ?? [];
+    } else {
+      mode.value = 'demo';
+    }
+  } catch {
+    mode.value = 'demo';
+  } finally {
+    loading.value = false;
+    nextTick(renderChart);
+    window.addEventListener('resize', onResize);
+  }
 });
 
 onBeforeUnmount(() => {

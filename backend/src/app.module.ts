@@ -13,6 +13,7 @@ import { KoxModule } from './kox/kox.module';
 import { InsightModule } from './insight/insight.module';
 import { CrmModule } from './crm/crm.module';
 import { LaiguModule } from './laigu/laigu.module';
+import { SparkModule } from './spark/spark.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { LaiguModule } from './laigu/laigu.module';
     InsightModule,
     CrmModule,
     LaiguModule,
+    SparkModule,
   ],
 })
 export class AppModule {}
