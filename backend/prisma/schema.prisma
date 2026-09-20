@@ -453,6 +453,7 @@ model KosAccount {
 
   taskRecords    KoxTaskAuthor[]
   dailyStats     KoxAccountDailyStat[]
+  notes          KoxNote[]
 
   @@index([platform])
   @@index([accountType])
@@ -460,6 +461,44 @@ model KosAccount {
   @@index([regionName])
   @@index([saleArea])
   @@index([storeName])
+}
+
+model KoxNote {
+  id           Int         @id @default(autoincrement())
+  noteId       String      @unique
+  accountId    Int?
+  account      KosAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  brandId      Int         @default(1)
+  title        String
+  content      String?
+  coverUrl     String?
+  noteUrl      String?
+  noteType     String      @default("normal")
+  publishTime  DateTime?
+  exposure     Int         @default(0)
+  views        Int         @default(0)
+  likes        Int         @default(0)
+  collects     Int         @default(0)
+  comments     Int         @default(0)
+  shares       Int         @default(0)
+  followCount  Int         @default(0)
+  pmInquiries  Int         @default(0)
+  pmOpenings   Int         @default(0)
+  pmLeads      Int         @default(0)
+  formLeads    Int         @default(0)
+  authorName   String?
+  accountType  String?
+  category     String?
+  modelTag     String?
+  keyword      String?
+  statDate     DateTime?
+  rawJson      Json?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([brandId, publishTime])
+  @@index([accountId])
+  @@index([noteType])
 }
 
 model KoxAccountDailyStat {

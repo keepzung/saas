@@ -16,7 +16,7 @@
           :options="modelOptions"
           @change="onFilterChange"
         />
-        <a-radio-group v-model:value="days" size="small" @change="regenerate">
+        <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
           <a-radio-button :value="7">近7天</a-radio-button>
           <a-radio-button :value="30">近30天</a-radio-button>
         </a-radio-group>
@@ -39,7 +39,8 @@
       </FilterTopbar>
     </template>
 
-    <NoticeBar>该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
+    <NoticeBar v-if="mode === 'demo'">该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
+    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台，每日 T+1 更新</NoticeBar>
 
     <div class="overview-blocks">
       <div v-for="b in blocks" :key="b.label" class="block-card">
@@ -81,7 +82,7 @@
           <div class="left">
             <span class="bar"></span>
             <span class="list-title">内容列表</span>
-            <span class="muted mini">共 {{ filtered.length }} 条</span>
+            <span class="muted mini">共 {{ tableTotal }} 条</span>
           </div>
           <div class="right">
             <a-button size="small" :loading="exporting" @click="exportCsv">导出明细数据</a-button>
@@ -90,17 +91,17 @@
       </template>
       <a-table
         :columns="columns"
-        :data-source="paged"
+        :data-source="tableRows"
         :loading="loading"
         :pagination="{
-          total: filtered.length,
+          total: tableTotal,
           current: page,
           pageSize: PAGE_SIZE,
           showSizeChanger: false,
           size: 'small',
         }"
         row-key="id"
-        @change="(pag) => { page = pag.current; }"
+        @change="onTableChange"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
@@ -132,6 +133,7 @@
           </div>
         </div>
       </template>
+
       <div class="violation-keyword-section">
         <div class="violation-scope-row">
           <span class="violation-keyword-label">违规关键词：</span>
@@ -228,11 +230,12 @@ import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
-import { getKoxAccounts } from '../../api/kox';
+import { getKoxAccounts, getKoxNotes, getKoxNotesSummary } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const PAGE_SIZE = 10;
+const EXPORT_ROW_CAP = 5000;
 
 const TYPES = ['车型评测', '智能科技', '用车体验', '购车指南', '维保知识', '对比测评', '场景宣传', '用车避坑', '品牌对比', '新能源知识'];
 const MODELS = ['D7', 'RX5', 'iMAX8', 'Ei5', 'RX9'];
@@ -277,15 +280,34 @@ const typeFilter = ref('全部');
 const modelFilter = ref('全部车型');
 const keyword = ref('');
 const authorKw = ref('');
+const metric = ref('views');
+const mode = ref('loading'); // 'loading' | 'real' | 'demo'
+const realTotal = ref(0);
+const realFacets = ref({ categories: [], models: [] });
+const summaryData = ref(null);
 
-const typeOptions = [
-  { value: '全部', label: '全部类型' },
-  ...TYPES.map((t) => ({ value: t, label: t })),
-];
-const modelOptions = [
-  { value: '全部车型', label: '全部车型' },
-  ...MODELS.map((m) => ({ value: m, label: m })),
-];
+const typeOptions = computed(() =>
+  mode.value === 'real'
+    ? [
+        { value: '全部', label: '全部类型' },
+        ...realFacets.value.categories.map((t) => ({ value: t, label: t })),
+      ]
+    : [
+        { value: '全部', label: '全部类型' },
+        ...TYPES.map((t) => ({ value: t, label: t })),
+      ],
+);
+const modelOptions = computed(() =>
+  mode.value === 'real'
+    ? [
+        { value: '全部车型', label: '全部车型' },
+        ...realFacets.value.models.map((m) => ({ value: m, label: m })),
+      ]
+    : [
+        { value: '全部车型', label: '全部车型' },
+        ...MODELS.map((m) => ({ value: m, label: m })),
+      ],
+);
 
 const columns = [
   { key: 'title', title: '标题', width: 300 },
@@ -315,6 +337,19 @@ const fmt = (v) => {
 };
 
 const blocks = computed(() => {
+  if (mode.value === 'real' && summaryData.value) {
+    const t = summaryData.value.totals;
+    return [
+      { label: '内容数', value: fmt(t.note_cnt) },
+      { label: '互动量', value: fmt(t.interaction_sum) },
+      { label: '获得关注数', value: fmt(t.follow_sum) },
+      { label: '阅读数', value: fmt(t.view_sum) },
+      { label: '曝光量', value: fmt(t.exposure_sum) },
+      { label: '私信进线数', value: fmt(t.pm_inquiries_sum) },
+      { label: '私信开口数', value: fmt(t.pm_openings_sum) },
+      { label: '私信留资数', value: fmt(t.pm_leads_sum) },
+    ];
+  }
   const list = filtered.value;
   const sum = (k) => list.reduce((s, n) => s + Number(n[k] ?? 0), 0);
   return [
@@ -329,27 +364,42 @@ const blocks = computed(() => {
   ];
 });
 
-const filtered = computed(() =>
-  notes.value.filter((n) => {
+const filtered = computed(() => {
+  if (mode.value === 'real') return notes.value;
+  return notes.value.filter((n) => {
     if (typeFilter.value !== '全部' && n.type !== typeFilter.value) return false;
     if (modelFilter.value !== '全部车型' && n.model !== modelFilter.value) return false;
     if (keyword.value && !n.title.includes(keyword.value)) return false;
     if (authorKw.value && !n.author.includes(authorKw.value)) return false;
     return true;
-  }),
-);
+  });
+});
 
 const paged = computed(() => {
   const start = (page.value - 1) * PAGE_SIZE;
   return filtered.value.slice(start, start + PAGE_SIZE);
 });
 
+const tableRows = computed(() => (mode.value === 'real' ? notes.value : paged.value));
+const tableTotal = computed(() =>
+  mode.value === 'real' ? realTotal.value : filtered.value.length,
+);
+
 const wordCloud = computed(() => {
+  const colors = ['#5087ec', '#f28e2b', '#36b37e', '#9b5de5'];
+  if (mode.value === 'real' && summaryData.value) {
+    const kws = summaryData.value.keywords ?? [];
+    const max = Math.max(1, ...kws.map((w) => w.count));
+    return kws.map((w, i) => ({
+      text: w.text,
+      size: 12 + Math.round((w.count / max) * 18),
+      color: colors[i % colors.length],
+    }));
+  }
   const freq = new Map();
   for (const n of notes.value) {
     for (const w of [n.keyword, n.type]) freq.set(w, (freq.get(w) ?? 0) + 1);
   }
-  const colors = ['#5087ec', '#f28e2b', '#36b37e', '#9b5de5'];
   const max = Math.max(1, ...freq.values());
   return [...freq.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -369,16 +419,31 @@ let pieChart = null;
 function renderCharts() {
   if (typeEffEl.value) {
     if (!typeChart) typeChart = echarts.init(typeEffEl.value);
-    const byType = new Map();
-    for (const n of filtered.value) {
-      const cur = byType.get(n.type) ?? { inter: 0, leads: 0 };
-      cur.inter += n.digg + n.comment;
-      cur.leads += n.formLeads;
-      byType.set(n.type, cur);
+    let types = [];
+    let interData = [];
+    let leadsData = [];
+    if (mode.value === 'real' && summaryData.value) {
+      const eff = summaryData.value.type_efficiency ?? [];
+      const totalInter = Math.max(1, eff.reduce((s, v) => s + v.inter, 0));
+      const totalLeads = Math.max(1, eff.reduce((s, v) => s + v.leads, 0));
+      types = eff.map((e) => e.category);
+      interData = eff.map((e) => Math.round((e.inter / totalInter) * 100));
+      leadsData = eff.map((e) => Math.round((e.leads / totalLeads) * 100));
+    } else {
+      const byType = new Map();
+      for (const n of filtered.value) {
+        const cur = byType.get(n.type) ?? { inter: 0, leads: 0 };
+        cur.inter += n.digg + n.comment;
+        cur.leads += n.formLeads;
+        byType.set(n.type, cur);
+      }
+      const eff = [...byType.entries()];
+      const totalInter = Math.max(1, eff.reduce((s, [, v]) => s + v.inter, 0));
+      const totalLeads = Math.max(1, eff.reduce((s, [, v]) => s + v.leads, 0));
+      types = eff.map(([t]) => t);
+      interData = eff.map(([, v]) => Math.round((v.inter / totalInter) * 100));
+      leadsData = eff.map(([, v]) => Math.round((v.leads / totalLeads) * 100));
     }
-    const types = [...byType.keys()];
-    const totalInter = Math.max(1, [...byType.values()].reduce((s, v) => s + v.inter, 0));
-    const totalLeads = Math.max(1, [...byType.values()].reduce((s, v) => s + v.leads, 0));
     typeChart.setOption({
       tooltip: { trigger: 'axis', valueFormatter: (v) => `${v}%` },
       legend: { data: ['互动量占比', '获取线索占比'] },
@@ -390,14 +455,14 @@ function renderCharts() {
           name: '互动量占比',
           type: 'bar',
           stack: 'x',
-          data: types.map((t) => Math.round((byType.get(t).inter / totalInter) * 100)),
+          data: interData,
           itemStyle: { color: '#5087ec' },
           barMaxWidth: 14,
         },
         {
           name: '获取线索占比',
           type: 'bar',
-          data: types.map((t) => Math.round((byType.get(t).leads / totalLeads) * 100)),
+          data: leadsData,
           itemStyle: { color: '#36b37e' },
           barMaxWidth: 14,
         },
@@ -406,8 +471,17 @@ function renderCharts() {
   }
   if (modelPieEl.value) {
     if (!pieChart) pieChart = echarts.init(modelPieEl.value);
-    const byModel = new Map();
-    for (const n of filtered.value) byModel.set(n.model, (byModel.get(n.model) ?? 0) + 1);
+    let pieData = [];
+    if (mode.value === 'real' && summaryData.value) {
+      pieData = (summaryData.value.model_distribution ?? []).map((m) => ({
+        name: m.model,
+        value: m.cnt,
+      }));
+    } else {
+      const byModel = new Map();
+      for (const n of filtered.value) byModel.set(n.model, (byModel.get(n.model) ?? 0) + 1);
+      pieData = [...byModel.entries()].map(([name, value]) => ({ name, value }));
+    }
     pieChart.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c}篇 ({d}%)' },
       legend: { orient: 'vertical', right: 10, top: 'center' },
@@ -416,7 +490,7 @@ function renderCharts() {
           type: 'pie',
           radius: ['38%', '66%'],
           center: ['38%', '50%'],
-          data: [...byModel.entries()].map(([name, value]) => ({ name, value })),
+          data: pieData,
           label: { show: false },
           itemStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -475,15 +549,115 @@ function regenerate() {
   nextTick(renderCharts);
 }
 
+function realParams(extra = {}) {
+  return {
+    brandId: auth.currentBrandId ?? undefined,
+    start: dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
+    end: dayjs().format('YYYY-MM-DD'),
+    ...(typeFilter.value !== '全部' ? { category: typeFilter.value } : {}),
+    ...(modelFilter.value !== '全部车型' ? { modelTag: modelFilter.value } : {}),
+    ...(keyword.value ? { keyword: keyword.value } : {}),
+    ...(authorKw.value ? { author: authorKw.value } : {}),
+    ...extra,
+  };
+}
+
+function mapRealRow(n) {
+  return {
+    id: n.id,
+    title: n.title,
+    body: n.content || '',
+    author: n.author_name || '-',
+    accountType: n.account_type || 'KOS',
+    type: n.category || '未分类',
+    model: n.model_tag || '未提及',
+    keyword: n.category || '',
+    cover: n.cover_url || `/images/kox-notes/note${(n.id % 5) + 1}.webp`,
+    noteUrl: n.note_url,
+    publishTime: n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '-',
+    digg: n.likes,
+    comment: n.comments,
+    share: n.shares,
+    collect: n.collects,
+    view: n.views,
+    exposure: n.exposure,
+    formLeads: n.form_leads,
+    follow: n.follow_count,
+    pmIn: n.pm_inquiries,
+    pmOpen: n.pm_openings,
+    pmLeads: n.pm_leads,
+  };
+}
+
+async function loadReal({ fetchSummary = true } = {}) {
+  loading.value = true;
+  try {
+    const [listRes, sumRes] = await Promise.all([
+      getKoxNotes(
+        realParams({ metric: metric.value, page: page.value, page_size: PAGE_SIZE }),
+      ),
+      fetchSummary ? getKoxNotesSummary(realParams()) : Promise.resolve(null),
+    ]);
+    realTotal.value = listRes.total ?? 0;
+    realFacets.value = {
+      categories: listRes.category_facets ?? [],
+      models: listRes.model_facets ?? [],
+    };
+    if (sumRes) summaryData.value = sumRes;
+    notes.value = (listRes.list ?? []).map(mapRealRow);
+    nextTick(renderCharts);
+  } catch {
+    message.error('加载笔记数据失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function fetchAllRealRows() {
+  const all = [];
+  let p = 1;
+  while (all.length < EXPORT_ROW_CAP) {
+    const res = await getKoxNotes(
+      realParams({ metric: metric.value, page: p, page_size: 500 }),
+    );
+    const list = res.list ?? [];
+    all.push(...list);
+    if (!list.length || all.length >= (res.total ?? 0)) break;
+    p += 1;
+  }
+  return all.slice(0, EXPORT_ROW_CAP);
+}
+
+function onDaysChange() {
+  page.value = 1;
+  if (mode.value === 'real') loadReal();
+  else regenerate();
+}
+
 function onFilterChange() {
   page.value = 1;
-  nextTick(renderCharts);
+  if (mode.value === 'real') loadReal();
+  else nextTick(renderCharts);
+}
+
+const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads' };
+
+function onTableChange(pag, _filters, sorter) {
+  page.value = pag.current ?? 1;
+  if (mode.value === 'real') {
+    metric.value = sorter?.order ? SORT_METRIC[sorter.field] ?? 'views' : 'views';
+    loadReal({ fetchSummary: false });
+  }
 }
 
 const detailOpen = ref(false);
 const detail = ref(null);
 
 function showDetail(row) {
+  if (row.noteUrl) {
+    window.open(row.noteUrl, '_blank');
+    return;
+  }
   detail.value = row;
   detailOpen.value = true;
 }
@@ -494,10 +668,30 @@ async function exportCsv() {
   exporting.value = true;
   try {
     const head = ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
-    const rows = filtered.value.map((n) => [
-      n.title, n.author, n.type, n.model, n.accountType,
-      n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.formLeads, n.publishTime,
-    ]);
+    let rows;
+    if (mode.value === 'real') {
+      const raw = await fetchAllRealRows();
+      rows = raw.map((n) => [
+        n.title,
+        n.author_name,
+        n.category ?? '',
+        n.model_tag ?? '',
+        n.account_type ?? '',
+        n.likes,
+        n.comments,
+        n.shares,
+        n.collects,
+        n.views,
+        n.exposure,
+        n.form_leads,
+        n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
+      ]);
+    } else {
+      rows = filtered.value.map((n) => [
+        n.title, n.author, n.type, n.model, n.accountType,
+        n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.formLeads, n.publishTime,
+      ]);
+    }
     const csv = [head, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
       .join('\n');
@@ -523,7 +717,7 @@ const detected = ref(false);
 const detectError = ref('');
 const detection = ref({ total: 0, bad: 0, good: 0, rate: 0, rows: [] });
 
-function detect() {
+async function detect() {
   const kws = violationKw.value.split('/').map((s) => s.trim()).filter(Boolean);
   if (!kws.length) {
     detectError.value = '请输入违规关键词后点击「开始检测」';
@@ -537,9 +731,10 @@ function detect() {
   }
   detectError.value = '';
   detecting.value = true;
-  setTimeout(() => {
+
+  const run = (pool) => {
     const rows = [];
-    for (const n of filtered.value) {
+    for (const n of pool) {
       const hits = [];
       const positions = [];
       if (scopeTitle.value) {
@@ -567,7 +762,7 @@ function detect() {
         });
       }
     }
-    const total = filtered.value.length;
+    const total = pool.length;
     detection.value = {
       total,
       bad: rows.length,
@@ -577,7 +772,19 @@ function detect() {
     };
     detected.value = true;
     detecting.value = false;
-  }, 600);
+  };
+
+  if (mode.value === 'real') {
+    try {
+      const raw = await fetchAllRealRows();
+      run(raw.map(mapRealRow));
+    } catch {
+      message.error('检测失败，请稍后重试');
+      detecting.value = false;
+    }
+  } else {
+    setTimeout(() => run(filtered.value), 600);
+  }
 }
 
 async function loadAccounts() {
@@ -599,10 +806,33 @@ function onResize() {
 
 onMounted(async () => {
   loading.value = true;
-  await loadAccounts();
-  regenerate();
-  loading.value = false;
-  window.addEventListener('resize', onResize);
+  try {
+    const probe = await getKoxNotes(
+      realParams({ metric: 'views', page: 1, page_size: PAGE_SIZE }),
+    );
+    if ((probe.total ?? 0) > 0) {
+      mode.value = 'real';
+      realTotal.value = probe.total ?? 0;
+      realFacets.value = {
+        categories: probe.category_facets ?? [],
+        models: probe.model_facets ?? [],
+      };
+      notes.value = (probe.list ?? []).map(mapRealRow);
+      summaryData.value = await getKoxNotesSummary(realParams());
+      nextTick(renderCharts);
+    } else {
+      mode.value = 'demo';
+      await loadAccounts();
+      regenerate();
+    }
+  } catch {
+    mode.value = 'demo';
+    await loadAccounts();
+    regenerate();
+  } finally {
+    loading.value = false;
+    window.addEventListener('resize', onResize);
+  }
 });
 
 onBeforeUnmount(() => {

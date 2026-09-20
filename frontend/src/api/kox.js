@@ -30,3 +30,9 @@ export const getModelSales = (params) =>
 
 export const getKoxRanking = (params) =>
   request.get('/kox/ranking', { params });
+
+export const getKoxNotes = (params) =>
+  request.get('/kox/notes', { params });
+
+export const getKoxNotesSummary = (params) =>
+  request.get('/kox/notes/summary', { params });

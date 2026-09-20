@@ -92,6 +92,43 @@ export class KoxController {
     return this.koxService.ranking(query);
   }
 
+  @Get('kox/notes')
+  notes(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      noteType?: string;
+      category?: string;
+      modelTag?: string;
+      keyword?: string;
+      author?: string;
+      metric?: string;
+      page?: string;
+      page_size?: string;
+    },
+  ) {
+    return this.koxService.notes(query);
+  }
+
+  @Get('kox/notes/summary')
+  notesSummary(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      noteType?: string;
+      category?: string;
+      modelTag?: string;
+      keyword?: string;
+      author?: string;
+    },
+  ) {
+    return this.koxService.notesSummary(query);
+  }
+
   @Get('kox/tasks')
   tasks(@Query() query: { page?: string; page_size?: string; status?: string }) {
     return this.koxService.tasks(query);

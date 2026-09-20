@@ -1,0 +1,13 @@
+{
+  "name": "spark-explorer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "小红书星火平台 (mcc.xiaohongshu.com) 数据探测与采集工具",
+  "scripts": {
+    "explore": "node explore.cjs",
+    "login": "node login.cjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

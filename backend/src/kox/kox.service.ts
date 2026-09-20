@@ -780,6 +780,213 @@ export class KoxService {
     };
   }
 
+  private noteFilters(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    noteType?: string;
+    category?: string;
+    modelTag?: string;
+    keyword?: string;
+    author?: string;
+  }): { where: Prisma.KoxNoteWhereInput; base: Prisma.KoxNoteWhereInput; start: Date; end: Date } {
+    const end = query.end ? new Date(query.end) : new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = query.start
+      ? new Date(query.start)
+      : new Date(end.getTime() - 29 * 86400000);
+    start.setHours(0, 0, 0, 0);
+
+    const base: Prisma.KoxNoteWhereInput = {
+      publishTime: { gte: start, lte: end },
+      ...(query.brandId ? { brandId: Number(query.brandId) } : {}),
+    };
+    const where: Prisma.KoxNoteWhereInput = { ...base };
+    if (query.noteType) where.noteType = query.noteType;
+    if (query.category) where.category = query.category;
+    if (query.modelTag) where.modelTag = query.modelTag;
+    if (query.keyword)
+      where.title = { contains: query.keyword, mode: 'insensitive' };
+    if (query.author)
+      where.OR = [
+        { authorName: { contains: query.author, mode: 'insensitive' } },
+        { account: { nickname: { contains: query.author, mode: 'insensitive' } } },
+      ];
+    return { where, base, start, end };
+  }
+
+  async notes(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    noteType?: string;
+    category?: string;
+    modelTag?: string;
+    keyword?: string;
+    author?: string;
+    metric?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const { where, base } = this.noteFilters(query);
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(500, Math.max(1, Number(query.page_size ?? 20) || 20));
+
+    const METRICS: Record<string, Prisma.KoxNoteOrderByWithRelationInput> = {
+      views: { views: 'desc' },
+      likes: { likes: 'desc' },
+      comments: { comments: 'desc' },
+      shares: { shares: 'desc' },
+      collects: { collects: 'desc' },
+      exposure: { exposure: 'desc' },
+      formLeads: { formLeads: 'desc' },
+      pmLeads: { pmLeads: 'desc' },
+      publishTime: { publishTime: 'desc' },
+    };
+    const orderBy = METRICS[query.metric ?? ''] ?? METRICS.views;
+
+    const [total, rows, categoryFacets, modelFacets] = await Promise.all([
+      this.prisma.koxNote.count({ where }),
+      this.prisma.koxNote.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          account: {
+            select: { nickname: true, accountType: true, storeName: true },
+          },
+        },
+      }),
+      this.prisma.koxNote.groupBy({ by: ['category'], where: base }),
+      this.prisma.koxNote.groupBy({ by: ['modelTag'], where: base }),
+    ]);
+
+    return {
+      list: rows.map((n) => ({
+        id: n.id,
+        note_id: n.noteId,
+        note_type: n.noteType,
+        title: n.title,
+        content: n.content,
+        cover_url: n.coverUrl,
+        note_url: n.noteUrl,
+        publish_time: n.publishTime,
+        author_name: n.account?.nickname ?? n.authorName ?? '-',
+        account_type: n.account?.accountType ?? n.accountType ?? 'KOS',
+        store_name: n.account?.storeName ?? null,
+        category: n.category,
+        model_tag: n.modelTag,
+        exposure: n.exposure,
+        views: n.views,
+        likes: n.likes,
+        collects: n.collects,
+        comments: n.comments,
+        shares: n.shares,
+        follow_count: n.followCount,
+        pm_inquiries: n.pmInquiries,
+        pm_openings: n.pmOpenings,
+        pm_leads: n.pmLeads,
+        form_leads: n.formLeads,
+      })),
+      total,
+      page,
+      page_size: pageSize,
+      category_facets: categoryFacets
+        .map((g) => g.category)
+        .filter((c): c is string => !!c),
+      model_facets: modelFacets
+        .map((g) => g.modelTag)
+        .filter((m): m is string => !!m),
+    };
+  }
+
+  async notesSummary(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    noteType?: string;
+    category?: string;
+    modelTag?: string;
+    keyword?: string;
+    author?: string;
+  }) {
+    const { where } = this.noteFilters(query);
+    const rows = await this.prisma.koxNote.findMany({
+      where,
+      select: {
+        likes: true,
+        comments: true,
+        formLeads: true,
+        followCount: true,
+        views: true,
+        exposure: true,
+        pmInquiries: true,
+        pmOpenings: true,
+        pmLeads: true,
+        category: true,
+        modelTag: true,
+        keyword: true,
+      },
+    });
+
+    const totals = rows.reduce(
+      (acc, n) => ({
+        note_cnt: acc.note_cnt + 1,
+        interaction_sum: acc.interaction_sum + n.likes + n.comments,
+        follow_sum: acc.follow_sum + n.followCount,
+        view_sum: acc.view_sum + n.views,
+        exposure_sum: acc.exposure_sum + n.exposure,
+        pm_inquiries_sum: acc.pm_inquiries_sum + n.pmInquiries,
+        pm_openings_sum: acc.pm_openings_sum + n.pmOpenings,
+        pm_leads_sum: acc.pm_leads_sum + n.pmLeads,
+      }),
+      {
+        note_cnt: 0,
+        interaction_sum: 0,
+        follow_sum: 0,
+        view_sum: 0,
+        exposure_sum: 0,
+        pm_inquiries_sum: 0,
+        pm_openings_sum: 0,
+        pm_leads_sum: 0,
+      },
+    );
+
+    const byCategory = new Map<string, { inter: number; leads: number }>();
+    const byModel = new Map<string, number>();
+    const kwFreq = new Map<string, number>();
+    for (const n of rows) {
+      const cat = n.category ?? '未分类';
+      const cur = byCategory.get(cat) ?? { inter: 0, leads: 0 };
+      cur.inter += n.likes + n.comments;
+      cur.leads += n.formLeads;
+      byCategory.set(cat, cur);
+
+      const model = n.modelTag ?? '未提及';
+      byModel.set(model, (byModel.get(model) ?? 0) + 1);
+
+      const kw = n.keyword ?? n.modelTag ?? n.category;
+      if (kw) kwFreq.set(kw, (kwFreq.get(kw) ?? 0) + 1);
+    }
+
+    return {
+      totals,
+      type_efficiency: [...byCategory.entries()].map(([category, v]) => ({
+        category,
+        inter: v.inter,
+        leads: v.leads,
+      })),
+      model_distribution: [...byModel.entries()]
+        .map(([model, cnt]) => ({ model, cnt }))
+        .sort((a, b) => b.cnt - a.cnt),
+      keywords: [...kwFreq.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 42)
+        .map(([text, count]) => ({ text, count })),
+    };
+  }
+
   async importAccounts(rows: ImportAccountRow[]) {
     let added = 0;
     let updated = 0;
