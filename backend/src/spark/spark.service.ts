@@ -641,4 +641,140 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('星火 cookie 已运行时更新（注意：重启后将恢复为 .env 配置）');
     return { ok: true };
   }
+
+  /** 项目报表列表：周期 × 关联账户自动聚合投放数据 */
+  async projects(query: { brandId?: string; keyword?: string }) {
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const projects = await this.prisma.koxCampaignProject.findMany({
+      where: {
+        brandId,
+        ...(query.keyword ? { name: { contains: query.keyword } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        createdBy: { select: { nickname: true, name: true, phone: true } },
+        accounts: { select: { virtualSellerId: true } },
+      },
+    });
+
+    const list = await Promise.all(
+      projects.map(async (p) => {
+        const sellerIds = p.accounts.map((a) => a.virtualSellerId);
+        const start = new Date(p.startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(p.endDate);
+        end.setHours(23, 59, 59, 999);
+        const agg = sellerIds.length
+          ? await this.prisma.koxCampaignDailyStat.aggregate({
+              where: {
+                statDate: { gte: start, lte: end },
+                brandId,
+                virtualSellerId: { in: sellerIds },
+              },
+              _sum: {
+                fee: true,
+                impression: true,
+                click: true,
+                interaction: true,
+                msgLeadsNum: true,
+              },
+            })
+          : null;
+        const fee = Number(agg?._sum.fee ?? 0);
+        const impression = agg?._sum.impression ?? 0;
+        const click = agg?._sum.click ?? 0;
+        const msgLeads = agg?._sum.msgLeadsNum ?? 0;
+        const budget = p.budget != null ? Number(p.budget) : null;
+        return {
+          id: p.id,
+          name: p.name,
+          remark: p.remark,
+          period: `${p.startDate.toISOString().slice(0, 10)} ~ ${p.endDate.toISOString().slice(0, 10)}`,
+          start_date: p.startDate.toISOString().slice(0, 10),
+          end_date: p.endDate.toISOString().slice(0, 10),
+          account_num: sellerIds.length,
+          budget,
+          fee: Math.round(fee * 100) / 100,
+          budget_rate: budget ? Math.round((fee / budget) * 1000) / 10 : null,
+          impression,
+          click,
+          ctr: impression ? Math.round((click / impression) * 10000) / 100 : 0,
+          interaction: agg?._sum.interaction ?? 0,
+          msg_leads: msgLeads,
+          msg_lead_cost: msgLeads ? Math.round((fee / msgLeads) * 10) / 10 : 0,
+          created_by:
+            p.createdBy?.nickname ?? p.createdBy?.name ?? p.createdBy?.phone ?? '-',
+          created_at: p.createdAt,
+        };
+      }),
+    );
+
+    const totalBudget = list.reduce((a, p) => a + (p.budget ?? 0), 0);
+    const totalFee = list.reduce((a, p) => a + p.fee, 0);
+    return {
+      total: list.length,
+      summary: {
+        project_num: list.length,
+        budget_total: Math.round(totalBudget * 100) / 100,
+        fee_total: Math.round(totalFee * 100) / 100,
+        budget_rate: totalBudget
+          ? Math.round((totalFee / totalBudget) * 1000) / 10
+          : 0,
+        msg_leads_total: list.reduce((a, p) => a + p.msg_leads, 0),
+      },
+      list,
+    };
+  }
+
+  async createProject(
+    dto: {
+      name?: string;
+      startDate?: string;
+      endDate?: string;
+      budget?: number;
+      remark?: string;
+      virtualSellerIds?: string[];
+    },
+    userId: number,
+    brandId?: string,
+  ) {
+    const name = (dto?.name ?? '').trim();
+    if (!name) throw new Error('请填写项目名称');
+    const start = dto?.startDate ? new Date(dto.startDate) : null;
+    const end = dto?.endDate ? new Date(dto.endDate) : null;
+    if (!start || Number.isNaN(start.getTime())) throw new Error('请选择项目开始日期');
+    if (!end || Number.isNaN(end.getTime())) throw new Error('请选择项目结束日期');
+    if (end < start) throw new Error('结束日期不能早于开始日期');
+    const ids = [...new Set(dto?.virtualSellerIds ?? [])];
+    if (!ids.length) throw new Error('请至少关联一个投放账户');
+
+    const known = await this.prisma.sparkAccount.findMany({
+      where: { virtualSellerId: { in: ids } },
+      select: { virtualSellerId: true },
+    });
+    if (known.length !== ids.length) {
+      throw new Error(`存在无效的投放账户（${ids.length - known.length} 个不在星火账户列表中）`);
+    }
+
+    const project = await this.prisma.koxCampaignProject.create({
+      data: {
+        name,
+        startDate: start,
+        endDate: end,
+        budget: dto?.budget != null && dto.budget > 0 ? dto.budget : null,
+        remark: (dto?.remark ?? '').trim() || null,
+        brandId: brandId ? Number(brandId) : SPARK_BRAND_ID,
+        createdById: userId,
+        accounts: { create: ids.map((virtualSellerId) => ({ virtualSellerId })) },
+      },
+    });
+    return { id: project.id };
+  }
+
+  async deleteProject(id: number) {
+    const existing = await this.prisma.koxCampaignProject.findUnique({ where: { id } });
+    if (!existing) throw new Error('项目不存在');
+    await this.prisma.koxCampaignProject.delete({ where: { id } });
+    return { id };
+  }
 }

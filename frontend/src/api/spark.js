@@ -14,3 +14,12 @@ export const getSparkCampaignAccounts = (params) =>
 
 export const getSparkAccounts = (params) =>
   request.get('/spark/accounts', { params });
+
+export const getSparkProjects = (params) =>
+  request.get('/spark/projects', { params });
+
+export const createSparkProject = (data, brandId) =>
+  request.post('/spark/projects', data, { params: brandId ? { brandId } : {} });
+
+export const deleteSparkProject = (id) =>
+  request.delete(`/spark/projects/${id}`);

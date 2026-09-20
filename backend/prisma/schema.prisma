@@ -79,6 +79,7 @@ model User {
   kolReviews     KolReview[]    @relation("KolReviewOperator")
   kolLogs        KolLog[]       @relation("KolLogOperator")
   koxTasksCreated KoxTask[]     @relation("KoxTaskCreator")
+  campaignProjects KoxCampaignProject[] @relation("CampaignProjectCreator")
 
   @@index([role])
   @@index([companyId])
@@ -667,6 +668,33 @@ model SparkSyncLog {
   createdAt       DateTime @default(now())
 
   @@index([syncType, createdAt])
+}
+
+model KoxCampaignProject {
+  id          Int       @id @default(autoincrement())
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  budget      Decimal?  @db.Decimal(14, 2)
+  remark      String?
+  brandId     Int       @default(2)
+  createdById Int
+  createdBy   User      @relation("CampaignProjectCreator", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  accounts    KoxCampaignProjectAccount[]
+
+  @@index([brandId])
+}
+
+model KoxCampaignProjectAccount {
+  id              Int    @id @default(autoincrement())
+  projectId       Int
+  project         KoxCampaignProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  virtualSellerId String
+
+  @@unique([projectId, virtualSellerId])
+  @@index([virtualSellerId])
 }
 
 model InsightContent {

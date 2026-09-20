@@ -6,7 +6,8 @@
       </a-button>
     </template>
 
-    <NoticeBar>数据说明：当前为演示数据，聚光平台授权接入后将替换为真实项目数据。</NoticeBar>
+    <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实项目数据。</NoticeBar>
+    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新；项目消耗按「项目周期 × 关联账户」自动聚合。</NoticeBar>
 
     <div class="stat-grid">
       <div class="stat-card">
@@ -31,16 +32,17 @@
       <a-table
         :columns="columns"
         :data-source="list"
+        :loading="loading"
         :pagination="false"
         row-key="id"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'">
             <div class="c-name">{{ record.name }}</div>
-            <div class="muted small">{{ record.strategy }}</div>
+            <div class="muted small">{{ record.strategy || record.remark || (record.account_num ? `关联 ${record.account_num} 个投放账户` : '') }}</div>
           </template>
           <template v-else-if="column.key === 'budget'">
-            <div class="budget-cell">
+            <div v-if="record.budget" class="budget-cell">
               <span>¥{{ fmt(record.budget) }}</span>
               <div class="bar-track">
                 <div
@@ -51,9 +53,16 @@
               </div>
               <span class="muted small">{{ ((record.cost / record.budget) * 100).toFixed(0) }}%</span>
             </div>
+            <div v-else class="budget-cell">
+              <span class="muted small">未设预算</span>
+              <div class="bar-track">
+                <div class="bar-fill" :style="{ width: '0%' }" />
+              </div>
+              <span class="muted small">¥{{ fmt(record.cost) }} 已消耗</span>
+            </div>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <a-popconfirm title="确认删除该项目？" @confirm="removeItem(record)">
+            <a-popconfirm :title="`确认删除项目「${record.name}」？`" @confirm="removeItem(record)">
               <a-button type="link" size="small" danger>删除</a-button>
             </a-popconfirm>
           </template>
@@ -71,8 +80,11 @@ import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
+import { getSparkProjects, deleteSparkProject } from '../../api/spark';
+import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
+const auth = useAuthStore();
 
 const rand = (seed) => {
   const x = Math.sin(seed * 311.7) * 43758.5453;
@@ -97,17 +109,23 @@ const genItem = (i) => {
     clicks,
     interactions,
     ctr: ((clicks / impressions) * 100).toFixed(2),
-    cpc: (cost / clicks).toFixed(1),
-    cpm: (cost / (impressions / 1000)).toFixed(1),
     pm_leads: pmLeads,
     lead_cost: pmLeads ? (cost / pmLeads).toFixed(1) : '-',
   };
 };
 
-const list = ref(Array.from({ length: 6 }, (_, i) => genItem(i)));
+const mode = ref('loading'); // 'loading' | 'real' | 'demo'
+const loading = ref(false);
+const list = ref([]);
 
-const totalBudget = computed(() => list.value.reduce((a, r) => a + r.budget, 0));
-const totalCost = computed(() => list.value.reduce((a, r) => a + r.cost, 0));
+const demoList = ref(Array.from({ length: 6 }, (_, i) => genItem(i)));
+
+const totalBudget = computed(() =>
+  list.value.reduce((a, r) => a + (r.budget ?? 0), 0),
+);
+const totalCost = computed(() =>
+  list.value.reduce((a, r) => a + (r.cost ?? r.fee ?? 0), 0),
+);
 const budgetRate = computed(() =>
   totalBudget.value ? ((totalCost.value / totalBudget.value) * 100).toFixed(1) : 0,
 );
@@ -115,7 +133,7 @@ const budgetRate = computed(() =>
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
 const columns = [
-  { key: 'name', title: '项目名称 / 投流策略' },
+  { key: 'name', title: '项目名称' },
   { title: '项目周期', dataIndex: 'period', width: 200 },
   { key: 'budget', title: '预算 / 消耗', width: 180 },
   { title: '展现量', dataIndex: 'impressions', width: 100, sorter: (a, b) => a.impressions - b.impressions },
@@ -127,9 +145,57 @@ const columns = [
   { key: 'actions', title: '操作', width: 80 },
 ];
 
-function removeItem(record) {
-  list.value = list.value.filter((r) => r.id !== record.id);
-  message.success(`项目「${record.name}」已删除（演示）`);
+async function load() {
+  loading.value = true;
+  try {
+    const res = await getSparkProjects({
+      brandId: auth.currentBrandId ?? 2,
+    });
+    if ((res.total ?? 0) > 0) {
+      mode.value = 'real';
+      list.value = (res.list ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        remark: p.remark,
+        account_num: p.account_num,
+        period: p.period,
+        budget: p.budget,
+        cost: p.fee,
+        impressions: p.impression,
+        clicks: p.click,
+        ctr: p.ctr ? `${p.ctr}%` : '0',
+        interactions: p.interaction,
+        pm_leads: p.msg_leads,
+        lead_cost: p.msg_leads ? p.msg_lead_cost : '-',
+        created_by: p.created_by,
+      }));
+    } else {
+      mode.value = 'demo';
+      list.value = demoList.value;
+    }
+  } catch {
+    mode.value = 'demo';
+    list.value = demoList.value;
+  } finally {
+    loading.value = false;
+  }
+}
+load();
+
+async function removeItem(record) {
+  if (mode.value === 'real') {
+    try {
+      await deleteSparkProject(record.id);
+      message.success(`项目「${record.name}」已删除`);
+      await load();
+    } catch {
+      message.error('删除失败，请稍后重试');
+    }
+  } else {
+    demoList.value = demoList.value.filter((r) => r.id !== record.id);
+    list.value = demoList.value;
+    message.success(`项目「${record.name}」已删除（演示）`);
+  }
 }
 
 function goAdd() {

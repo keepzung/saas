@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SparkService } from './spark.service';
 
@@ -65,5 +66,25 @@ export class SparkController {
       throw new Error('cookie 不能为空');
     }
     return this.sparkService.updateCookie(dto.cookie.trim());
+  }
+
+  @Get('spark/projects')
+  projects(@Query() query: { brandId?: string; keyword?: string }) {
+    return this.sparkService.projects(query);
+  }
+
+  @Post('spark/projects')
+  createProject(
+    @Body() dto: Record<string, unknown>,
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+  ) {
+    const user = req.user as { id: number };
+    return this.sparkService.createProject(dto as never, user.id, brandId);
+  }
+
+  @Delete('spark/projects/:id')
+  deleteProject(@Param('id', ParseIntPipe) id: number) {
+    return this.sparkService.deleteProject(id);
   }
 }
