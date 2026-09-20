@@ -8,8 +8,14 @@ export class SparkController {
   constructor(private sparkService: SparkService) {}
 
   @Post('spark/sync')
-  sync(@Body() dto: { date?: string }) {
-    return this.sparkService.syncCampaign(dto?.date);
+  sync(@Body() dto: { date?: string; type?: string }) {
+    const type = dto?.type ?? 'all';
+    if (type === 'campaign') return this.sparkService.syncCampaign(dto?.date);
+    if (type === 'notes') return this.sparkService.syncNotes(dto?.date);
+    return Promise.all([
+      this.sparkService.syncCampaign(dto?.date),
+      this.sparkService.syncNotes(dto?.date),
+    ]).then(([campaign, notes]) => ({ campaign, notes }));
   }
 
   @Get('spark/status')

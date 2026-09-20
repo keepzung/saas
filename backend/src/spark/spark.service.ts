@@ -1,11 +1,15 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 
 const RTB_PAGE_SIZE = 500;
 const MAX_PAGES = 10;
+const NOTE_PAGE_SIZE = 50;
+const NOTE_MAX_PAGES = 40;
+const NOTE_WINDOW_DAYS = 30;
 const SPARK_BRAND_ID = 2;
 
 export interface SyncResult {
@@ -60,23 +64,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return yesterday.toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   }
 
-  /** 定时入口：昨日若未同步则执行（幂等，跳过已同步日期） */
+  /** 定时入口：昨日若未同步则执行（幂等，跳过已同步日期）；投放与笔记互相独立 */
   private async safeSync() {
     try {
       const statDate = this.syncDate();
-      const done = await this.prisma.sparkSyncLog.findFirst({
-        where: { syncType: 'campaign', statDate, status: 'success' },
-      });
-      if (done) return;
-      const result = await this.syncCampaign(statDate);
-      this.logger.log(
-        `星火投放同步完成 ${statDate}：入库 ${result.upserted} 行，新增账户 ${result.accountsAdded}，移除 ${result.accountsRemoved}`,
-      );
-    } catch (error) {
-      if (error instanceof SparkCookieExpiredError) {
-        this.logger.warn(`星火定时同步跳过：${error.message}`);
-        return;
+      for (const [type, runner] of [
+        ['campaign', () => this.syncCampaign(statDate)],
+        ['notes', () => this.syncNotes(statDate)],
+      ] as const) {
+        const done = await this.prisma.sparkSyncLog.findFirst({
+          where: { syncType: type, statDate, status: 'success' },
+        });
+        if (done && !(type === 'notes' && done.fetched === 0)) continue;
+        try {
+          const result = await runner();
+          this.logger.log(
+            `星火${type} 同步完成 ${statDate}：拉取 ${result.fetched}，入库 ${result.upserted}`,
+          );
+        } catch (error) {
+          if (error instanceof SparkCookieExpiredError) {
+            this.logger.warn(`星火${type} 同步跳过：${error.message}`);
+            continue;
+          }
+          this.logger.warn(`星火${type} 同步失败: ${(error as Error).message}`);
+        }
       }
+    } catch (error) {
       this.logger.warn(`星火定时同步失败: ${(error as Error).message}`);
     }
   }
@@ -169,6 +182,124 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.syncing = false;
     }
+  }
+
+  /** 同步笔记明细（近 NOTE_WINDOW_DAYS 天累计快照 upsert 至 KoxNote，笔记排行/总览发布区块数据源） */
+  async syncNotes(date?: string): Promise<SyncResult> {
+    const statDate = date ?? this.syncDate();
+    const timeStart = new Date(
+      new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000,
+    )
+      .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+
+    const rows: Record<string, unknown>[] = [];
+    for (let pageNo = 1; pageNo <= NOTE_MAX_PAGES; pageNo += 1) {
+      const data = await this.api.noteDetailList({
+        timeStart,
+        timeEnd: statDate,
+        pageNo,
+        pageSize: NOTE_PAGE_SIZE,
+      });
+      rows.push(...data.rows);
+      if (rows.length >= data.total || !data.rows.length) break;
+    }
+
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      const s = String(v ?? '').replace(/,/g, '').trim();
+      if (!s || s === '-' || s === '--') return 0;
+      if (/万$/.test(s)) return Math.round(parseFloat(s) * 10000) || 0;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const parseDate = (v: unknown): Date | null => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') {
+        const d = new Date(v > 1e12 ? v : v * 1000);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(String(v).replace(/-/g, '/'));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: { brandId: SPARK_BRAND_ID },
+      select: { id: true, nickname: true, storeName: true, accountType: true },
+    });
+    const byNickname = new Map<string, number>();
+    const byStore = new Map<string, number>();
+    for (const a of accounts) {
+      if (a.nickname) byNickname.set(a.nickname, a.id);
+      if (a.storeName) byStore.set(a.storeName, a.id);
+    }
+
+    const day = new Date(`${statDate}T00:00:00.000Z`);
+    let upserted = 0;
+    for (const r of rows) {
+      const pick = (code: string): unknown => {
+        if (r[code] !== undefined && r[code] !== null) return r[code];
+        const list = Array.isArray(r.targetVos)
+          ? (r.targetVos as { targetCode?: string; targetValue?: unknown; value?: unknown }[])
+          : null;
+        const hit = list?.find((t) => t.targetCode === code);
+        return hit ? (hit.targetValue ?? hit.value) : undefined;
+      };
+      const title = String(pick('note_title') ?? '').trim();
+      const authorName = String(pick('author_name') ?? '').trim();
+      if (!title && !authorName) continue;
+
+      const noteIdRaw = String(pick('note_id') ?? '').trim();
+      const publishTime = parseDate(pick('note_publish_time'));
+      const noteId =
+        noteIdRaw ||
+        `spark_${createHash('md5')
+          .update(`${title}|${authorName}|${publishTime?.toISOString() ?? ''}`)
+          .digest('hex')
+          .slice(0, 24)}`;
+
+      const brandUserName = String(pick('brand_user_name') ?? '').trim() || null;
+      const accountId =
+        byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
+
+      const data = {
+        accountId,
+        brandId: SPARK_BRAND_ID,
+        title: title || '(无标题)',
+        content: null,
+        noteUrl: noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null,
+        noteType: String(pick('note_type') ?? '') === '2' ? 'video' : 'normal',
+        publishTime,
+        exposure: num(pick('imp_num')),
+        views: num(pick('read_feed_num')),
+        likes: num(pick('like_num')),
+        collects: num(pick('fav_num')),
+        comments: num(pick('cmt_num')),
+        shares: num(pick('share_num')),
+        followCount: num(pick('follow_num')),
+        authorName: authorName || null,
+        accountType: 'KOS',
+        statDate: day,
+        rawJson: r as Prisma.InputJsonValue,
+      };
+      await this.prisma.koxNote.upsert({
+        where: { noteId },
+        create: { noteId, ...data },
+        update: data,
+      });
+      upserted += 1;
+    }
+
+    const result: SyncResult = {
+      syncType: 'notes',
+      statDate,
+      status: 'success',
+      fetched: rows.length,
+      upserted,
+      accountsAdded: 0,
+      accountsRemoved: 0,
+    };
+    await this.prisma.sparkSyncLog.create({ data: result });
+    return result;
   }
 
   /** upsert SparkAccount 镜像并返回新增数；不在此轮出现的账户置 active=false */

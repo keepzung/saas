@@ -206,7 +206,11 @@ export class KoxService {
       statDate: { gte: start, lte: end },
       ...(brandId ? { brandId } : {}),
     };
-    const [rows, accountAgg, campaignRows] = await Promise.all([
+    const noteWhere: Prisma.KoxNoteWhereInput = {
+      publishTime: { gte: start, lte: end },
+      ...(brandId ? { brandId } : {}),
+    };
+    const [rows, accountAgg, campaignRows, noteRows] = await Promise.all([
       this.prisma.koxDailyStat.findMany({ where, orderBy: { statDate: 'asc' } }),
       this.prisma.kosAccount.groupBy({
         by: ['accountType'],
@@ -216,6 +220,20 @@ export class KoxService {
       this.prisma.koxCampaignDailyStat.findMany({
         where: campaignWhere,
         orderBy: { statDate: 'asc' },
+      }),
+      this.prisma.koxNote.findMany({
+        where: noteWhere,
+        select: {
+          authorName: true,
+          views: true,
+          exposure: true,
+          likes: true,
+          comments: true,
+          shares: true,
+          collects: true,
+          followCount: true,
+          publishTime: true,
+        },
       }),
     ]);
 
@@ -240,6 +258,49 @@ export class KoxService {
       accountAgg.find((g) => g.accountType === t)?._count._all ?? 0;
 
     const r2 = (v: number) => Math.round(v * 100) / 100;
+
+    // 发布区块：星火笔记明细（KoxNote）优先，无数据时回退 KoxDailyStat
+    const noteAuthors = new Set(
+      noteRows.map((n) => n.authorName).filter((a): a is string => !!a),
+    );
+    const noteSum = (f: (n: (typeof noteRows)[number]) => number) =>
+      noteRows.reduce((acc, n) => acc + f(n), 0);
+    const noteViewSum = noteSum((n) => n.views);
+    const noteExposureSum = noteSum((n) => n.exposure);
+    const noteInteractionSum = noteSum(
+      (n) => n.likes + n.comments + n.shares + n.collects,
+    );
+    const hasNotes = noteRows.length > 0;
+
+    const publish = hasNotes
+      ? {
+          author_num: noteAuthors.size,
+          item_cnt: noteRows.length,
+          crazy_item_cnt: noteRows.filter((n) => n.views >= 10000).length,
+          item_author_ratio: noteAuthors.size
+            ? r2(noteRows.length / noteAuthors.size)
+            : 0,
+          follow_count_sum: noteSum((n) => n.followCount),
+          exposure_sum: noteExposureSum,
+          view_sum: noteViewSum,
+          interaction_sum: noteInteractionSum,
+          interaction_rate: noteViewSum
+            ? r2((noteInteractionSum / noteViewSum) * 100)
+            : 0,
+          tool_item_cnt_sum: 0,
+        }
+      : {
+          author_num: authorNum,
+          item_cnt: itemCnt,
+          crazy_item_cnt: sum((r) => r.crazyItemCnt),
+          item_author_ratio: authorNum ? r2(itemCnt / authorNum) : 0,
+          follow_count_sum: sum((r) => r.followCountSum),
+          exposure_sum: exposureSum,
+          view_sum: viewSum,
+          interaction_sum: interactionSum,
+          interaction_rate: viewSum ? r2((interactionSum / viewSum) * 100) : 0,
+          tool_item_cnt_sum: sum((r) => r.toolItemCntSum),
+        };
 
     // 广告区块：星火投放真实数据（KoxCampaignDailyStat）优先，无数据时回退 KoxDailyStat
     const campaignFee = campaignRows.reduce((acc, r) => acc + Number(r.fee), 0);
@@ -281,18 +342,8 @@ export class KoxService {
       kos_num: typeCount('KOS'),
       kob_num: typeCount('KOB'),
       koc_num: typeCount('KOC'),
-      publish: {
-        author_num: authorNum,
-        item_cnt: itemCnt,
-        crazy_item_cnt: sum((r) => r.crazyItemCnt),
-        item_author_ratio: authorNum ? r2(itemCnt / authorNum) : 0,
-        follow_count_sum: sum((r) => r.followCountSum),
-        exposure_sum: exposureSum,
-        view_sum: viewSum,
-        interaction_sum: interactionSum,
-        interaction_rate: viewSum ? r2((interactionSum / viewSum) * 100) : 0,
-        tool_item_cnt_sum: sum((r) => r.toolItemCntSum),
-      },
+      publish,
+      publish_source: hasNotes ? 'spark_notes' : 'kox_daily_stat',
       lead: {
         total_pm_inquiries_sum: sum((r) => r.totalPmInquiries),
         total_pm_openings_sum: sum((r) => r.totalPmOpenings),
@@ -331,6 +382,20 @@ export class KoxService {
           const key = c.statDate.toISOString().slice(0, 10);
           feeByDate.set(key, (feeByDate.get(key) ?? 0) + Number(c.fee));
         }
+        const noteByDate = new Map<
+          string,
+          { item_cnt: number; view_sum: number; interaction_sum: number }
+        >();
+        for (const n of noteRows) {
+          if (!n.publishTime) continue;
+          const key = n.publishTime.toISOString().slice(0, 10);
+          const cur =
+            noteByDate.get(key) ?? { item_cnt: 0, view_sum: 0, interaction_sum: 0 };
+          cur.item_cnt += 1;
+          cur.view_sum += n.views;
+          cur.interaction_sum += n.likes + n.comments + n.shares + n.collects;
+          noteByDate.set(key, cur);
+        }
         const byDate = new Map<
           string,
           { item_cnt: number; view_sum: number; interaction_sum: number; total_pm_leads: number; ad_cost: number }
@@ -344,6 +409,17 @@ export class KoxService {
             total_pm_leads: r.totalPmLeads,
             ad_cost: r2(feeByDate.get(key) ?? 0),
           });
+        }
+        for (const [key, v] of noteByDate) {
+          if (!byDate.has(key)) {
+            byDate.set(key, {
+              item_cnt: v.item_cnt,
+              view_sum: v.view_sum,
+              interaction_sum: v.interaction_sum,
+              total_pm_leads: 0,
+              ad_cost: r2(feeByDate.get(key) ?? 0),
+            });
+          }
         }
         for (const [key, fee] of feeByDate) {
           if (!byDate.has(key)) {

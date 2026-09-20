@@ -157,6 +157,110 @@ export class SparkApiClient {
     );
   }
 
+  /** 笔记明细行（原始字段对象，字段名与 dynamicTargets 的 targetCode 一致） */
+  async noteDetailList(params: {
+    timeStart: string;
+    timeEnd: string;
+    pageNo: number;
+    pageSize?: number;
+  }): Promise<{ total: number; rows: Record<string, unknown>[] }> {
+    const body = {
+      viewAlias: 'mcc_assets_creativityContent_noteAnalysisView',
+      chart: 'noteList',
+      dynamicTargets: [
+        'note_id',
+        'note_title',
+        'note_publish_time',
+        'author_name',
+        'brand_user_name',
+        'note_status',
+        'note_type',
+        'is_rtb_adver',
+        'staff_city',
+        'staff_label',
+        'imp_num',
+        'read_feed_num',
+        'like_num',
+        'cmt_num',
+        'fav_num',
+        'share_num',
+        'follow_num',
+        'engage_num',
+      ],
+      sorts: [],
+      page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 50 },
+      frontFilterList: [
+        {
+          filterField: 'time_dim',
+          filterFieldName: '时间维度',
+          filterType: 20,
+          selectFilter: {
+            selectType: 10,
+            selectShowType: 0,
+            valueSource: 0,
+            selectLabels: [{ selected: 1, labelValue: 'all_key', labelName: '合计' }],
+          },
+        },
+        {
+          filterField: 'date_key',
+          filterFieldName: '笔记数据范围',
+          filterType: 10,
+          timeFilter: {
+            pattern: 30,
+            timeShowType: 11,
+            disableRange: 0,
+            limitMax: 366,
+            quickDates: [6, 16, 21, 36, 41, 46, 51],
+            values: [params.timeStart, params.timeEnd],
+          },
+        },
+        {
+          filterField: 'is_rtb_adver',
+          filterFieldName: '推广状态',
+          filterType: 20,
+          selectFilter: {
+            selectType: 20,
+            selectShowType: 0,
+            valueSource: 1,
+            selectLabels: [{ selected: 1, labelValue: '全部', labelName: '全部' }],
+          },
+        },
+        {
+          filterField: 'content_type',
+          filterFieldName: '笔记来源',
+          filterType: 20,
+          selectFilter: {
+            selectType: 20,
+            selectShowType: 0,
+            valueSource: 1,
+            selectLabels: [{ selected: 1, labelValue: '全部', labelName: '全部' }],
+          },
+        },
+        {
+          filterField: 'note_type',
+          filterFieldName: '笔记类型',
+          filterType: 20,
+          selectFilter: {
+            selectType: 20,
+            selectShowType: 0,
+            valueSource: 1,
+            selectLabels: [{ selected: 1, labelValue: '全部', labelName: '全部' }],
+          },
+        },
+      ],
+    };
+    const data = (await this.visionDetailList(body)) as {
+      detailListVo?: {
+        total?: number;
+        detailDataList?: Record<string, unknown>[];
+        detailVoList?: Record<string, unknown>[];
+      };
+    };
+    const vo = data?.detailListVo ?? {};
+    const rows = vo.detailDataList ?? vo.detailVoList ?? [];
+    return { total: vo.total ?? rows.length, rows };
+  }
+
   /** 表格级最新计算分区日（如 2026-09-20）；无值时返回 null */
   async getLatestCalculateDate(tableName: string): Promise<string | null> {
     const data = await this.request<string | null>(
