@@ -274,11 +274,17 @@ const resetting = ref(null);
 const resettingBusy = ref(false);
 const resetPassword = ref('');
 
-const roleOptions = [
-  { label: '超级管理员（全部权限）', value: 'ADMIN' },
-  { label: '项目管理员（可分配成员权限）', value: 'MANAGER' },
-  { label: '普通用户（按模块分配）', value: 'SALES' },
-];
+const isSuperAdmin = computed(() => auth.user?.role === 'ADMIN');
+
+const roleOptions = computed(() => {
+  const base = [
+    { label: '项目管理员（可分配成员权限）', value: 'MANAGER' },
+    { label: '普通用户（按模块分配）', value: 'SALES' },
+  ];
+  return isSuperAdmin.value
+    ? [{ label: '超级管理员（全部权限）', value: 'ADMIN' }, ...base]
+    : base;
+});
 
 const columns = [
   { title: '用户', key: 'nickname', width: 190 },

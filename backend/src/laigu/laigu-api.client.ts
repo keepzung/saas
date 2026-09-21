@@ -83,7 +83,7 @@ export class LaiguApiClient {
 
   async post<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
     if (!this.baseUrl || !this.appKey || !this.secret) {
-      throw new Error('来鼓 API 未配置（LAIGU_BASE_URL / LAIGU_APP_KEY / LAIGU_SECRET）');
+      throw new Error('来鼓连接已关闭（测试账号已断开，如需恢复请在 .env 配置 LAIGU_* 凭证）');
     }
     const bodyStr = sortedCompactJson(body);
     let res: Response;

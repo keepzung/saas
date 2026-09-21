@@ -66,6 +66,7 @@ export class UserService {
       user_id: user.id,
       nickname: user.nickname ?? user.phone,
       mobile: user.phone,
+      role: user.role,
       unionid: '',
       avatar: user.avatar,
       area: null,

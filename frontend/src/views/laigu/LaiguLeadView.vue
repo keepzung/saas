@@ -163,7 +163,7 @@
                 v-for="msg in messages"
                 :key="msg.id"
                 class="chat-row"
-                :class="{ client: msg.role === 'client' }"
+                :class="{ self: msg.role !== 'client' }"
               >
                 <div class="chat-meta">
                   <span class="chat-name">{{ roleLabel(msg) }}</span>
@@ -472,7 +472,7 @@ onMounted(() => {
   align-items: flex-start;
 }
 
-.chat-row.client {
+.chat-row.self {
   align-items: flex-end;
 }
 
@@ -496,7 +496,7 @@ onMounted(() => {
   word-break: break-word;
 }
 
-.chat-row.client .chat-bubble {
+.chat-row.self .chat-bubble {
   background: #eaf1ff;
   color: #1d4ed8;
 }
