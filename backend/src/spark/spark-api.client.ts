@@ -161,8 +161,9 @@ export class SparkApiClient {
   async noteDetailList(params: {
     timeStart: string;
     timeEnd: string;
-    publishStart: string;
-    publishEnd: string;
+    publishStart?: string;
+    publishEnd?: string;
+    promotedOnly?: boolean;
     pageNo: number;
     pageSize?: number;
   }): Promise<{ total: number; rows: Record<string, unknown>[] }> {
@@ -216,19 +217,23 @@ export class SparkApiClient {
             values: [params.timeStart, params.timeEnd],
           },
         },
-        {
-          filterField: 'note_publish_date',
-          filterFieldName: '笔记发布日期',
-          filterType: 10,
-          timeFilter: {
-            pattern: 10,
-            timeShowType: 11,
-            disableRange: 1,
-            limitMax: 366,
-            quickDates: [6, 16, 21, 36, 41, 46, 51],
-            values: [params.publishStart, params.publishEnd],
-          },
-        },
+        ...(params.publishStart
+          ? [
+              {
+                filterField: 'note_publish_date',
+                filterFieldName: '笔记发布日期',
+                filterType: 10,
+                timeFilter: {
+                  pattern: 10,
+                  timeShowType: 11,
+                  disableRange: 1,
+                  limitMax: 366,
+                  quickDates: [6, 16, 21, 36, 41, 46, 51],
+                  values: [params.publishStart, params.publishEnd],
+                },
+              },
+            ]
+          : []),
         {
           filterField: 'is_rtb_adver',
           filterFieldName: '推广状态',
@@ -237,7 +242,9 @@ export class SparkApiClient {
             selectType: 20,
             selectShowType: 0,
             valueSource: 1,
-            selectLabels: [{ selected: 1, labelValue: '全部', labelName: '全部' }],
+            selectLabels: params.promotedOnly
+              ? [{ selected: 1, labelValue: '1', labelName: '已推广' }]
+              : [{ selected: 1, labelValue: '全部', labelName: '全部' }],
           },
         },
         {

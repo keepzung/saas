@@ -33,9 +33,14 @@ const REMOVE_PATHS = [
 ];
 
 const CAMPAIGN_FEATURES = [
-  { name: '投放计划', path: '/kox_df/campaign-analysis/plans' },
+  { name: '经销商投放总览', path: '/kox_df/campaign-analysis/dealer-overview' },
+  { name: '总部投放总览', path: '/kox_df/campaign-analysis/hq-overview' },
   { name: '项目报表', path: '/kox_df/campaign-analysis/project-reports' },
   { name: '新增项目', path: '/kox_df/campaign-analysis/add' },
+];
+
+const CAMPAIGN_RENAME = [
+  { from: '/kox_df/campaign-analysis/plans', toName: '经销商投放总览', toPath: '/kox_df/campaign-analysis/dealer-overview' },
 ];
 
 async function main() {
@@ -124,14 +129,21 @@ async function main() {
     }
     let cSort = 0;
     for (const f of CAMPAIGN_FEATURES) {
-      const existing = await prisma.moduleNode.findFirst({
-        where: { parentId: campaignGroup.id, type: 'feature', path: f.path },
-      });
+      // 兼容旧「投放计划」节点：原地改名改路径，避免残留旧项
+      const existing =
+        (await prisma.moduleNode.findFirst({
+          where: { parentId: campaignGroup.id, type: 'feature', path: f.path },
+        })) ??
+        (f.path === CAMPAIGN_RENAME[0].toPath
+          ? await prisma.moduleNode.findFirst({
+              where: { parentId: campaignGroup.id, type: 'feature', path: CAMPAIGN_RENAME[0].from },
+            })
+          : null);
       if (existing) {
-        if (existing.name !== f.name || existing.sort !== cSort) {
+        if (existing.name !== f.name || existing.sort !== cSort || existing.path !== f.path) {
           await prisma.moduleNode.update({
             where: { id: existing.id },
-            data: { name: f.name, sort: cSort },
+            data: { name: f.name, path: f.path, sort: cSort },
           });
         }
         console.log('campaign feature ok:', f.name);

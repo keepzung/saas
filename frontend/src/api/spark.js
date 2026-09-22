@@ -15,6 +15,9 @@ export const getSparkCampaignAccounts = (params) =>
 export const getSparkAccounts = (params) =>
   request.get('/spark/accounts', { params });
 
+export const updateSparkAccountScope = (id, scope) =>
+  request.put(`/spark/accounts/${id}/scope`, { scope });
+
 export const getSparkProjects = (params) =>
   request.get('/spark/projects', { params });
 

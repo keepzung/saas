@@ -10,6 +10,8 @@ const MAX_PAGES = 10;
 const NOTE_PAGE_SIZE = 100;
 const NOTE_DAILY_MAX_PAGES = 30;
 const NOTE_BACKFILL_MAX_PAGES = 80;
+const NOTE_FULL_MAX_PAGES = 700;
+const NOTE_PROMOTED_MAX_PAGES = 30;
 const NOTE_WINDOW_DAYS = 30;
 const SPARK_BRAND_ID = 2;
 
@@ -189,15 +191,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 同步笔记明细：按发布日期增量（每日拉 statDate~今日新发布笔记，指标为近30天累计快照）；backfill 回填近35天 */
-  async syncNotes(date?: string, opts?: { backfill?: boolean }): Promise<SyncResult> {
+  /**
+   * 同步笔记明细（指标为近30天累计快照）：
+   * - daily（默认）：note_publish_date = statDate~今日
+   * - backfill：近35天发布
+   * - full：全量历史（无发布日期筛选）
+   * - promoted：仅已推广（刷新投流状态）
+   */
+  async syncNotes(
+    date?: string,
+    opts?: { backfill?: boolean; full?: boolean; promoted?: boolean },
+  ): Promise<SyncResult> {
     const statDate = date ?? this.syncDate();
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-    const maxPages = opts?.backfill ? NOTE_BACKFILL_MAX_PAGES : NOTE_DAILY_MAX_PAGES;
-    const publishStart = opts?.backfill
-      ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - 34 * 86400000)
-          .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
-      : statDate;
+    const maxPages = opts?.full
+      ? NOTE_FULL_MAX_PAGES
+      : opts?.backfill
+        ? NOTE_BACKFILL_MAX_PAGES
+        : opts?.promoted
+          ? NOTE_PROMOTED_MAX_PAGES
+          : NOTE_DAILY_MAX_PAGES;
+    const publishStart = opts?.full || opts?.promoted
+      ? undefined
+      : opts?.backfill
+        ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - 34 * 86400000)
+            .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
+        : statDate;
     const timeStart = new Date(
       new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000,
     )
@@ -211,6 +230,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         timeEnd: statDate,
         publishStart,
         publishEnd: today,
+        promotedOnly: !!opts?.promoted,
         pageNo,
         pageSize: NOTE_PAGE_SIZE,
       });
@@ -312,6 +332,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
 
       const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
+      const rtbRaw = String(pick('is_rtb_adver') ?? '').trim();
 
       const data = {
         accountId,
@@ -320,6 +341,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         content: null,
         noteUrl: noteUrlRaw || (noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null),
         noteType: String(pick('note_type') ?? '') === '2' ? 'video' : 'normal',
+        isRtbAdver: rtbRaw === '1' || rtbRaw.toLowerCase() === 'true' ? true : rtbRaw ? false : null,
         publishTime,
         exposure: num(pick('imp_num')),
         views: num(pick('read_feed_num')),
@@ -349,13 +371,24 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
-      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}`,
+      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}`,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
     return result;
   }
 
   /** upsert SparkAccount 镜像并返回新增数；不在此轮出现的账户置 active=false */
+  /** 启发式归属：主机厂直营/总部素材号 → hq，其余 dealer */
+  private guessScope(name: string): string {
+    return /^荣威ROEWE$/.test(name) ||
+      /^MV_华东_上汽荣威/.test(name) ||
+      /^上汽集团/.test(name) ||
+      /乘用车分公司/.test(name) ||
+      /^荣威-科莱/.test(name)
+      ? 'hq'
+      : 'dealer';
+  }
+
   private async mirrorAccounts(rows: RtbAccountMetrics[], sellerIds: Set<string>): Promise<number> {
     let added = 0;
     for (const r of rows) {
@@ -387,7 +420,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         });
       } else {
         await this.prisma.sparkAccount.create({
-          data: { virtualSellerId: r.virtualSellerId, ...data },
+          data: {
+            virtualSellerId: r.virtualSellerId,
+            ...data,
+            scope: this.guessScope(name),
+          },
         });
         added += 1;
       }
@@ -456,8 +493,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return { list: rows, total, page, page_size: pageSize };
   }
 
-  /** 投放汇总：指标卡 + 逐日趋势 */
-  async campaignSummary(query: { start?: string; end?: string; brandId?: string }) {
+  /** scope → 星火账户 virtualSellerId 集合（null = 不过滤） */
+  private async scopeSellerIds(scope?: string): Promise<string[] | null> {
+    if (!scope || scope === 'all') return null;
+    const rows = await this.prisma.sparkAccount.findMany({
+      where: { scope },
+      select: { virtualSellerId: true },
+    });
+    return rows.map((r) => r.virtualSellerId);
+  }
+
+  /** 总部账户名称集合（笔记 brand_user_name 与其对应） */
+  private async hqAccountNames(): Promise<string[]> {
+    const rows = await this.prisma.sparkAccount.findMany({
+      where: { scope: 'hq' },
+      select: { name: true },
+    });
+    return rows.map((r) => r.name);
+  }
+
+  /** 投放汇总：指标卡 + 逐日趋势（scope 可选 dealer/hq） */
+  async campaignSummary(query: {
+    start?: string;
+    end?: string;
+    brandId?: string;
+    scope?: string;
+  }) {
     const end = query.end ? new Date(query.end) : new Date();
     end.setHours(23, 59, 59, 999);
     const start = query.start
@@ -465,9 +526,14 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       : new Date(end.getTime() - 29 * 86400000);
     start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const sellerIds = await this.scopeSellerIds(query.scope);
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
-      where: { statDate: { gte: start, lte: end }, brandId },
+      where: {
+        statDate: { gte: start, lte: end },
+        brandId,
+        ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
+      },
       orderBy: { statDate: 'asc' },
     });
 
@@ -494,11 +560,26 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     }
     const r2v = (v: number) => Math.round(v * 100) / 100;
 
+    // 投流内容数 = 全部历史中被投流推广的笔记数（按 scope 拆分：笔记主体名 ∈ 总部账户名集合）
+    const promoWhere: Prisma.KoxNoteWhereInput = {
+      brandId,
+      isRtbAdver: true,
+    };
+    if (query.scope === 'hq' || query.scope === 'dealer') {
+      const hqNames = await this.hqAccountNames();
+      promoWhere.brandUserName = query.scope === 'hq'
+        ? { in: hqNames }
+        : { notIn: hqNames };
+    }
+    const promo_note_cnt = await this.prisma.koxNote.count({ where: promoWhere });
+
     return {
       start: start.toISOString().slice(0, 10),
       end: end.toISOString().slice(0, 10),
       total: rows.length,
+      promo_note_cnt,
       summary: {
+        promo_note_cnt,
         consume_days: dayMap.size,
         account_num: new Set(rows.map((r) => r.virtualSellerId)).size,
         fee: r2v(totalFee),
@@ -540,6 +621,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     page?: string;
     page_size?: string;
     brandId?: string;
+    scope?: string;
   }) {
     const end = query.end ? new Date(query.end) : new Date();
     end.setHours(23, 59, 59, 999);
@@ -548,12 +630,14 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       : new Date(end.getTime() - 29 * 86400000);
     start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const sellerIds = await this.scopeSellerIds(query.scope);
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
       where: {
         statDate: { gte: start, lte: end },
         brandId,
         ...(query.accountKind ? { accountKind: query.accountKind } : {}),
+        ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
       },
     });
 
@@ -660,14 +744,21 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** 账户镜像列表（含增减状态） */
-  async accounts(query: { keyword?: string; active?: string; page?: string; page_size?: string }) {
+  /** 账户镜像列表（含增减状态与归属） */
+  async accounts(query: {
+    keyword?: string;
+    active?: string;
+    scope?: string;
+    page?: string;
+    page_size?: string;
+  }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(query.page_size ?? 20) || 20));
     const where: Prisma.SparkAccountWhereInput = {};
     if (query.active !== undefined && query.active !== '') {
       where.active = query.active === 'true' || query.active === '1';
     }
+    if (query.scope === 'hq' || query.scope === 'dealer') where.scope = query.scope;
     if (query.keyword) {
       where.OR = [
         { name: { contains: query.keyword } },
@@ -699,6 +790,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         advertiser_id: a.advertiserId,
         last_consume_date: a.lastConsumeDate,
         active: a.active,
+        scope: a.scope,
         first_seen_at: a.firstSeenAt,
         last_seen_at: a.lastSeenAt,
       })),
@@ -708,6 +800,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       added_last_24h: addedToday,
       removed_total: removedTotal,
     };
+  }
+
+  async updateAccountScope(id: number, scope: string) {
+    if (!['hq', 'dealer'].includes(scope)) {
+      throw new Error('scope 仅支持 hq / dealer');
+    }
+    const existing = await this.prisma.sparkAccount.findUnique({ where: { id } });
+    if (!existing) throw new Error('账户不存在');
+    await this.prisma.sparkAccount.update({ where: { id }, data: { scope } });
+    return { id, scope };
   }
 
   updateCookie(cookie: string) {

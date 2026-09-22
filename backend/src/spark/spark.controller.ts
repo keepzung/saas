@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SparkService } from './spark.service';
@@ -9,14 +22,18 @@ export class SparkController {
   constructor(private sparkService: SparkService) {}
 
   @Post('spark/sync')
-  sync(@Body() dto: { date?: string; type?: string; backfill?: boolean }) {
+  sync(@Body() dto: { date?: string; type?: string; backfill?: boolean; full?: boolean; promoted?: boolean }) {
     const type = dto?.type ?? 'all';
+    const noteOpts = {
+      backfill: !!dto?.backfill,
+      full: !!dto?.full,
+      promoted: !!dto?.promoted,
+    };
     if (type === 'campaign') return this.sparkService.syncCampaign(dto?.date);
-    if (type === 'notes')
-      return this.sparkService.syncNotes(dto?.date, { backfill: !!dto?.backfill });
+    if (type === 'notes') return this.sparkService.syncNotes(dto?.date, noteOpts);
     return Promise.all([
       this.sparkService.syncCampaign(dto?.date),
-      this.sparkService.syncNotes(dto?.date, { backfill: !!dto?.backfill }),
+      this.sparkService.syncNotes(dto?.date, noteOpts),
     ]).then(([campaign, notes]) => ({ campaign, notes }));
   }
 
@@ -32,7 +49,8 @@ export class SparkController {
 
   @Get('spark/campaign/summary')
   campaignSummary(
-    @Query() query: { start?: string; end?: string; brandId?: string },
+    @Query()
+    query: { start?: string; end?: string; brandId?: string; scope?: string },
   ) {
     return this.sparkService.campaignSummary(query);
   }
@@ -49,6 +67,7 @@ export class SparkController {
       page?: string;
       page_size?: string;
       brandId?: string;
+      scope?: string;
     },
   ) {
     return this.sparkService.campaignAccounts(query);
@@ -56,9 +75,25 @@ export class SparkController {
 
   @Get('spark/accounts')
   accounts(
-    @Query() query: { keyword?: string; active?: string; page?: string; page_size?: string },
+    @Query()
+    query: {
+      keyword?: string;
+      active?: string;
+      scope?: string;
+      page?: string;
+      page_size?: string;
+    },
   ) {
     return this.sparkService.accounts(query);
+  }
+
+  @Put('spark/accounts/:id/scope')
+  updateAccountScope(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { scope?: string },
+  ) {
+    if (!dto?.scope) throw new BadRequestException('scope 不能为空');
+    return this.sparkService.updateAccountScope(id, dto.scope);
   }
 
   @Post('spark/cookie')

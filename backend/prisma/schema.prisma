@@ -489,6 +489,8 @@ model KoxNote {
   formLeads    Int         @default(0)
   authorName   String?
   accountType  String?
+  isRtbAdver   Boolean?
+  brandUserName String?
   category     String?
   modelTag     String?
   keyword      String?
@@ -650,11 +652,13 @@ model SparkAccount {
   advertiserId    String?
   lastConsumeDate String?
   active          Boolean  @default(true)
+  scope           String   @default("dealer")
   firstSeenAt     DateTime @default(now())
   lastSeenAt      DateTime @default(now())
   brandId         Int      @default(2)
 
   @@index([brandId, active])
+  @@index([scope])
 }
 
 model SparkSyncLog {
