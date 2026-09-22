@@ -333,6 +333,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
       const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
       const rtbRaw = String(pick('is_rtb_adver') ?? '').trim();
+      const isRtbAdver = rtbRaw
+        ? rtbRaw === '1' ||
+          rtbRaw.toLowerCase() === 'true' ||
+          rtbRaw.includes('已推广')
+        : null;
 
       const data = {
         accountId,
@@ -341,6 +346,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         content: null,
         noteUrl: noteUrlRaw || (noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null),
         noteType: String(pick('note_type') ?? '') === '2' ? 'video' : 'normal',
+        isRtbAdver,
         isRtbAdver: rtbRaw === '1' || rtbRaw.toLowerCase() === 'true' ? true : rtbRaw ? false : null,
         publishTime,
         exposure: num(pick('imp_num')),
