@@ -347,7 +347,6 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         noteUrl: noteUrlRaw || (noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null),
         noteType: String(pick('note_type') ?? '') === '2' ? 'video' : 'normal',
         isRtbAdver,
-        isRtbAdver: rtbRaw === '1' || rtbRaw.toLowerCase() === 'true' ? true : rtbRaw ? false : null,
         publishTime,
         exposure: num(pick('imp_num')),
         views: num(pick('read_feed_num')),
