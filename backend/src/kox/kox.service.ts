@@ -952,6 +952,7 @@ export class KoxService {
     modelTag?: string;
     keyword?: string;
     author?: string;
+    isRtbAdver?: string;
   }): { where: Prisma.KoxNoteWhereInput; base: Prisma.KoxNoteWhereInput; start: Date; end: Date } {
     const end = query.end ? new Date(query.end) : new Date();
     end.setHours(23, 59, 59, 999);
@@ -968,6 +969,9 @@ export class KoxService {
     if (query.noteType) where.noteType = query.noteType;
     if (query.category) where.category = query.category;
     if (query.modelTag) where.modelTag = query.modelTag;
+    if (query.isRtbAdver === 'true' || query.isRtbAdver === 'false') {
+      where.isRtbAdver = query.isRtbAdver === 'true';
+    }
     if (query.keyword)
       where.title = { contains: query.keyword, mode: 'insensitive' };
     if (query.author)
@@ -987,6 +991,7 @@ export class KoxService {
     modelTag?: string;
     keyword?: string;
     author?: string;
+    isRtbAdver?: string;
     metric?: string;
     page?: string;
     page_size?: string;

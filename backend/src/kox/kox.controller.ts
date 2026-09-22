@@ -104,6 +104,7 @@ export class KoxController {
       modelTag?: string;
       keyword?: string;
       author?: string;
+      isRtbAdver?: string;
       metric?: string;
       page?: string;
       page_size?: string;

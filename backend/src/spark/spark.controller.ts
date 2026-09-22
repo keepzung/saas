@@ -104,6 +104,20 @@ export class SparkController {
     return this.sparkService.updateCookie(dto.cookie.trim());
   }
 
+  @Get('spark/campaign/region')
+  campaignRegion(
+    @Query()
+    query: {
+      start?: string;
+      end?: string;
+      brandId?: string;
+      scope?: string;
+      groupby?: string;
+    },
+  ) {
+    return this.sparkService.campaignRegion(query);
+  }
+
   @Get('spark/projects')
   projects(@Query() query: { brandId?: string; keyword?: string }) {
     return this.sparkService.projects(query);

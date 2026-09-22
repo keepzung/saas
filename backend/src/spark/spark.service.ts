@@ -823,6 +823,137 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
+  /** 区域汇总：投放数据按账户归属映射至大区/门店（账号名称匹配 KosAccount，未匹配单独归组） */
+  async campaignRegion(query: {
+    start?: string;
+    end?: string;
+    brandId?: string;
+    scope?: string;
+    groupby?: string;
+  }) {
+    const groupby = ['region', 'store'].includes(query.groupby ?? '')
+      ? (query.groupby as string)
+      : 'region';
+    const end = query.end ? new Date(query.end) : new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = query.start
+      ? new Date(query.start)
+      : new Date(end.getTime() - 29 * 86400000);
+    start.setHours(0, 0, 0, 0);
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const sellerIds = await this.scopeSellerIds(query.scope);
+
+    const [rows, kos, sparks] = await Promise.all([
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: {
+          statDate: { gte: start, lte: end },
+          brandId,
+          ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
+        },
+      }),
+      this.prisma.kosAccount.findMany({
+        where: { brandId },
+        select: { nickname: true, storeName: true, regionName: true },
+      }),
+      this.prisma.sparkAccount.findMany({
+        select: { virtualSellerId: true, name: true },
+      }),
+    ]);
+
+    const regionByStore = new Map<string, string>();
+    const regionByNick = new Map<string, string>();
+    for (const k of kos) {
+      if (k.storeName) regionByStore.set(k.storeName, k.regionName ?? '未匹配');
+      if (k.nickname) regionByNick.set(k.nickname, k.regionName ?? '未匹配');
+    }
+    const attrBySeller = new Map<string, { region: string; store: string }>();
+    for (const s of sparks) {
+      const region = regionByStore.get(s.name) ?? regionByNick.get(s.name) ?? '未匹配';
+      attrBySeller.set(s.virtualSellerId, {
+        region,
+        store: region === '未匹配' ? '未匹配' : s.name,
+      });
+    }
+
+    type Agg = {
+      name: string;
+      region: string;
+      accountIds: Set<string>;
+      fee: number;
+      impression: number;
+      click: number;
+      interaction: number;
+      msg_inquiries: number;
+      msg_openings: number;
+      msg_leads: number;
+    };
+    const groups = new Map<string, Agg>();
+    for (const r of rows) {
+      const attr = attrBySeller.get(r.virtualSellerId) ?? {
+        region: '未匹配',
+        store: '未匹配',
+      };
+      const key = groupby === 'store' ? `${attr.region}·${attr.store}` : attr.region;
+      const cur =
+        groups.get(key) ??
+        {
+          name: groupby === 'store' ? attr.store : attr.region,
+          region: attr.region,
+          accountIds: new Set<string>(),
+          fee: 0,
+          impression: 0,
+          click: 0,
+          interaction: 0,
+          msg_inquiries: 0,
+          msg_openings: 0,
+          msg_leads: 0,
+        };
+      cur.accountIds.add(r.virtualSellerId);
+      cur.fee += Number(r.fee);
+      cur.impression += r.impression;
+      cur.click += r.click;
+      cur.interaction += r.interaction;
+      cur.msg_inquiries += r.messageConsult;
+      cur.msg_openings += r.msgChatUserCnt;
+      cur.msg_leads += r.msgLeadsNum;
+      groups.set(key, cur);
+    }
+
+    const list = [...groups.values()]
+      .map((g) => ({
+        name: g.name,
+        region: groupby === 'store' ? g.region : undefined,
+        account_num: g.accountIds.size,
+        fee: Math.round(g.fee * 100) / 100,
+        impression: g.impression,
+        click: g.click,
+        ctr: g.impression ? Math.round((g.click / g.impression) * 10000) / 100 : 0,
+        interaction: g.interaction,
+        msg_inquiries: g.msg_inquiries,
+        msg_openings: g.msg_openings,
+        msg_leads: g.msg_leads,
+        msg_lead_cost: g.msg_leads ? Math.round((g.fee / g.msg_leads) * 10) / 10 : 0,
+      }))
+      .sort((a, b) => b.fee - a.fee);
+
+    const totalFee = list.reduce((a, x) => a + x.fee, 0);
+    return {
+      groupby,
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+      total: list.length,
+      summary: {
+        group_num: list.length,
+        account_num: new Set(rows.map((r) => r.virtualSellerId)).size,
+        fee: Math.round(totalFee * 100) / 100,
+        impression: list.reduce((a, x) => a + x.impression, 0),
+        click: list.reduce((a, x) => a + x.click, 0),
+        msg_leads: list.reduce((a, x) => a + x.msg_leads, 0),
+      },
+      list,
+    };
+  }
+
   /** 项目报表列表：周期 × 关联账户自动聚合投放数据 */
   async projects(query: { brandId?: string; keyword?: string }) {
     const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
