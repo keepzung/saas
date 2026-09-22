@@ -129,18 +129,9 @@ const routes = [
         meta: { title: '经销商运营' },
       },
       {
-        path: '/kox_df/campaign-analysis/dealer-overview',
-        component: () => import('../views/kox/KoxCampaignPlansView.vue'),
-        meta: { title: '经销商投放总览', scope: 'dealer' },
-      },
-      {
-        path: '/kox_df/campaign-analysis/hq-overview',
-        component: () => import('../views/kox/KoxCampaignPlansView.vue'),
-        meta: { title: '总部投放总览', scope: 'hq' },
-      },
-      {
         path: '/kox_df/campaign-analysis/plans',
-        redirect: '/kox_df/campaign-analysis/dealer-overview',
+        component: () => import('../views/kox/KoxCampaignPlansView.vue'),
+        meta: { title: '投放计划' },
       },
       {
         path: '/kox_df/campaign-analysis/project-reports',

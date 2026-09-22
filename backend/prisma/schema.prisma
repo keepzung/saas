@@ -80,6 +80,9 @@ model User {
   kolLogs        KolLog[]       @relation("KolLogOperator")
   koxTasksCreated KoxTask[]     @relation("KoxTaskCreator")
   campaignProjects KoxCampaignProject[] @relation("CampaignProjectCreator")
+  createdById     Int?
+  createdBy       User?         @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers    User[]        @relation("UserCreator")
 
   @@index([role])
   @@index([companyId])

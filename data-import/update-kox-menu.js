@@ -33,14 +33,15 @@ const REMOVE_PATHS = [
 ];
 
 const CAMPAIGN_FEATURES = [
-  { name: '经销商投放总览', path: '/kox_df/campaign-analysis/dealer-overview' },
-  { name: '总部投放总览', path: '/kox_df/campaign-analysis/hq-overview' },
+  { name: '投放计划', path: '/kox_df/campaign-analysis/plans' },
   { name: '项目报表', path: '/kox_df/campaign-analysis/project-reports' },
   { name: '新增项目', path: '/kox_df/campaign-analysis/add' },
 ];
 
-const CAMPAIGN_RENAME = [
-  { from: '/kox_df/campaign-analysis/plans', toName: '经销商投放总览', toPath: '/kox_df/campaign-analysis/dealer-overview' },
+// 曾经存在过的节点（本地曾短暂改成经销商/总部总览，需清理）
+const CAMPAIGN_STALE_PATHS = [
+  '/kox_df/campaign-analysis/dealer-overview',
+  '/kox_df/campaign-analysis/hq-overview',
 ];
 
 async function main() {
@@ -129,16 +130,13 @@ async function main() {
     }
     let cSort = 0;
     for (const f of CAMPAIGN_FEATURES) {
-      // 兼容旧「投放计划」节点：原地改名改路径，避免残留旧项
-      const existing =
-        (await prisma.moduleNode.findFirst({
-          where: { parentId: campaignGroup.id, type: 'feature', path: f.path },
-        })) ??
-        (f.path === CAMPAIGN_RENAME[0].toPath
-          ? await prisma.moduleNode.findFirst({
-              where: { parentId: campaignGroup.id, type: 'feature', path: CAMPAIGN_RENAME[0].from },
-            })
-          : null);
+      const key = `${campaignGroup.key}_f_${f.path.split('/').pop()}`;
+      let existing = await prisma.moduleNode.findFirst({
+        where: { parentId: campaignGroup.id, type: 'feature', path: f.path },
+      });
+      if (!existing) {
+        existing = await prisma.moduleNode.findUnique({ where: { key } }).catch(() => null);
+      }
       if (existing) {
         if (existing.name !== f.name || existing.sort !== cSort || existing.path !== f.path) {
           await prisma.moduleNode.update({
@@ -150,7 +148,7 @@ async function main() {
       } else {
         await prisma.moduleNode.create({
           data: {
-            key: `${campaignGroup.key}_f_${f.path.split('/').pop()}`,
+            key,
             name: f.name,
             type: 'feature',
             path: f.path,
@@ -161,6 +159,17 @@ async function main() {
         console.log('created campaign feature:', f.name);
       }
       cSort += 1;
+    }
+
+    // 清理历史残留（经销商/总部总览等）
+    for (const p of CAMPAIGN_STALE_PATHS) {
+      const node = await prisma.moduleNode.findFirst({
+        where: { parentId: campaignGroup.id, type: 'feature', path: p },
+      });
+      if (node) {
+        await prisma.moduleNode.delete({ where: { id: node.id } });
+        console.log('removed stale feature:', node.name, p);
+      }
     }
 
     const total = await prisma.moduleNode.count();

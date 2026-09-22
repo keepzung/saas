@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper :title="pageTitle" :subtitle="scope === 'hq' ? '总部/主机厂直营账户投流总览' : '经销商门店账户投流总览'">
+  <PageWrapper title="投放计划" subtitle="投流情况总览与账户投放明细">
     <template #filters>
       <FilterTopbar>
         <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
@@ -10,7 +10,6 @@
         <a-button size="small" @click="reload">
           <ReloadOutlined />
         </a-button>
-        <a-button size="small" @click="openScopeDrawer">账户归属</a-button>
       </FilterTopbar>
     </template>
 
@@ -162,42 +161,6 @@
         </template>
       </a-table>
     </a-card>
-
-    <a-drawer v-model:open="scopeDrawer" title="账户归属管理" width="640">
-      <div class="muted small" style="margin-bottom: 8px">
-        归属决定「经销商投放总览 / 总部投放总览」的统计口径，调整后立即生效。
-      </div>
-      <a-input-search
-        v-model:value="scopeKeyword"
-        placeholder="搜索账户名称"
-        allow-clear
-        style="margin-bottom: 8px"
-        @search="loadScopeAccounts"
-      />
-      <a-table
-        :columns="scopeColumns"
-        :data-source="scopeFiltered"
-        :loading="scopeLoading"
-        :pagination="{ pageSize: 12, size: 'small', showSizeChanger: false }"
-        row-key="id"
-        size="small"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'scopeSel'">
-            <a-select
-              :value="record.scope"
-              size="small"
-              style="width: 100px"
-              :options="[
-                { label: '经销商', value: 'dealer' },
-                { label: '总部', value: 'hq' },
-              ]"
-              @change="(v) => changeScope(record, v)"
-            />
-          </template>
-        </template>
-      </a-table>
-    </a-drawer>
   </PageWrapper>
 </template>
 
@@ -210,17 +173,11 @@ import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
-import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkAccounts, updateSparkAccountScope } from '../../api/spark';
+import { getSparkCampaignSummary, getSparkCampaignAccounts } from '../../api/spark';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
-import { useRoute } from 'vue-router';
 
 const auth = useAuthStore();
-const route = useRoute();
-const scope = route.meta.scope ?? 'dealer';
-const pageTitle = computed(() =>
-  scope === 'hq' ? '总部投放总览' : '经销商投放总览',
-);
 const PAGE_SIZE = 10;
 
 /* ---------- 演示模式（表空回退） ---------- */
@@ -263,7 +220,6 @@ function realParams(extra = {}) {
   const hasRange = range.value?.[0] && range.value?.[1];
   return {
     brandId: auth.currentBrandId ?? 2,
-    scope,
     start: hasRange ? range.value[0].format('YYYY-MM-DD') : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
     end: hasRange ? range.value[1].format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
     ...extra,
@@ -448,55 +404,6 @@ async function exportAll() {
 const maxFee = computed(() =>
   accountRows.value.reduce((mx, r) => Math.max(mx, Number(r.fee ?? 0)), 1),
 );
-
-/* ---------- 账户归属管理 ---------- */
-const scopeDrawer = ref(false);
-const scopeKeyword = ref('');
-const scopeLoading = ref(false);
-const scopeAll = ref([]);
-
-const scopeColumns = [
-  { title: '账户名称', dataIndex: 'name', ellipsis: true },
-  { title: '类型', dataIndex: 'account_kind', width: 110, ellipsis: true },
-  { key: 'scopeSel', title: '归属', width: 110 },
-];
-
-const scopeFiltered = computed(() => {
-  const kw = scopeKeyword.value.trim();
-  if (!kw) return scopeAll.value;
-  return scopeAll.value.filter((a) => a.name.includes(kw));
-});
-
-async function openScopeDrawer() {
-  scopeDrawer.value = true;
-  scopeLoading.value = true;
-  try {
-    const all = [];
-    let p = 1;
-    for (;;) {
-      const res = await getSparkAccounts({ page: p, page_size: 100 });
-      all.push(...(res.list ?? []));
-      if (all.length >= (res.total ?? 0) || !(res.list ?? []).length) break;
-      p += 1;
-    }
-    scopeAll.value = all;
-  } catch {
-    scopeAll.value = [];
-  } finally {
-    scopeLoading.value = false;
-  }
-}
-
-async function changeScope(record, value) {
-  try {
-    await updateSparkAccountScope(record.id, value);
-    record.scope = value;
-    message.success(`「${record.name}」归属已设为${value === 'hq' ? '总部' : '经销商'}`);
-    reload();
-  } catch {
-    message.error('更新失败，请稍后重试');
-  }
-}
 
 const accountColumns = [
   { key: 'name', title: '账户名称 / 类型' },
