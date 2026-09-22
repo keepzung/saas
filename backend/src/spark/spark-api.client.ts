@@ -157,10 +157,12 @@ export class SparkApiClient {
     );
   }
 
-  /** 笔记明细行（原始字段对象，字段名与 dynamicTargets 的 targetCode 一致） */
+  /** 笔记明细行（原始 targetList 结构，值经 pickTarget 提取；publishStart/End 圈定发布日期范围） */
   async noteDetailList(params: {
     timeStart: string;
     timeEnd: string;
+    publishStart: string;
+    publishEnd: string;
     pageNo: number;
     pageSize?: number;
   }): Promise<{ total: number; rows: Record<string, unknown>[] }> {
@@ -188,7 +190,7 @@ export class SparkApiClient {
         'engage_num',
       ],
       sorts: [],
-      page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 50 },
+      page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 100 },
       frontFilterList: [
         {
           filterField: 'time_dim',
@@ -212,6 +214,19 @@ export class SparkApiClient {
             limitMax: 366,
             quickDates: [6, 16, 21, 36, 41, 46, 51],
             values: [params.timeStart, params.timeEnd],
+          },
+        },
+        {
+          filterField: 'note_publish_date',
+          filterFieldName: '笔记发布日期',
+          filterType: 10,
+          timeFilter: {
+            pattern: 10,
+            timeShowType: 11,
+            disableRange: 1,
+            limitMax: 366,
+            quickDates: [6, 16, 21, 36, 41, 46, 51],
+            values: [params.publishStart, params.publishEnd],
           },
         },
         {

@@ -7,8 +7,9 @@ import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './sp
 
 const RTB_PAGE_SIZE = 500;
 const MAX_PAGES = 10;
-const NOTE_PAGE_SIZE = 50;
-const NOTE_MAX_PAGES = 40;
+const NOTE_PAGE_SIZE = 100;
+const NOTE_DAILY_MAX_PAGES = 30;
+const NOTE_BACKFILL_MAX_PAGES = 80;
 const NOTE_WINDOW_DAYS = 30;
 const SPARK_BRAND_ID = 2;
 
@@ -188,22 +189,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 同步笔记明细（近 NOTE_WINDOW_DAYS 天累计快照 upsert 至 KoxNote，笔记排行/总览发布区块数据源） */
-  async syncNotes(date?: string): Promise<SyncResult> {
+  /** 同步笔记明细：按发布日期增量（每日拉 statDate~今日新发布笔记，指标为近30天累计快照）；backfill 回填近35天 */
+  async syncNotes(date?: string, opts?: { backfill?: boolean }): Promise<SyncResult> {
     const statDate = date ?? this.syncDate();
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const maxPages = opts?.backfill ? NOTE_BACKFILL_MAX_PAGES : NOTE_DAILY_MAX_PAGES;
+    const publishStart = opts?.backfill
+      ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - 34 * 86400000)
+          .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
+      : statDate;
     const timeStart = new Date(
       new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000,
     )
       .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 
     const rows: Record<string, unknown>[] = [];
-    for (let pageNo = 1; pageNo <= NOTE_MAX_PAGES; pageNo += 1) {
+    let total = 0;
+    for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList({
         timeStart,
         timeEnd: statDate,
+        publishStart,
+        publishEnd: today,
         pageNo,
         pageSize: NOTE_PAGE_SIZE,
       });
+      total = data.total;
       rows.push(...data.rows);
       if (rows.length >= data.total || !data.rows.length) break;
     }
@@ -241,18 +252,53 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     let upserted = 0;
     for (const r of rows) {
       const pick = (code: string): unknown => {
-        if (r[code] !== undefined && r[code] !== null) return r[code];
-        const list = Array.isArray(r.targetVos)
-          ? (r.targetVos as { targetCode?: string; targetValue?: unknown; value?: unknown }[])
-          : null;
-        const hit = list?.find((t) => t.targetCode === code);
-        return hit ? (hit.targetValue ?? hit.value) : undefined;
+        if (r[code] !== undefined && r[code] !== null && r[code] !== '') return r[code];
+        const list = Array.isArray(r.targetList)
+          ? (r.targetList as {
+              targetCode?: string;
+              targetValue?: unknown;
+              targetOriginValue?: unknown;
+              targetDownloadValue?: unknown;
+              linkVos?: { targetCode?: string; targetValue?: unknown }[];
+            }[])
+          : Array.isArray(r.targetVos)
+            ? (r.targetVos as {
+                targetCode?: string;
+                targetValue?: unknown;
+                targetOriginValue?: unknown;
+                targetDownloadValue?: unknown;
+                linkVos?: { targetCode?: string; targetValue?: unknown }[];
+              }[])
+            : null;
+        if (!list) return undefined;
+        const hit = list.find((t) => t.targetCode === code);
+        if (!hit) return undefined;
+        if (hit.targetValue != null && hit.targetValue !== '') return hit.targetValue;
+        if (hit.targetOriginValue != null && hit.targetOriginValue !== '') {
+          return hit.targetOriginValue;
+        }
+        if (hit.targetDownloadValue != null && hit.targetDownloadValue !== '') {
+          return hit.targetDownloadValue;
+        }
+        return undefined;
+      };
+      const pickLink = (code: string): unknown => {
+        const list = Array.isArray(r.targetList)
+          ? (r.targetList as { linkVos?: { targetCode?: string; targetValue?: unknown }[] }[])
+          : Array.isArray(r.targetVos)
+            ? (r.targetVos as { linkVos?: { targetCode?: string; targetValue?: unknown }[] }[])
+            : null;
+        for (const t of list ?? []) {
+          const hit = (t.linkVos ?? []).find((l) => l.targetCode === code);
+          if (hit?.targetValue != null && hit.targetValue !== '') return hit.targetValue;
+        }
+        return undefined;
       };
       const title = String(pick('note_title') ?? '').trim();
-      const authorName = String(pick('author_name') ?? '').trim();
+      const authorName = String(pick('author_name') ?? pickLink('author_name') ?? '').trim();
       if (!title && !authorName) continue;
 
-      const noteIdRaw = String(pick('note_id') ?? '').trim();
+      const noteIdRaw = String(pick('note_id') ?? pickLink('note_id') ?? '').trim();
       const publishTime = parseDate(pick('note_publish_time'));
       const noteId =
         noteIdRaw ||
@@ -265,12 +311,14 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const accountId =
         byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
 
+      const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
+
       const data = {
         accountId,
         brandId: SPARK_BRAND_ID,
         title: title || '(无标题)',
         content: null,
-        noteUrl: noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null,
+        noteUrl: noteUrlRaw || (noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null),
         noteType: String(pick('note_type') ?? '') === '2' ? 'video' : 'normal',
         publishTime,
         exposure: num(pick('imp_num')),
@@ -301,6 +349,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
+      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}`,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
     return result;

@@ -9,13 +9,14 @@ export class SparkController {
   constructor(private sparkService: SparkService) {}
 
   @Post('spark/sync')
-  sync(@Body() dto: { date?: string; type?: string }) {
+  sync(@Body() dto: { date?: string; type?: string; backfill?: boolean }) {
     const type = dto?.type ?? 'all';
     if (type === 'campaign') return this.sparkService.syncCampaign(dto?.date);
-    if (type === 'notes') return this.sparkService.syncNotes(dto?.date);
+    if (type === 'notes')
+      return this.sparkService.syncNotes(dto?.date, { backfill: !!dto?.backfill });
     return Promise.all([
       this.sparkService.syncCampaign(dto?.date),
-      this.sparkService.syncNotes(dto?.date),
+      this.sparkService.syncNotes(dto?.date, { backfill: !!dto?.backfill }),
     ]).then(([campaign, notes]) => ({ campaign, notes }));
   }
 
