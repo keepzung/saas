@@ -3,7 +3,6 @@
     <template #extra>
       <a-radio-group v-model:value="platform" size="small" @change="reload">
         <a-radio-button value="all">全部平台</a-radio-button>
-        <a-radio-button value="douyin">抖音</a-radio-button>
         <a-radio-button value="xhs">小红书</a-radio-button>
       </a-radio-group>
       <a-range-picker v-model:value="range" size="small" @change="reload" />

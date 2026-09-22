@@ -145,6 +145,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             shareCnt: num(r.share),
             interaction: num(r.interaction),
             msgLeadsNum: num(r.msgLeadsNum),
+            msgChatUserCnt: num(r.msgChatUserCnt),
+            messageConsult: num(r.messageConsult),
             leads: num(r.leads),
             brandId: SPARK_BRAND_ID,
             rawJson: r as Prisma.InputJsonValue,
@@ -159,6 +161,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             shareCnt: num(r.share),
             interaction: num(r.interaction),
             msgLeadsNum: num(r.msgLeadsNum),
+            msgChatUserCnt: num(r.msgChatUserCnt),
+            messageConsult: num(r.messageConsult),
             leads: num(r.leads),
           },
         });
@@ -421,18 +425,25 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
     const totalFee = rows.reduce((acc, r) => acc + Number(r.fee), 0);
     const totalMsgLeads = sum((r) => r.msgLeadsNum);
+    const totalConsult = sum((r) => r.messageConsult);
+    const totalOpen = sum((r) => r.msgChatUserCnt);
+    const totalImpression = sum((r) => r.impression);
+    const totalClick = sum((r) => r.click);
 
-    const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; accounts: Set<string> }>();
+    const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
       const key = r.statDate.toISOString().slice(0, 10);
-      const cur = dayMap.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0, accounts: new Set<string>() };
+      const cur = dayMap.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0, consult: 0, open: 0, accounts: new Set<string>() };
       cur.fee += Number(r.fee);
       cur.impression += r.impression;
       cur.click += r.click;
       cur.msg_leads += r.msgLeadsNum;
+      cur.consult += r.messageConsult;
+      cur.open += r.msgChatUserCnt;
       cur.accounts.add(r.virtualSellerId);
       dayMap.set(key, cur);
     }
+    const r2v = (v: number) => Math.round(v * 100) / 100;
 
     return {
       start: start.toISOString().slice(0, 10),
@@ -441,23 +452,29 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       summary: {
         consume_days: dayMap.size,
         account_num: new Set(rows.map((r) => r.virtualSellerId)).size,
-        fee: Math.round(totalFee * 100) / 100,
-        impression: sum((r) => r.impression),
-        click: sum((r) => r.click),
-        ctr: sum((r) => r.impression)
-          ? Math.round((sum((r) => r.click) / sum((r) => r.impression)) * 10000) / 100
-          : 0,
+        fee: r2v(totalFee),
+        impression: totalImpression,
+        click: totalClick,
+        ctr: totalImpression ? r2v((totalClick / totalImpression) * 100) : 0,
+        cpc: totalClick ? r2v(totalFee / totalClick) : 0,
+        cpm: totalImpression ? r2v((totalFee / totalImpression) * 1000) : 0,
         interaction: sum((r) => r.interaction),
+        msg_inquiries: totalConsult,
+        msg_openings: totalOpen,
         msg_leads: totalMsgLeads,
-        msg_lead_cost: totalMsgLeads ? Math.round((totalFee / totalMsgLeads) * 10) / 10 : 0,
+        msg_inquiry_cost: totalConsult ? r2v(totalFee / totalConsult) : 0,
+        msg_open_cost: totalOpen ? r2v(totalFee / totalOpen) : 0,
+        msg_lead_cost: totalMsgLeads ? r2v(totalFee / totalMsgLeads) : 0,
       },
       trend: [...dayMap.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([date, v]) => ({
           date,
-          fee: Math.round(v.fee * 100) / 100,
+          fee: r2v(v.fee),
           impression: v.impression,
           click: v.click,
+          msg_inquiries: v.consult,
+          msg_openings: v.open,
           msg_leads: v.msg_leads,
           active_accounts: v.accounts.size,
         })),
@@ -509,6 +526,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         collect: number;
         share: number;
         interaction: number;
+        msg_inquiries: number;
+        msg_openings: number;
         msg_leads: number;
         leads: number;
       }
@@ -523,18 +542,20 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           agent_name: r.agentName,
           advertiser_id: r.advertiserId,
           brand_user_id: r.brandUserId,
-          consume_days: 0,
-          fee: 0,
-          impression: 0,
-          click: 0,
-          like: 0,
-          comment: 0,
-          collect: 0,
-          share: 0,
-          interaction: 0,
-          msg_leads: 0,
-          leads: 0,
-        };
+        consume_days: 0,
+        fee: 0,
+        impression: 0,
+        click: 0,
+        like: 0,
+        comment: 0,
+        collect: 0,
+        share: 0,
+        interaction: 0,
+        msg_inquiries: 0,
+        msg_openings: 0,
+        msg_leads: 0,
+        leads: 0,
+      };
       if (Number(r.fee) > 0) cur.consume_days += 1;
       cur.fee += Number(r.fee);
       cur.impression += r.impression;
@@ -544,6 +565,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       cur.collect += r.collectCnt;
       cur.share += r.shareCnt;
       cur.interaction += r.interaction;
+      cur.msg_inquiries += r.messageConsult;
+      cur.msg_openings += r.msgChatUserCnt;
       cur.msg_leads += r.msgLeadsNum;
       cur.leads += r.leads;
       agg.set(r.virtualSellerId, cur);
@@ -581,6 +604,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           ...a,
           fee: Math.round(a.fee * 100) / 100,
           ctr: a.impression ? Math.round((a.click / a.impression) * 10000) / 100 : 0,
+          msg_inquiry_cost: a.msg_inquiries ? Math.round((a.fee / a.msg_inquiries) * 10) / 10 : 0,
+          msg_open_cost: a.msg_openings ? Math.round((a.fee / a.msg_openings) * 10) / 10 : 0,
           msg_lead_cost: a.msg_leads ? Math.round((a.fee / a.msg_leads) * 10) / 10 : 0,
         })),
     };

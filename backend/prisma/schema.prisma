@@ -626,6 +626,8 @@ model KoxCampaignDailyStat {
   shareCnt        Int      @default(0)
   interaction     Int      @default(0)
   msgLeadsNum     Int      @default(0)
+  msgChatUserCnt  Int      @default(0)
+  messageConsult  Int      @default(0)
   leads           Int      @default(0)
   brandId         Int      @default(2)
   rawJson         Json?

@@ -1,7 +1,13 @@
 <template>
   <PageWrapper title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
     <template #extra>
-      <a-radio-group v-model:value="days" size="small" @change="reload">
+      <a-range-picker
+        v-model:value="customRange"
+        size="small"
+        :placeholder="['开始日期', '结束日期']"
+        @change="reload"
+      />
+      <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
         <a-radio-button :value="7">近7天</a-radio-button>
         <a-radio-button :value="30">近30天</a-radio-button>
       </a-radio-group>
@@ -174,10 +180,29 @@ const auth = useAuthStore();
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);
+const customRange = ref([]);
 const tierEl = ref(null);
 let tierChart = null;
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
+
+function rangeParams() {
+  if (customRange.value?.[0] && customRange.value?.[1]) {
+    return {
+      start: customRange.value[0].format('YYYY-MM-DD'),
+      end: customRange.value[1].format('YYYY-MM-DD'),
+    };
+  }
+  return {
+    start: dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
+    end: dayjs().format('YYYY-MM-DD'),
+  };
+}
+
+function onDaysChange() {
+  customRange.value = [];
+  reload();
+}
 
 const columns = [
   { key: 'rank', title: '排名', width: 70 },
@@ -269,8 +294,7 @@ async function reload() {
       dimension: 'store',
       brandId: auth.currentBrandId ?? undefined,
       metric: 'view_sum',
-      start: dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
-      end: dayjs().format('YYYY-MM-DD'),
+      ...rangeParams(),
       page_size: 100,
     });
     const list = res.list ?? [];

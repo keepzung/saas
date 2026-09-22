@@ -1,6 +1,9 @@
 <template>
   <PageWrapper title="项目报表" subtitle="投放项目效果汇总">
     <template #extra>
+      <a-button size="small" class="export-btn" :loading="exporting" @click="exportExcelData">
+        <DownloadOutlined /> 数据导出
+      </a-button>
       <a-button type="primary" size="small" @click="goAdd">
         <PlusOutlined /> 新增项目
       </a-button>
@@ -75,16 +78,64 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
+import { PlusOutlined, DownloadOutlined } from '@ant-design/icons-vue';
 import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
 import { getSparkProjects, deleteSparkProject } from '../../api/spark';
+import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
 const auth = useAuthStore();
+const exporting = ref(false);
+
+async function exportExcelData() {
+  exporting.value = true;
+  try {
+    let rows = [];
+    if (mode.value === 'real') {
+      const res = await getSparkProjects({ brandId: auth.currentBrandId ?? 2 });
+      rows = (res.list ?? []).map((p) => ({
+        项目名称: p.name,
+        项目周期: p.period,
+        关联账户数: p.account_num,
+        预算: p.budget ?? '',
+        消耗: p.fee,
+        预算进度: p.budget_rate != null ? `${p.budget_rate}%` : '未设预算',
+        曝光量: p.impression,
+        点击量: p.click,
+        点击率: `${p.ctr}%`,
+        互动量: p.interaction,
+        私信留资: p.msg_leads,
+        留资成本: p.msg_leads ? p.msg_lead_cost : '-',
+        创建人: p.created_by,
+        备注: p.remark ?? '',
+      }));
+    } else {
+      rows = list.value.map((r) => ({
+        项目名称: r.name,
+        项目周期: r.period,
+        预算: r.budget,
+        消耗: r.cost,
+        曝光量: r.impressions,
+        点击量: r.clicks,
+        点击率: r.ctr,
+        互动量: r.interactions,
+        私信留资: r.pm_leads,
+        留资成本: r.lead_cost,
+      }));
+      message.warning('当前为演示数据，导出内容为示意数据');
+    }
+    exportExcel([{ name: '项目报表', rows }], '项目报表数据');
+    message.success('Excel 导出成功');
+  } catch {
+    message.error('导出失败，请稍后重试');
+  } finally {
+    exporting.value = false;
+  }
+}
 
 const rand = (seed) => {
   const x = Math.sin(seed * 311.7) * 43758.5453;
@@ -232,6 +283,8 @@ function goAdd() {
 
 .hl-blue { color: #3456e6; }
 .hl-green { color: #16a34a; }
+
+.export-btn { margin-right: 8px; }
 
 .c-name { font-weight: 500; }
 .muted { color: var(--color-text-secondary, #64748b); }
