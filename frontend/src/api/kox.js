@@ -36,3 +36,9 @@ export const getKoxNotes = (params) =>
 
 export const getKoxNotesSummary = (params) =>
   request.get('/kox/notes/summary', { params });
+
+export const getKoxRegionAnalysis = (params) =>
+  request.get('/kox/region-analysis', { params });
+
+export const getKoxAccountRanking = (params) =>
+  request.get('/kox/account-ranking', { params });

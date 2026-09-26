@@ -19,6 +19,7 @@ const CATEGORY_KEY = 'm_kox';
 const OPERATION_FEATURES = [
   { name: '运营总览', path: '/kox_df/operation-analysis/overview' },
   { name: '区域排行', path: '/kox_df/operation-analysis/region-ranking' },
+  { name: '区域数据分析', path: '/kox_df/operation-analysis/region-data' },
   { name: '经销商排行', path: '/kox_df/operation-analysis/dealer-ranking' },
   { name: '账号排行', path: '/kox_df/operation-analysis/author-ranking' },
   { name: '笔记排行', path: '/kox_df/operation-analysis/note-ranking' },

@@ -220,7 +220,7 @@ import {
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
 import { getCompaniesByUserId } from '../api/auth';
-import { brandTheme, BRAND_HIDDEN_MENUS } from '../config/brands';
+import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_MENU_NAME_OVERRIDES } from '../config/brands';
 
 const route = useRoute();
 const router = useRouter();
@@ -244,7 +244,18 @@ const theme = computed(() => brandTheme(auth.currentBrandId));
 
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
-  if (!hidden || hidden.length === 0) return auth.moduleTree;
+  const renames = BRAND_MENU_NAME_OVERRIDES[auth.currentBrandId];
+  const renameLeaf = (f) => (renames && renames[f.name] ? { ...f, name: renames[f.name] } : f);
+  if (!hidden || hidden.length === 0) {
+    if (!renames) return auth.moduleTree;
+    return auth.moduleTree.map((cat) => ({
+      ...cat,
+      children: (cat.children ?? []).map((g) => ({
+        ...g,
+        children: (g.children ?? []).map(renameLeaf),
+      })),
+    }));
+  }
   return auth.moduleTree
     .map((cat) => ({
       ...cat,
@@ -253,7 +264,7 @@ const categories = computed(() => {
           const hit = hidden.includes(g.name);
           if (hit) return null;
           if (!g.children?.length) return g;
-          const children = g.children.filter((f) => !hidden.includes(f.name));
+          const children = g.children.filter((f) => !hidden.includes(f.name)).map(renameLeaf);
           if (!children.length) return null;
           return { ...g, children };
         })
@@ -268,12 +279,17 @@ const avatarText = computed(() => {
 });
 
 const breadcrumbs = computed(() => {
+  const renames = BRAND_MENU_NAME_OVERRIDES[auth.currentBrandId];
   const crumbs = [];
   for (const cat of auth.moduleTree) {
     for (const group of cat.children ?? []) {
       for (const feature of group.children ?? []) {
         if (feature.path === route.path) {
-          crumbs.push(cat.name, group.name, feature.name);
+          crumbs.push(
+            cat.name,
+            group.name,
+            renames && renames[feature.name] ? renames[feature.name] : feature.name,
+          );
           return crumbs;
         }
       }

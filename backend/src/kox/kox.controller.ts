@@ -72,9 +72,49 @@ export class KoxController {
 
   @Get('kox/overview')
   overview(
-    @Query() query: { start?: string; end?: string; platform?: string; brandId?: string },
+    @Query()
+    query: {
+      start?: string;
+      end?: string;
+      platform?: string;
+      brandId?: string;
+      accountTag?: string;
+      regionName?: string;
+    },
   ) {
     return this.koxService.overview(query);
+  }
+
+  @Get('kox/region-analysis')
+  regionAnalysis(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      accountType?: string;
+    },
+  ) {
+    return this.koxService.regionAnalysis(query);
+  }
+
+  @Get('kox/account-ranking')
+  accountRanking(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      accountType?: string;
+      regionName?: string;
+      tag?: string;
+      keyword?: string;
+      metric?: string;
+      page?: string;
+      page_size?: string;
+    },
+  ) {
+    return this.koxService.accountRanking(query);
   }
 
   @Get('kox/ranking')
@@ -108,6 +148,8 @@ export class KoxController {
       keyword?: string;
       author?: string;
       isRtbAdver?: string;
+      accountTag?: string;
+      regionName?: string;
       metric?: string;
       page?: string;
       page_size?: string;
@@ -128,6 +170,8 @@ export class KoxController {
       modelTag?: string;
       keyword?: string;
       author?: string;
+      accountTag?: string;
+      regionName?: string;
     },
   ) {
     return this.koxService.notesSummary(query);

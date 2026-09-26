@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { calcCes, classifyTier, KOS_TIERS, KosTierMeta } from './kos-tier.service';
 
 export interface AccountDto {
   nickname: string;
@@ -204,6 +205,8 @@ export class KoxService {
     end?: string;
     platform?: string;
     brandId?: string;
+    accountTag?: string;
+    regionName?: string;
   }) {
     const end = query.end ? new Date(query.end) : new Date();
     const start = query.start
@@ -211,23 +214,43 @@ export class KoxService {
       : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
     const platform = query.platform || 'all';
     const brandId = query.brandId ? Number(query.brandId) : undefined;
+    const accountTag = query.accountTag || '';
+    const regionName = query.regionName || '';
 
     const where: Prisma.KoxDailyStatWhereInput = {
       platform,
       statDate: { gte: start, lte: end },
       ...(brandId !== undefined ? { brandId } : {}),
     };
-    const accountWhere: Prisma.KosAccountWhereInput = brandId
-      ? { brandId }
-      : {};
+    const accountWhere: Prisma.KosAccountWhereInput = {
+      ...(brandId ? { brandId } : {}),
+      ...(accountTag ? { accountTag } : {}),
+      ...(regionName ? { regionName } : {}),
+    };
     const campaignWhere: Prisma.KoxCampaignDailyStatWhereInput = {
       statDate: { gte: start, lte: end },
       ...(brandId ? { brandId } : {}),
     };
-    const noteWhere: Prisma.KoxNoteWhereInput = {
+    // 标签/大区筛选传导到笔记：按账号关联（accountId）或作者昵称兜底
+    let noteWhere: Prisma.KoxNoteWhereInput = {
       publishTime: { gte: start, lte: end },
       ...(brandId ? { brandId } : {}),
     };
+    let filteredAccountNames: string[] | null = null;
+    if (accountTag || regionName) {
+      const filteredAccounts = await this.prisma.kosAccount.findMany({
+        where: accountWhere,
+        select: { id: true, nickname: true },
+      });
+      filteredAccountNames = filteredAccounts.map((a) => a.nickname);
+      noteWhere = {
+        ...noteWhere,
+        OR: [
+          { account: { id: { in: filteredAccounts.map((a) => a.id) } } },
+          { authorName: { in: filteredAccountNames } },
+        ],
+      };
+    }
     const [rows, accountAgg, campaignRows, noteRows] = await Promise.all([
       this.prisma.koxDailyStat.findMany({ where, orderBy: { statDate: 'asc' } }),
       this.prisma.kosAccount.groupBy({
@@ -250,6 +273,10 @@ export class KoxService {
           shares: true,
           collects: true,
           followCount: true,
+          pmInquiries: true,
+          pmOpenings: true,
+          pmLeads: true,
+          isRtbAdver: true,
           publishTime: true,
         },
       }),
@@ -394,32 +421,115 @@ export class KoxService {
         live_conversion_cost: liveTotalLeads ? r2(liveCost / liveTotalLeads) : 0,
       },
       ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
+      // 特斯拉版汇总条（账号标签/大区筛选联动）：KOS数/门店数/粉丝覆盖/内容四指标/账均发布
+      summary: await (async () => {
+        const [fansAgg, storeGroups, accountTotal] = await Promise.all([
+          this.prisma.kosAccount.aggregate({ where: accountWhere, _sum: { fans: true } }),
+          this.prisma.kosAccount.groupBy({
+            by: ['storeName'],
+            where: { storeName: { not: null }, ...accountWhere },
+          }),
+          this.prisma.kosAccount.count({ where: accountWhere }),
+        ]);
+        const itemCntN = noteRows.length;
+        return {
+          kos_num: accountTotal,
+          store_num: storeGroups.length,
+          fans_sum: fansAgg._sum.fans ?? 0,
+          item_cnt: itemCntN,
+          exposure_sum: noteExposureSum,
+          view_sum: noteViewSum,
+          interaction_sum: noteInteractionSum,
+          avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
+        };
+      })(),
+      // 特斯拉版线索转化漏斗：投放（partner 通道，品牌级）+ 自然（未投流笔记，随筛选）
+      lead_funnel: (() => {
+        let organic = { inquiries: 0, openings: 0, leads: 0 };
+        for (const n of noteRows) {
+          if (n.isRtbAdver === true) continue;
+          organic.inquiries += n.pmInquiries;
+          organic.openings += n.pmOpenings;
+          organic.leads += n.pmLeads;
+        }
+        const camp = campaignRows.reduce(
+          (acc, r) => ({
+            enter: acc.enter + r.messageConsult,
+            open: acc.open + r.msgChatUserCnt,
+            leads: acc.leads + r.msgLeadsNum,
+          }),
+          { enter: 0, open: 0, leads: 0 },
+        );
+        const inquiries = camp.enter + organic.inquiries;
+        const openings = camp.open + organic.openings;
+        const leads = camp.leads + organic.leads;
+        return {
+          pm_inquiries: inquiries,
+          pm_openings: openings,
+          pm_leads: leads,
+          open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+          lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
+          campaign: camp,
+          organic,
+          scope_note:
+            accountTag || regionName
+              ? '筛选条件下投放部分为品牌级全量，未按筛选拆分'
+              : '投放+自然口径；投放=partner通道子账户合计，自然=未投流笔记私信',
+        };
+      })(),
       trend: (() => {
         const campByDate = new Map<
           string,
-          { fee: number; impression: number; click: number; msg_leads: number }
+          {
+            fee: number;
+            impression: number;
+            click: number;
+            msg_leads: number;
+            msg_enter: number;
+            msg_open: number;
+          }
         >();
         for (const c of campaignRows) {
           const key = c.statDate.toISOString().slice(0, 10);
           const cur =
-            campByDate.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0 };
+            campByDate.get(key) ?? {
+              fee: 0,
+              impression: 0,
+              click: 0,
+              msg_leads: 0,
+              msg_enter: 0,
+              msg_open: 0,
+            };
           cur.fee += Number(c.fee);
           cur.impression += c.impression;
           cur.click += c.click;
           cur.msg_leads += c.msgLeadsNum;
+          cur.msg_enter += c.messageConsult;
+          cur.msg_open += c.msgChatUserCnt;
           campByDate.set(key, cur);
         }
         const noteByDate = new Map<
           string,
-          { item_cnt: number; view_sum: number; interaction_sum: number }
+          {
+            item_cnt: number;
+            view_sum: number;
+            exposure_sum: number;
+            interaction_sum: number;
+          }
         >();
         for (const n of noteRows) {
           if (!n.publishTime) continue;
           const key = n.publishTime.toISOString().slice(0, 10);
           const cur =
-            noteByDate.get(key) ?? { item_cnt: 0, view_sum: 0, interaction_sum: 0 };
+            noteByDate.get(key) ?? {
+              item_cnt: 0,
+              view_sum: 0,
+              exposure_sum: 0,
+              interaction_sum: 0,
+            };
           cur.item_cnt += 1;
           cur.view_sum += n.views;
+          cur.exposure_sum += n.exposure;
           cur.interaction_sum += n.likes + n.comments + n.shares + n.collects;
           noteByDate.set(key, cur);
         }
@@ -428,55 +538,66 @@ export class KoxService {
           {
             item_cnt: number;
             view_sum: number;
+            exposure_sum: number;
             interaction_sum: number;
             total_pm_leads: number;
             ad_cost: number;
             ad_impression: number;
             ad_click: number;
             ad_msg_leads: number;
+            ad_msg_enter: number;
+            ad_msg_open: number;
           }
         >();
+        const emptyRow = () => ({
+          item_cnt: 0,
+          view_sum: 0,
+          exposure_sum: 0,
+          interaction_sum: 0,
+          total_pm_leads: 0,
+        });
+        const campPart = (camp?: {
+          fee: number;
+          impression: number;
+          click: number;
+          msg_leads: number;
+          msg_enter: number;
+          msg_open: number;
+        }) => ({
+          ad_cost: r2(camp?.fee ?? 0),
+          ad_impression: camp?.impression ?? 0,
+          ad_click: camp?.click ?? 0,
+          ad_msg_leads: camp?.msg_leads ?? 0,
+          ad_msg_enter: camp?.msg_enter ?? 0,
+          ad_msg_open: camp?.msg_open ?? 0,
+        });
         for (const r of rows) {
           const key = r.statDate.toISOString().slice(0, 10);
           const camp = campByDate.get(key);
           byDate.set(key, {
             item_cnt: r.itemCnt,
             view_sum: r.viewSum,
+            exposure_sum: r.exposureSum,
             interaction_sum: r.interactionSum,
             total_pm_leads: r.totalPmLeads,
-            ad_cost: r2(camp?.fee ?? 0),
-            ad_impression: camp?.impression ?? 0,
-            ad_click: camp?.click ?? 0,
-            ad_msg_leads: camp?.msg_leads ?? 0,
+            ...campPart(camp),
           });
         }
         for (const [key, v] of noteByDate) {
           if (!byDate.has(key)) {
-            const camp = campByDate.get(key);
             byDate.set(key, {
+              ...emptyRow(),
               item_cnt: v.item_cnt,
               view_sum: v.view_sum,
+              exposure_sum: v.exposure_sum,
               interaction_sum: v.interaction_sum,
-              total_pm_leads: 0,
-              ad_cost: r2(camp?.fee ?? 0),
-              ad_impression: camp?.impression ?? 0,
-              ad_click: camp?.click ?? 0,
-              ad_msg_leads: camp?.msg_leads ?? 0,
+              ...campPart(campByDate.get(key)),
             });
           }
         }
         for (const [key, camp] of campByDate) {
           if (!byDate.has(key)) {
-            byDate.set(key, {
-              item_cnt: 0,
-              view_sum: 0,
-              interaction_sum: 0,
-              total_pm_leads: 0,
-              ad_cost: r2(camp.fee),
-              ad_impression: camp.impression,
-              ad_click: camp.click,
-              ad_msg_leads: camp.msg_leads,
-            });
+            byDate.set(key, { ...emptyRow(), ...campPart(camp) });
           }
         }
         return [...byDate.entries()]
@@ -1050,7 +1171,7 @@ export class KoxService {
     };
   }
 
-  private noteFilters(query: {
+  private async noteFilters(query: {
     brandId?: string;
     start?: string;
     end?: string;
@@ -1060,7 +1181,14 @@ export class KoxService {
     keyword?: string;
     author?: string;
     isRtbAdver?: string;
-  }): { where: Prisma.KoxNoteWhereInput; base: Prisma.KoxNoteWhereInput; start: Date; end: Date } {
+    accountTag?: string;
+    regionName?: string;
+  }): Promise<{
+    where: Prisma.KoxNoteWhereInput;
+    base: Prisma.KoxNoteWhereInput;
+    start: Date;
+    end: Date;
+  }> {
     const end = query.end ? new Date(query.end) : new Date();
     end.setHours(23, 59, 59, 999);
     const start = query.start
@@ -1086,6 +1214,24 @@ export class KoxService {
         { authorName: { contains: query.author, mode: 'insensitive' } },
         { account: { nickname: { contains: query.author, mode: 'insensitive' } } },
       ];
+    if (query.accountTag || query.regionName) {
+      const scoped = { ...(query.accountTag ? { accountTag: query.accountTag } : {}), ...(query.regionName ? { regionName: query.regionName } : {}) };
+      const accs = await this.prisma.kosAccount.findMany({
+        where: scoped,
+        select: { id: true, nickname: true },
+      });
+      const and: Prisma.KoxNoteWhereInput[] = [
+        {
+          OR: [
+            { account: { id: { in: accs.map((a) => a.id) } } },
+            { authorName: { in: accs.map((a) => a.nickname) } },
+          ],
+        },
+      ];
+      if (where.OR) and.push({ OR: where.OR as Prisma.KoxNoteWhereInput[] });
+      where.AND = and;
+      delete where.OR;
+    }
     return { where, base, start, end };
   }
 
@@ -1099,11 +1245,13 @@ export class KoxService {
     keyword?: string;
     author?: string;
     isRtbAdver?: string;
+    accountTag?: string;
+    regionName?: string;
     metric?: string;
     page?: string;
     page_size?: string;
   }) {
-    const { where, base } = this.noteFilters(query);
+    const { where, base } = await this.noteFilters(query);
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(500, Math.max(1, Number(query.page_size ?? 20) || 20));
 
@@ -1185,8 +1333,10 @@ export class KoxService {
     modelTag?: string;
     keyword?: string;
     author?: string;
+    accountTag?: string;
+    regionName?: string;
   }) {
-    const { where } = this.noteFilters(query);
+    const { where } = await this.noteFilters(query);
     const rows = await this.prisma.koxNote.findMany({
       where,
       select: {
@@ -1259,6 +1409,385 @@ export class KoxService {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 42)
         .map(([text, count]) => ({ text, count })),
+    };
+  }
+
+  /** 特斯拉·区域/账号标签聚合双表（需求3 区域排行 + 需求8 区域数据分析共用） */
+  async regionAnalysis(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    accountType?: string;
+  }) {
+    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const start = query.start
+      ? new Date(`${query.start}T00:00:00.000`)
+      : new Date(end.getTime() - 6 * 86400000);
+    const brandId = query.brandId ? Number(query.brandId) : undefined;
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000),
+    );
+
+    const accountWhere: Prisma.KosAccountWhereInput = {
+      ...(brandId ? { brandId } : {}),
+      ...(query.accountType ? { accountType: query.accountType } : {}),
+    };
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: accountWhere,
+      select: {
+        id: true,
+        nickname: true,
+        accountType: true,
+        accountTag: true,
+        regionName: true,
+        storeName: true,
+      },
+    });
+    const notes = await this.prisma.koxNote.findMany({
+      where: {
+        publishTime: { gte: start, lte: end },
+        ...(brandId ? { brandId } : {}),
+      },
+      select: {
+        accountId: true,
+        authorName: true,
+        exposure: true,
+        views: true,
+        likes: true,
+        collects: true,
+        comments: true,
+        shares: true,
+        followCount: true,
+        pmInquiries: true,
+        pmOpenings: true,
+        pmLeads: true,
+        isRtbAdver: true,
+      },
+    });
+
+    // 笔记 → 账号键（accountId 优先，authorName 兜底）
+    const idToAcc = new Map(accounts.map((a) => [a.id, a]));
+    const nameToAcc = new Map(accounts.map((a) => [a.nickname, a]));
+    interface Agg {
+      kos: Set<number>;
+      published: Set<number>;
+      note_cnt: number;
+      exposure: number;
+      view: number;
+      interaction: number;
+      ces: number;
+      pm_inquiries: number;
+      pm_openings: number;
+      pm_leads: number;
+      organic_leads: number;
+    }
+    const newAgg = (): Agg => ({
+      kos: new Set(),
+      published: new Set(),
+      note_cnt: 0,
+      exposure: 0,
+      view: 0,
+      interaction: 0,
+      ces: 0,
+      pm_inquiries: 0,
+      pm_openings: 0,
+      pm_leads: 0,
+      organic_leads: 0,
+    });
+    const groups = new Map<string, Agg>();
+    const tagGroups = new Map<string, Agg>();
+    const bucketOf = (m: Map<string, Agg>, key: string) => {
+      let g = m.get(key);
+      if (!g) {
+        g = newAgg();
+        m.set(key, g);
+      }
+      return g;
+    };
+    // 账号先入桶（未发布账号也计入 KOS 数）；区域/标签两套分桶
+    const regionOf = (a: (typeof accounts)[number]) =>
+      a.regionName ?? a.storeName ?? '未知区域';
+    const tagOf = (a: (typeof accounts)[number]) => a.accountTag ?? '未标签';
+    for (const a of accounts) {
+      bucketOf(groups, regionOf(a)).kos.add(a.id);
+      bucketOf(tagGroups, tagOf(a)).kos.add(a.id);
+    }
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    for (const n of notes) {
+      const acc = n.accountId != null ? idToAcc.get(n.accountId) : undefined;
+      const byName = acc ?? (n.authorName ? nameToAcc.get(n.authorName) : undefined);
+      const rKey = byName ? regionOf(byName) : '未匹配账号';
+      const tKey = byName ? tagOf(byName) : '未标签';
+      const g = bucketOf(groups, rKey);
+      const tg = bucketOf(tagGroups, tKey);
+      for (const bucket of [g, tg]) {
+        if (byName) bucket.published.add(byName.id);
+        bucket.note_cnt += 1;
+        bucket.exposure += n.exposure;
+        bucket.view += n.views;
+        bucket.interaction += n.likes + n.comments + n.shares + n.collects;
+        bucket.ces += calcCes(
+          n.likes,
+          n.collects,
+          n.comments,
+          n.shares,
+          n.followCount,
+        );
+        bucket.pm_inquiries += n.pmInquiries;
+        bucket.pm_openings += n.pmOpenings;
+        bucket.pm_leads += n.pmLeads;
+        if (n.isRtbAdver !== true) bucket.organic_leads += n.pmLeads;
+      }
+    }
+
+    const mapRow = ([name, g]: [string, Agg]) => {
+      const kosCnt = g.kos.size;
+      return {
+        name,
+        kos_cnt: kosCnt,
+        published_cnt: g.published.size,
+        unpublished_cnt: kosCnt - g.published.size,
+        note_cnt: g.note_cnt,
+        exposure_sum: g.exposure,
+        view_sum: g.view,
+        interaction_sum: g.interaction,
+        ces_sum: g.ces,
+        avg_notes: kosCnt ? r2(g.note_cnt / kosCnt) : 0,
+        avg_exposure: g.note_cnt ? r2(g.exposure / g.note_cnt) : 0,
+        avg_ces: g.note_cnt ? r2(g.ces / g.note_cnt) : 0,
+        pm_inquiries: g.pm_inquiries,
+        pm_openings: g.pm_openings,
+        organic_leads: g.organic_leads,
+        pm_leads: g.pm_leads,
+      };
+    };
+    type RegionRow = ReturnType<typeof mapRow>;
+    const sortRows = (rows: RegionRow[]) =>
+      rows.sort((a, b) => b.kos_cnt - a.kos_cnt || b.pm_leads - a.pm_leads);
+
+    return {
+      start,
+      end,
+      days,
+      metric_note:
+        '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
+      regions: sortRows([...groups.entries()].map(mapRow)),
+      tags: sortRows([...tagGroups.entries()].map(mapRow)),
+      tier_meta: KOS_TIERS.map((t) => ({
+        key: t.key,
+        label: t.label,
+        min: t.min,
+        color: t.color,
+      })),
+    };
+  }
+
+  /** 特斯拉·账号排行（留资分层排序，需求4；总览底部 mini 榜共用 metric 切换） */
+  async accountRanking(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    accountType?: string;
+    regionName?: string;
+    tag?: string;
+    keyword?: string;
+    metric?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const start = query.start
+      ? new Date(`${query.start}T00:00:00.000`)
+      : new Date(end.getTime() - 6 * 86400000);
+    const brandId = query.brandId ? Number(query.brandId) : undefined;
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000),
+    );
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(query.page_size ?? 20) || 20));
+
+    const accountWhere: Prisma.KosAccountWhereInput = {
+      ...(brandId ? { brandId } : {}),
+      ...(query.accountType ? { accountType: query.accountType } : {}),
+      ...(query.regionName ? { regionName: query.regionName } : {}),
+      ...(query.tag ? { accountTag: query.tag } : {}),
+      ...(query.keyword
+        ? { nickname: { contains: query.keyword, mode: 'insensitive' } }
+        : {}),
+    };
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: accountWhere,
+      select: {
+        id: true,
+        authorId: true,
+        nickname: true,
+        accountType: true,
+        accountTag: true,
+        regionName: true,
+        storeName: true,
+        fans: true,
+        authorUrl: true,
+      },
+    });
+
+    const notes = await this.prisma.koxNote.findMany({
+      where: {
+        publishTime: { gte: start, lte: end },
+        ...(brandId ? { brandId } : {}),
+      },
+      select: {
+        accountId: true,
+        authorName: true,
+        exposure: true,
+        views: true,
+        likes: true,
+        collects: true,
+        comments: true,
+        shares: true,
+        followCount: true,
+        pmInquiries: true,
+        pmOpenings: true,
+        pmLeads: true,
+      },
+    });
+
+    interface AccAgg {
+      item_cnt: number;
+      exposure: number;
+      view: number;
+      interaction: number;
+      likes: number;
+      collects: number;
+      comments: number;
+      ces: number;
+      pm_inquiries: number;
+      pm_openings: number;
+      pm_leads: number;
+    }
+    const aggById = new Map<number, AccAgg>();
+    const nameToId = new Map(accounts.map((a) => [a.nickname, a.id]));
+    const idSet = new Set(accounts.map((a) => a.id));
+    const blank = (): AccAgg => ({
+      item_cnt: 0,
+      exposure: 0,
+      view: 0,
+      interaction: 0,
+      likes: 0,
+      collects: 0,
+      comments: 0,
+      ces: 0,
+      pm_inquiries: 0,
+      pm_openings: 0,
+      pm_leads: 0,
+    });
+    const bump = (accountId: number, fn: (a: AccAgg) => void) => {
+      let cur = aggById.get(accountId);
+      if (!cur) {
+        cur = blank();
+        aggById.set(accountId, cur);
+      }
+      fn(cur);
+    };
+    for (const n of notes) {
+      let accId: number | null = null;
+      if (n.accountId != null && idSet.has(n.accountId)) accId = n.accountId;
+      else if (n.authorName) accId = nameToId.get(n.authorName) ?? null;
+      if (accId == null) continue;
+      bump(accId, (a) => {
+        a.item_cnt += 1;
+        a.exposure += n.exposure;
+        a.view += n.views;
+        a.interaction += n.likes + n.comments + n.shares + n.collects;
+        a.likes += n.likes;
+        a.collects += n.collects;
+        a.comments += n.comments;
+        a.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
+        a.pm_inquiries += n.pmInquiries;
+        a.pm_openings += n.pmOpenings;
+        a.pm_leads += n.pmLeads;
+      });
+    }
+
+    const rows = accounts.map((a) => {
+      const g = aggById.get(a.id) ?? blank();
+      const tier: KosTierMeta = classifyTier(g.pm_leads, days);
+      return {
+        account_id: a.id,
+        author_id: a.authorId,
+        nickname: a.nickname,
+        account_type: a.accountType,
+        account_tag: a.accountTag,
+        region_name: a.regionName,
+        store_name: a.storeName,
+        fans: a.fans,
+        author_url: a.authorUrl,
+        item_cnt: g.item_cnt,
+        exposure_sum: g.exposure,
+        view_sum: g.view,
+        interaction_sum: g.interaction,
+        likes_sum: g.likes,
+        collects_sum: g.collects,
+        comments_sum: g.comments,
+        ces: g.ces,
+        pm_inquiries: g.pm_inquiries,
+        pm_openings: g.pm_openings,
+        pm_leads: g.pm_leads,
+        weekly_leads: Math.round((g.pm_leads / (days / 7)) * 100) / 100,
+        tier_key: tier.key,
+        tier_label: tier.label,
+        tier_rank: tier.rank,
+        tier_color: tier.color,
+      };
+    });
+
+    const METRICS = [
+      'pm_leads',
+      'exposure_sum',
+      'view_sum',
+      'interaction_sum',
+      'ces',
+      'item_cnt',
+    ] as const;
+    const metric = (METRICS as readonly string[]).includes(query.metric ?? '')
+      ? (query.metric as (typeof METRICS)[number])
+      : 'pm_leads';
+    rows.sort(
+      (a, b) =>
+        a.tier_rank - b.tier_rank ||
+        b[metric] - a[metric] ||
+        b.pm_leads - a.pm_leads,
+    );
+
+    const tierStat = KOS_TIERS.map((t) => ({
+      key: t.key,
+      label: t.label,
+      color: t.color,
+      count: rows.filter((r) => r.tier_key === t.key).length,
+    }));
+
+    return {
+      start,
+      end,
+      days,
+      metric,
+      total: rows.length,
+      page,
+      page_size: pageSize,
+      tier_stat: tierStat,
+      region_facets: [
+        ...new Set(
+          accounts.map((a) => a.regionName).filter((r): r is string => !!r),
+        ),
+      ].sort(),
+      tag_facets: [
+        ...new Set(
+          accounts.map((a) => a.accountTag).filter((t): t is string => !!t),
+        ),
+      ],
+      metric_note: '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
+      list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
   }
 

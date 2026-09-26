@@ -225,6 +225,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
+import { useRoute } from 'vue-router';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -234,6 +235,7 @@ import { getKoxAccounts, getKoxNotes, getKoxNotesSummary } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
+const route = useRoute();
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 
@@ -805,6 +807,8 @@ function onResize() {
 }
 
 onMounted(async () => {
+  const qAuthor = route.query?.author;
+  if (qAuthor) authorKw.value = String(qAuthor);
   loading.value = true;
   try {
     const probe = await getKoxNotes(

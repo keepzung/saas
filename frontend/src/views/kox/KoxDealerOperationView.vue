@@ -1,5 +1,6 @@
 <template>
-  <PageWrapper title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
+  <KoxKosTierView v-if="isTesla" />
+  <PageWrapper v-else title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
     <template #extra>
       <a-range-picker
         v-model:value="customRange"
@@ -173,10 +174,12 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
+import KoxKosTierView from './KoxKosTierView.vue';
 import { getKoxRanking } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
+const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);

@@ -1,5 +1,10 @@
 <template>
-  <PageWrapper :title="pageTitle" :subtitle="pageSubtitle">
+  <KoxRegionAnalysisView
+    v-if="isTesla && fixedDimension === 'region'"
+    embedded-title="区域排行"
+  />
+  <KoxAccountRankingView v-else-if="isTesla && fixedDimension === 'account'" />
+  <PageWrapper v-else :title="pageTitle" :subtitle="pageSubtitle">
     <template #filters>
       <FilterTopbar>
         <a-select
@@ -186,10 +191,13 @@ import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
+import KoxRegionAnalysisView from './KoxRegionAnalysisView.vue';
+import KoxAccountRankingView from './KoxAccountRankingView.vue';
 import { getKoxRanking } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const authStore = useAuthStore();
+const isTesla = computed(() => Number(authStore.currentBrandId) === 6);
 const brandOptions = (authStore.brands ?? []).map((b) => ({
   value: b.id,
   label: b.name,

@@ -1,5 +1,6 @@
 <template>
-  <PageWrapper title="KOX 运营总览" subtitle="KOS/KOB/KOC 账号运营数据">
+  <KoxTeslaOverview v-if="isTesla" />
+  <PageWrapper v-else title="KOX 运营总览" subtitle="KOS/KOB/KOC 账号运营数据">
     <template #extra>
       <a-radio-group v-model:value="platform" size="small" @change="reload">
         <a-radio-button value="all">全部平台</a-radio-button>
@@ -113,15 +114,17 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
+import KoxTeslaOverview from './components/KoxTeslaOverview.vue';
 import { getKoxOverview } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
+const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 
 const ov = ref({});
 const platform = ref('all');

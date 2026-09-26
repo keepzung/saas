@@ -109,6 +109,11 @@ const routes = [
         meta: { title: '区域排行', fixedDimension: 'region' },
       },
       {
+        path: '/kox_df/operation-analysis/region-data',
+        component: () => import('../views/kox/KoxRegionAnalysisView.vue'),
+        meta: { title: '区域数据分析' },
+      },
+      {
         path: '/kox_df/operation-analysis/author-ranking',
         component: () => import('../views/kox/KoxRankingView.vue'),
         meta: { title: '账号排行', fixedDimension: 'account' },
