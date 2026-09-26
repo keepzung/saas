@@ -64,6 +64,8 @@
             :style="{
               fontSize: w.size + 'px',
               color: w.color,
+              fontWeight: w.weight,
+              opacity: w.opacity,
             }"
           >
             {{ w.text }}
@@ -387,30 +389,41 @@ const tableTotal = computed(() =>
   mode.value === 'real' ? realTotal.value : filtered.value.length,
 );
 
+const WORD_COLORS = ['#2563eb', '#dc2626', '#ea580c', '#059669', '#7c3aed', '#db2777', '#0891b2', '#d97706'];
+function wordColor(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) % 997;
+  return WORD_COLORS[h % WORD_COLORS.length];
+}
+const wordWeight = (size) => (size >= 30 ? 800 : size >= 22 ? 700 : 600);
 const wordCloud = computed(() => {
-  const colors = ['#5087ec', '#f28e2b', '#36b37e', '#9b5de5'];
+  let list;
   if (mode.value === 'real' && summaryData.value) {
-    const kws = summaryData.value.keywords ?? [];
-    const max = Math.max(1, ...kws.map((w) => w.count));
-    return kws.map((w, i) => ({
+    list = (summaryData.value.keywords ?? []).map((w) => ({ text: w.text, count: w.count }));
+  } else {
+    const freq = new Map();
+    for (const n of notes.value) {
+      for (const w of [n.keyword, n.type]) freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+    list = [...freq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 42)
+      .map(([text, count]) => ({ text, count }));
+  }
+  const max = Math.max(1, ...list.map((w) => w.count));
+  const min = Math.min(...list.map((w) => w.count), max);
+  // 参考版式：中心大词向外递减，字号平方根梯度拉大对比，密排居中成云团
+  return list.map((w) => {
+    const ratio = max === min ? 1 : (w.count - min) / (max - min);
+    const size = Math.round(13 + Math.pow(ratio, 0.6) * 24);
+    return {
       text: w.text,
-      size: 12 + Math.round((w.count / max) * 18),
-      color: colors[i % colors.length],
-    }));
-  }
-  const freq = new Map();
-  for (const n of notes.value) {
-    for (const w of [n.keyword, n.type]) freq.set(w, (freq.get(w) ?? 0) + 1);
-  }
-  const max = Math.max(1, ...freq.values());
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 42)
-    .map(([text, count], i) => ({
-      text,
-      size: 12 + Math.round((count / max) * 18),
-      color: colors[i % colors.length],
-    }));
+      size,
+      weight: wordWeight(size),
+      color: wordColor(w.text),
+      opacity: 0.72 + ratio * 0.28,
+    };
+  });
 });
 
 const typeEffEl = ref(null);
@@ -908,20 +921,20 @@ onBeforeUnmount(() => {
 .word-cloud-chart {
   width: 100%;
   height: 400px;
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   align-content: center;
-  gap: 6px 10px;
-  padding: 0 8px;
+  gap: 1px 11px;
+  padding: 0 6px;
   overflow: hidden;
 }
 
 .cloud-word {
-  font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.28;
+  letter-spacing: -0.3px;
   transition: transform 0.2s ease;
   cursor: default;
   white-space: nowrap;
