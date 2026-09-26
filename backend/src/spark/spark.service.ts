@@ -82,7 +82,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return this.orgs.forBrand(brandId);
   }
 
-  /** 定时入口：遍历全部活跃组织，昨日若未同步则执行（幂等，跳过已同步日期）；投放与笔记互相独立 */
+  /** 定时入口：遍历全部活跃组织；断档自动回填（默认回看7天），投放与笔记互相独立 */
   private async safeSync() {
     try {
       const orgs = await this.orgs.activeOrgs();
@@ -100,34 +100,142 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** 回看窗口天数：断档自动回填范围 */
+  private lookbackDates(): string[] {
+    const days = Math.max(
+      1,
+      Math.min(14, Number(this.configService.get<string>('SPARK_LOOKBACK_DAYS') ?? 7)),
+    );
+    const list: string[] = [];
+    for (let i = 0; i < days; i += 1) {
+      const d = new Date(new Date(`${this.syncDate()}T00:00:00+08:00`).getTime() - i * 86400000);
+      list.push(d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }));
+    }
+    return list;
+  }
+
+  private async hasSuccessLog(type: string, statDate: string, brandId: number): Promise<boolean> {
+    const done = await this.prisma.sparkSyncLog.findFirst({
+      where: { syncType: type, statDate, status: 'success', brandId },
+    });
+    if (!done) return false;
+    if (type === 'notes' && done.fetched === 0) return false;
+    return true;
+  }
+
   private async safeSyncOrg(ctx: SparkOrgCtx) {
-    const statDate = this.syncDate();
-    for (const [type, runner] of [
-      ['campaign', () => this.syncCampaign(undefined, ctx)],
-      ['notes', () => this.syncNotes(undefined, undefined, ctx)],
-    ] as const) {
-      const done = await this.prisma.sparkSyncLog.findFirst({
-        where: { syncType: type, statDate, status: 'success', brandId: ctx.brandId },
-      });
-      if (done && !(type === 'notes' && done.fetched === 0)) continue;
+    const dates = this.lookbackDates();
+    const statDate = dates[0];
+    let cookieBroken = false;
+    let syncedSomething = false;
+
+    // 1) 投放：逐日补齐窗口内断档
+    for (const d of dates) {
+      if (await this.hasSuccessLog('campaign', d, ctx.brandId)) continue;
       try {
-        const result = await runner();
+        const result = await this.syncCampaign(d, ctx);
+        syncedSomething = true;
         this.logger.log(
-          `星火${type} 同步完成 brand=${ctx.brandId} ${statDate}：拉取 ${result.fetched}，入库 ${result.upserted}`,
+          `星火campaign 同步完成 brand=${ctx.brandId} ${d}：拉取 ${result.fetched}，入库 ${result.upserted}`,
         );
       } catch (error) {
         if (error instanceof SparkCookieExpiredError) {
-          this.logger.warn(
-            `星火${type} 同步跳过 brand=${ctx.brandId}：${error.message}`,
-          );
-          continue;
+          cookieBroken = true;
+          break;
         }
-        this.logger.warn(
-          `星火${type} 同步失败 brand=${ctx.brandId}: ${(error as Error).message}`,
-        );
+        this.logger.warn(`星火campaign 同步失败 brand=${ctx.brandId} ${d}: ${(error as Error).message}`);
       }
     }
-    await this.orgs.markSynced(ctx.brandId);
+
+    // 2) 笔记：取窗口内最旧断档日跑一次（发布日期窗口 D~今日，一次覆盖其后所有断档日）
+    let notesOldest: string | null = null;
+    for (const d of dates) {
+      if (!(await this.hasSuccessLog('notes', d, ctx.brandId))) notesOldest = d;
+    }
+    if (notesOldest && !cookieBroken) {
+      try {
+        const result = await this.syncNotes(notesOldest, undefined, ctx);
+        syncedSomething = true;
+        // 一次同步覆盖 notesOldest~昨日 的发布窗口，逐日落成功日志避免逐日重爬
+        const covered = dates.slice(0, dates.indexOf(notesOldest) + 1);
+        for (const d of covered) {
+          await this.prisma.sparkSyncLog.create({
+            data: {
+              syncType: 'notes',
+              statDate: d,
+              status: 'success',
+              fetched: result.fetched,
+              upserted: result.upserted,
+              message: `covered by window sync from ${notesOldest}`,
+              brandId: ctx.brandId,
+            },
+          });
+        }
+        this.logger.log(
+          `星火notes 同步完成 brand=${ctx.brandId} 自${notesOldest}：拉取 ${result.fetched}，入库 ${result.upserted}`,
+        );
+      } catch (error) {
+        if (error instanceof SparkCookieExpiredError) cookieBroken = true;
+        else {
+          this.logger.warn(
+            `星火notes 同步失败 brand=${ctx.brandId} 自${notesOldest}: ${(error as Error).message}`,
+          );
+        }
+      }
+    }
+
+    if (cookieBroken) {
+      await this.alertCookieExpired(ctx);
+    } else if (syncedSomething) {
+      await this.alertCookieRecovered(ctx);
+    }
+    if (!cookieBroken) await this.orgs.markSynced(ctx.brandId);
+  }
+
+  /* ---------- 企业微信机器人告警（WECOM_WEBHOOK_URL 为空时静默关闭） ---------- */
+  private lastCookieAlertAt = new Map<number, number>();
+  private cookieAlertActive = new Set<number>();
+  private readonly COOKIE_ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
+
+  private async alertWecom(content: string): Promise<void> {
+    const url = this.configService.get<string>('WECOM_WEBHOOK_URL');
+    if (!url) return;
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          msgtype: 'markdown',
+          markdown: { content },
+        }),
+      });
+    } catch (error) {
+      this.logger.warn(`企微告警推送失败: ${(error as Error).message}`);
+    }
+  }
+
+  private async alertCookieExpired(ctx: SparkOrgCtx): Promise<void> {
+    const last = this.lastCookieAlertAt.get(ctx.brandId) ?? 0;
+    if (this.cookieAlertActive.has(ctx.brandId) && Date.now() - last < this.COOKIE_ALERT_COOLDOWN_MS) {
+      return;
+    }
+    this.cookieAlertActive.add(ctx.brandId);
+    this.lastCookieAlertAt.set(ctx.brandId, Date.now());
+    this.logger.warn(`brand=${ctx.brandId} 星火登录态失效，已触发告警`);
+    await this.alertWecom(
+      `**🔴 星火登录态失效**\n` +
+        `> 工作区 brandId：**${ctx.brandId}**${ctx.email ? `（${ctx.email}）` : ''}\n` +
+        `> 投放/笔记数据已暂停更新（历史不丢）\n` +
+        `> 请尽快有头登录换新 cookie，换新后系统将**自动补齐断档**`,
+    );
+  }
+
+  private async alertCookieRecovered(ctx: SparkOrgCtx): Promise<void> {
+    if (!this.cookieAlertActive.has(ctx.brandId)) return;
+    this.cookieAlertActive.delete(ctx.brandId);
+    await this.alertWecom(
+      `**🟢 星火登录态已恢复**\n> 工作区 brandId：**${ctx.brandId}**\n> 断档数据已自动回填，同步恢复正常`,
+    );
   }
 
   /** 同步聚光投放账户日数据（默认昨天；可指定日期补数；ctx 指定目标组织） */
