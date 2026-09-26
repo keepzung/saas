@@ -35,7 +35,14 @@ const REMOVE_PATHS = [
 const CAMPAIGN_FEATURES = [
   { name: '投放计划', path: '/kox_df/campaign-analysis/plans' },
   { name: '项目报表', path: '/kox_df/campaign-analysis/project-reports' },
+  { name: '周报表', path: '/kox_df/campaign-analysis/cycle-report' },
   { name: '新增项目', path: '/kox_df/campaign-analysis/add' },
+];
+
+const MONITORING_FEATURES = [
+  { name: '监测列表', path: '/kox_df/monitoring/list' },
+  { name: '添加监测', path: '/kox_df/monitoring/add' },
+  { name: '添加记录', path: '/kox_df/monitoring/records' },
 ];
 
 // 曾经存在过的节点（本地曾短暂改成经销商/总部总览，需清理）
@@ -159,6 +166,47 @@ async function main() {
         console.log('created campaign feature:', f.name);
       }
       cSort += 1;
+    }
+
+    // 4) monitoring group features (监测列表/添加监测/添加记录)
+    const monitorGroup = groups.find((g) => g.name === '监测管理');
+    if (monitorGroup) {
+      let mSort = 0;
+      for (const f of MONITORING_FEATURES) {
+        const key = `${monitorGroup.key}_f_${f.path.split('/').pop()}`;
+        let existing = await prisma.moduleNode.findFirst({
+          where: { parentId: monitorGroup.id, type: 'feature', path: f.path },
+        });
+        if (!existing) {
+          existing = await prisma.moduleNode.findUnique({ where: { key } }).catch(() => null);
+        }
+        if (existing) {
+          if (existing.name !== f.name || existing.sort !== mSort || existing.path !== f.path) {
+            await prisma.moduleNode.update({
+              where: { id: existing.id },
+              data: { name: f.name, path: f.path, sort: mSort },
+            });
+            console.log('updated monitoring feature:', f.name);
+          } else {
+            console.log('monitoring feature ok:', f.name);
+          }
+        } else {
+          await prisma.moduleNode.create({
+            data: {
+              key,
+              name: f.name,
+              type: 'feature',
+              path: f.path,
+              parentId: monitorGroup.id,
+              sort: mSort,
+            },
+          });
+          console.log('created monitoring feature:', f.name);
+        }
+        mSort += 1;
+      }
+    } else {
+      console.log('group 监测管理 not found（跳过监测菜单项）');
     }
 
     // 清理历史残留（经销商/总部总览等）

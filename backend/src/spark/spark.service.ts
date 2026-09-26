@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 
 const RTB_PAGE_SIZE = 500;
@@ -13,7 +14,8 @@ const NOTE_BACKFILL_MAX_PAGES = 80;
 const NOTE_FULL_MAX_PAGES = 700;
 const NOTE_PROMOTED_MAX_PAGES = 30;
 const NOTE_WINDOW_DAYS = 30;
-const SPARK_BRAND_ID = 2;
+/** 查询类接口缺省品牌（荣威）；同步写入的品牌取自组织上下文 */
+const SPARK_DEFAULT_BRAND_ID = 2;
 
 export interface SyncResult {
   syncType: string;
@@ -24,6 +26,7 @@ export interface SyncResult {
   accountsAdded: number;
   accountsRemoved: number;
   message?: string;
+  brandId?: number;
 }
 
 @Injectable()
@@ -36,6 +39,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly api: SparkApiClient,
     private readonly configService: ConfigService,
+    private readonly orgs: SparkOrgRegistry,
   ) {}
 
   onModuleInit() {
@@ -67,50 +71,84 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return yesterday.toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   }
 
-  /** 定时入口：昨日若未同步则执行（幂等，跳过已同步日期）；投放与笔记互相独立 */
+  /** 全部活跃组织的 brandId 列表（手动同步遍历用） */
+  async activeOrgBrandIds(): Promise<number[]> {
+    const orgs = await this.orgs.activeOrgs();
+    return orgs.map((o) => o.brandId);
+  }
+
+  /** 组织上下文（手动同步用）；无配置返回 null */
+  async orgCtx(brandId: number): Promise<SparkOrgCtx | null> {
+    return this.orgs.forBrand(brandId);
+  }
+
+  /** 定时入口：遍历全部活跃组织，昨日若未同步则执行（幂等，跳过已同步日期）；投放与笔记互相独立 */
   private async safeSync() {
     try {
-      const statDate = this.syncDate();
-      for (const [type, runner] of [
-        ['campaign', () => this.syncCampaign(statDate)],
-        ['notes', () => this.syncNotes(statDate)],
-      ] as const) {
-        const done = await this.prisma.sparkSyncLog.findFirst({
-          where: { syncType: type, statDate, status: 'success' },
-        });
-        if (done && !(type === 'notes' && done.fetched === 0)) continue;
-        try {
-          const result = await runner();
-          this.logger.log(
-            `星火${type} 同步完成 ${statDate}：拉取 ${result.fetched}，入库 ${result.upserted}`,
-          );
-        } catch (error) {
-          if (error instanceof SparkCookieExpiredError) {
-            this.logger.warn(`星火${type} 同步跳过：${error.message}`);
-            continue;
-          }
-          this.logger.warn(`星火${type} 同步失败: ${(error as Error).message}`);
-        }
+      const orgs = await this.orgs.activeOrgs();
+      if (!orgs.length) {
+        this.logger.warn('星火定时同步跳过：无活跃组织配置');
+        return;
+      }
+      for (const org of orgs) {
+        await this.safeSyncOrg(
+          { brandId: org.brandId, orgCode: org.orgCode, cookie: org.cookie, email: org.email },
+        );
       }
     } catch (error) {
       this.logger.warn(`星火定时同步失败: ${(error as Error).message}`);
     }
   }
 
-  /** 同步聚光投放账户日数据（默认昨天；可指定日期补数） */
-  async syncCampaign(date?: string): Promise<SyncResult> {
+  private async safeSyncOrg(ctx: SparkOrgCtx) {
+    const statDate = this.syncDate();
+    for (const [type, runner] of [
+      ['campaign', () => this.syncCampaign(undefined, ctx)],
+      ['notes', () => this.syncNotes(undefined, undefined, ctx)],
+    ] as const) {
+      const done = await this.prisma.sparkSyncLog.findFirst({
+        where: { syncType: type, statDate, status: 'success', brandId: ctx.brandId },
+      });
+      if (done && !(type === 'notes' && done.fetched === 0)) continue;
+      try {
+        const result = await runner();
+        this.logger.log(
+          `星火${type} 同步完成 brand=${ctx.brandId} ${statDate}：拉取 ${result.fetched}，入库 ${result.upserted}`,
+        );
+      } catch (error) {
+        if (error instanceof SparkCookieExpiredError) {
+          this.logger.warn(
+            `星火${type} 同步跳过 brand=${ctx.brandId}：${error.message}`,
+          );
+          continue;
+        }
+        this.logger.warn(
+          `星火${type} 同步失败 brand=${ctx.brandId}: ${(error as Error).message}`,
+        );
+      }
+    }
+    await this.orgs.markSynced(ctx.brandId);
+  }
+
+  /** 同步聚光投放账户日数据（默认昨天；可指定日期补数；ctx 指定目标组织） */
+  async syncCampaign(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
     if (this.syncing) throw new Error('同步进行中，请稍后再试');
     this.syncing = true;
     try {
+      const org = ctx ?? (await this.orgs.forBrand());
+      if (!org) throw new Error('无可用星火组织配置');
       const statDate = date ?? this.syncDate();
       const rows: RtbAccountMetrics[] = [];
       for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
-        const data = await this.api.rtbMetrics({
-          timeStart: statDate,
-          timeEnd: statDate,
-          pageIndex,
-          pageSize: RTB_PAGE_SIZE,
-        });
+        const data = await this.api.rtbMetrics(
+          {
+            timeStart: statDate,
+            timeEnd: statDate,
+            pageIndex,
+            pageSize: RTB_PAGE_SIZE,
+          },
+          org,
+        );
         rows.push(...(data.rtbAccountMetricsVos ?? []));
         if (rows.length >= (data.total ?? 0) || !(data.rtbAccountMetricsVos ?? []).length) {
           break;
@@ -151,7 +189,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             msgChatUserCnt: num(r.msgChatUserCnt),
             messageConsult: num(r.messageConsult),
             leads: num(r.leads),
-            brandId: SPARK_BRAND_ID,
+            brandId: org.brandId,
             rawJson: r as Prisma.InputJsonValue,
           },
           update: {
@@ -173,7 +211,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
 
       // 账户镜像 diff（新增/移除）
-      const accountsAdded = await this.mirrorAccounts(rows, sellerIds);
+      const accountsAdded = await this.mirrorAccounts(rows, sellerIds, org.brandId);
 
       const result: SyncResult = {
         syncType: 'campaign',
@@ -184,7 +222,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         accountsAdded,
         accountsRemoved: 0,
       };
-      await this.prisma.sparkSyncLog.create({ data: { ...result, message: undefined } });
+      await this.prisma.sparkSyncLog.create({
+        data: { ...result, message: undefined, brandId: org.brandId },
+      });
       return result;
     } finally {
       this.syncing = false;
@@ -201,7 +241,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   async syncNotes(
     date?: string,
     opts?: { backfill?: boolean; full?: boolean; promoted?: boolean },
+    ctx?: SparkOrgCtx,
   ): Promise<SyncResult> {
+    const org = ctx ?? (await this.orgs.forBrand());
+    if (!org) throw new Error('无可用星火组织配置');
     const statDate = date ?? this.syncDate();
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
     const maxPages = opts?.full
@@ -225,15 +268,18 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const rows: Record<string, unknown>[] = [];
     let total = 0;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
-      const data = await this.api.noteDetailList({
-        timeStart,
-        timeEnd: statDate,
-        publishStart,
-        publishEnd: today,
-        promotedOnly: !!opts?.promoted,
-        pageNo,
-        pageSize: NOTE_PAGE_SIZE,
-      });
+      const data = await this.api.noteDetailList(
+        {
+          timeStart,
+          timeEnd: statDate,
+          publishStart,
+          publishEnd: today,
+          promotedOnly: !!opts?.promoted,
+          pageNo,
+          pageSize: NOTE_PAGE_SIZE,
+        },
+        org,
+      );
       total = data.total;
       rows.push(...data.rows);
       if (rows.length >= data.total || !data.rows.length) break;
@@ -258,7 +304,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     };
 
     const accounts = await this.prisma.kosAccount.findMany({
-      where: { brandId: SPARK_BRAND_ID },
+      where: { brandId: org.brandId },
       select: { id: true, nickname: true, storeName: true, accountType: true },
     });
     const byNickname = new Map<string, number>();
@@ -341,7 +387,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
       const data = {
         accountId,
-        brandId: SPARK_BRAND_ID,
+        brandId: org.brandId,
         title: title || '(无标题)',
         content: null,
         noteUrl: noteUrlRaw || (noteIdRaw ? `https://www.xiaohongshu.com/explore/${noteIdRaw}` : null),
@@ -377,14 +423,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       accountsAdded: 0,
       accountsRemoved: 0,
       message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}`,
+      brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
     return result;
   }
 
   /** upsert SparkAccount 镜像并返回新增数；不在此轮出现的账户置 active=false */
-  /** 启发式归属：主机厂直营/总部素材号 → hq，其余 dealer */
-  private guessScope(name: string): string {
+  /** 启发式归属（仅荣威历史规则）：主机厂直营/总部素材号 → hq，其余（含其他组织）dealer */
+  private guessScope(brandId: number, name: string): string {
+    if (brandId !== 2) return 'dealer';
     return /^荣威ROEWE$/.test(name) ||
       /^MV_华东_上汽荣威/.test(name) ||
       /^上汽集团/.test(name) ||
@@ -394,7 +442,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       : 'dealer';
   }
 
-  private async mirrorAccounts(rows: RtbAccountMetrics[], sellerIds: Set<string>): Promise<number> {
+  private async mirrorAccounts(
+    rows: RtbAccountMetrics[],
+    sellerIds: Set<string>,
+    brandId: number,
+  ): Promise<number> {
     let added = 0;
     for (const r of rows) {
       if (!r.virtualSellerId) continue;
@@ -416,9 +468,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         lastConsumeDate: r.lastConsumeDate ?? null,
         active: true,
         lastSeenAt: new Date(),
-        brandId: SPARK_BRAND_ID,
       };
       if (existing) {
+        // 注意：更新不改写 brandId，避免跨组织同名/同 ID 账户来回漂移
         await this.prisma.sparkAccount.update({
           where: { virtualSellerId: r.virtualSellerId },
           data,
@@ -428,14 +480,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           data: {
             virtualSellerId: r.virtualSellerId,
             ...data,
-            scope: this.guessScope(name),
+            brandId,
+            scope: this.guessScope(brandId, name),
           },
         });
         added += 1;
       }
     }
     const gone = await this.prisma.sparkAccount.findMany({
-      where: { active: true, virtualSellerId: { notIn: [...sellerIds] } },
+      where: { active: true, brandId, virtualSellerId: { notIn: [...sellerIds] } },
       select: { id: true },
     });
     if (gone.length) {
@@ -447,15 +500,23 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return added;
   }
 
-  async status() {
-    const cookieConfigured = this.api.hasCookie();
+  /** 运行状态：?brandId= 按组织探测；未传时探测默认品牌并附带全部组织概览 */
+  async status(brandIdParam?: string) {
+    const brandId = brandIdParam ? Number(brandIdParam) : SPARK_DEFAULT_BRAND_ID;
+    const orgRows = await this.orgs.list();
+    const target = orgRows.find((o) => o.brandId === brandId);
+    const cookieConfigured = target
+      ? target.cookie.length > 0
+      : this.api.hasCookie();
     let latestCalculate: string | null = null;
     let cookieValid = false;
     let error: string | null = null;
     if (cookieConfigured) {
       try {
+        const ctx = await this.orgs.forBrand(brandId);
         latestCalculate = await this.api.getLatestCalculateDate(
           'redapp.app_ads_crm_mcc_org_brand_note_df',
+          ctx ?? undefined,
         );
         cookieValid = latestCalculate !== null;
       } catch (e) {
@@ -463,14 +524,25 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
     }
     const lastLogs = await this.prisma.sparkSyncLog.findMany({
+      where: { brandId },
       orderBy: { createdAt: 'desc' },
       take: 5,
     });
     const [accountTotal, accountActive] = await Promise.all([
-      this.prisma.sparkAccount.count({ where: { brandId: SPARK_BRAND_ID } }),
-      this.prisma.sparkAccount.count({ where: { brandId: SPARK_BRAND_ID, active: true } }),
+      this.prisma.sparkAccount.count({ where: { brandId } }),
+      this.prisma.sparkAccount.count({ where: { brandId, active: true } }),
     ]);
+    const orgs = orgRows.map((o) => ({
+      brand_id: o.brandId,
+      org_code: o.orgCode,
+      email: o.email,
+      active: o.active,
+      cookie_configured: o.cookie.length > 0,
+      last_sync_at: o.lastSyncAt,
+      remark: o.remark,
+    }));
     return {
+      brand_id: brandId,
       cookie_configured: cookieConfigured,
       cookie_valid: cookieValid,
       next_sync_date: this.syncDate(),
@@ -478,14 +550,21 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       error,
       accounts: { total: accountTotal, active: accountActive },
       recent_logs: lastLogs,
+      orgs,
     };
   }
 
-  async logs(query: { page?: string; page_size?: string; syncType?: string }) {
+  async logs(query: {
+    page?: string;
+    page_size?: string;
+    syncType?: string;
+    brandId?: string;
+  }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(50, Math.max(1, Number(query.page_size ?? 20) || 20));
     const where: Prisma.SparkSyncLogWhereInput = {};
     if (query.syncType) where.syncType = query.syncType;
+    if (query.brandId) where.brandId = Number(query.brandId);
     const [total, rows] = await Promise.all([
       this.prisma.sparkSyncLog.count({ where }),
       this.prisma.sparkSyncLog.findMany({
@@ -530,7 +609,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       ? new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
     start.setHours(0, 0, 0, 0);
-    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
@@ -634,7 +713,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       ? new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
     start.setHours(0, 0, 0, 0);
-    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
@@ -817,10 +896,25 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return { id, scope };
   }
 
-  updateCookie(cookie: string) {
+  /** 更新星火 cookie：带 brandId 时落库到对应组织（重启不丢），否则沿用旧的运行时热更（仅 .env 品牌） */
+  async updateCookie(cookie: string, brandIdParam?: string) {
+    if (brandIdParam) {
+      const brandId = Number(brandIdParam);
+      const ctx = await this.orgs.setCookie(brandId, cookie);
+      if (brandId === SPARK_DEFAULT_BRAND_ID) this.api.updateCookie(cookie);
+      this.logger.log(`brand ${brandId} 星火 cookie 已更新（DB + 运行时）`);
+      return { ok: true, brand_id: ctx.brandId, persisted: true };
+    }
     this.api.updateCookie(cookie);
+    const legacy = await this.orgs
+      .forBrand(SPARK_DEFAULT_BRAND_ID)
+      .catch(() => null);
+    if (legacy) {
+      await this.orgs.setCookie(SPARK_DEFAULT_BRAND_ID, cookie).catch(() => null);
+      return { ok: true, brand_id: SPARK_DEFAULT_BRAND_ID, persisted: true };
+    }
     this.logger.log('星火 cookie 已运行时更新（注意：重启后将恢复为 .env 配置）');
-    return { ok: true };
+    return { ok: true, persisted: false };
   }
 
   /** 区域汇总：投放数据按账户归属映射至大区/门店（账号名称匹配 KosAccount，未匹配单独归组） */
@@ -840,7 +934,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       ? new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
     start.setHours(0, 0, 0, 0);
-    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
     const [rows, kos, sparks] = await Promise.all([
@@ -956,7 +1050,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
   /** 项目报表列表：周期 × 关联账户自动聚合投放数据 */
   async projects(query: { brandId?: string; keyword?: string }) {
-    const brandId = query.brandId ? Number(query.brandId) : SPARK_BRAND_ID;
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const projects = await this.prisma.koxCampaignProject.findMany({
       where: {
         brandId,
@@ -992,10 +1086,26 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
               },
             })
           : null;
-        const fee = Number(agg?._sum.fee ?? 0);
-        const impression = agg?._sum.impression ?? 0;
-        const click = agg?._sum.click ?? 0;
-        const msgLeads = agg?._sum.msgLeadsNum ?? 0;
+        // 星火日聚合缺数时回退旧系统导入的周期累计快照（如特斯拉 uplus 导入）
+        let imported: Record<string, unknown> | null = null;
+        const hasDaily =
+          agg && Number(agg._sum.fee ?? 0) > 0 && Number(agg._sum.impression ?? 0) > 0;
+        if (!hasDaily && p.importedStats && typeof p.importedStats === 'object') {
+          imported = p.importedStats as Record<string, unknown>;
+        }
+        const numOr = (v: unknown, fb: number) =>
+          typeof v === 'number' && Number.isFinite(v) ? v : fb;
+        const fee = hasDaily ? Number(agg!._sum.fee ?? 0) : numOr(imported?.fee, 0);
+        const impression = hasDaily
+          ? agg!._sum.impression ?? 0
+          : numOr(imported?.impression, 0);
+        const click = hasDaily ? agg!._sum.click ?? 0 : numOr(imported?.click, 0);
+        const msgLeads = hasDaily
+          ? agg!._sum.msgLeadsNum ?? 0
+          : numOr(imported?.msg_leads, 0);
+        const interactionAgg = hasDaily
+          ? agg!._sum.interaction ?? 0
+          : numOr(imported?.interaction, 0);
         const budget = p.budget != null ? Number(p.budget) : null;
         return {
           id: p.id,
@@ -1011,9 +1121,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           impression,
           click,
           ctr: impression ? Math.round((click / impression) * 10000) / 100 : 0,
-          interaction: agg?._sum.interaction ?? 0,
+          interaction: interactionAgg,
           msg_leads: msgLeads,
           msg_lead_cost: msgLeads ? Math.round((fee / msgLeads) * 10) / 10 : 0,
+          data_source: hasDaily ? 'spark_daily' : imported ? 'imported' : 'none',
           created_by:
             p.createdBy?.nickname ?? p.createdBy?.name ?? p.createdBy?.phone ?? '-',
           created_at: p.createdAt,
@@ -1075,7 +1186,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         endDate: end,
         budget: dto?.budget != null && dto.budget > 0 ? dto.budget : null,
         remark: (dto?.remark ?? '').trim() || null,
-        brandId: brandId ? Number(brandId) : SPARK_BRAND_ID,
+        brandId: brandId ? Number(brandId) : SPARK_DEFAULT_BRAND_ID,
         createdById: userId,
         accounts: { create: ids.map((virtualSellerId) => ({ virtualSellerId })) },
       },

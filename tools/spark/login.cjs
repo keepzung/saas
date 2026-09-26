@@ -1,6 +1,7 @@
-// 星火平台登录 + 登录页结构探测
-// 用法: node login.cjs            (headless)
+// 星火平台登录 + 登录页结构探测（多账号：TAG=tesla node login.cjs → state/auth-tesla.json）
+// 用法: node login.cjs            (headless, 默认账号)
 //       HEADLESS=0 node login.cjs (有头，遇到滑块时人工拖动，脚本等待登录完成)
+//       TAG=tesla HEADLESS=0 node login.cjs  (特斯拉账号：读 .env SPARK_ACCOUNT_TESLA/SPARK_PASSWORD_TESLA)
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -12,9 +13,13 @@ for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/
   if (m) env[m[1]] = m[2];
 }
 
+const TAG = (process.env.TAG || '').trim();
 const STATE_DIR = path.join(__dirname, 'state');
-const STATE_FILE = path.join(STATE_DIR, 'auth.json');
+const STATE_FILE = path.join(STATE_DIR, TAG ? `auth-${TAG}.json` : 'auth.json');
 fs.mkdirSync(STATE_DIR, { recursive: true });
+const account = env[TAG ? `SPARK_ACCOUNT_${TAG.toUpperCase()}` : 'SPARK_ACCOUNT'] || env.SPARK_ACCOUNT;
+const password =
+  env[TAG ? `SPARK_PASSWORD_${TAG.toUpperCase()}` : 'SPARK_PASSWORD'] || env.SPARK_PASSWORD;
 
 const dumpPage = async (page, label) => {
   console.log(`\n===== [${label}] URL: ${page.url()}`);
@@ -90,8 +95,8 @@ const dumpPage = async (page, label) => {
   });
 
   if (hasUser && hasPass) {
-    await userInput.fill(env.SPARK_ACCOUNT);
-    await passInput.fill(env.SPARK_PASSWORD);
+    await userInput.fill(account);
+    await passInput.fill(password);
     await page.waitForTimeout(500);
 
     // 勾选协议：点文本左侧的圆形勾选框（坐标偏移）
@@ -170,7 +175,7 @@ const dumpPage = async (page, label) => {
     await page.waitForTimeout(3000);
     await ctx.storageState({ path: STATE_FILE });
     await page.screenshot({ path: path.join(STATE_DIR, '04-logged-in.png') });
-    console.log('\n[OK] 登录成功，state 已保存到 state/auth.json');
+    console.log(`\n[OK] 登录成功${TAG ? `（tag=${TAG}）` : ''}，state 已保存到 ${path.relative(__dirname, STATE_FILE)}`);
     await dumpPage(page, 'post-login');
   } else {
     await page.screenshot({ path: path.join(STATE_DIR, '04-not-logged.png') });

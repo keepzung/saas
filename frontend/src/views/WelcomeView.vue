@@ -114,6 +114,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
+import { brandTheme } from '../config/brands';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -122,9 +123,7 @@ const activeCard = ref(null);
 
 const systemName = computed(() => auth.systemName);
 const headerLogo = computed(() =>
-  auth.currentBrandId === 2
-    ? '/images/login/roewe-logo.png'
-    : '/images/login/logo.png',
+  brandTheme(auth.currentBrandId)?.logo || '/images/login/logo.png',
 );
 const categories = computed(() => auth.moduleTree);
 const isAdmin = computed(() => auth.user?.admin_flag === 1);

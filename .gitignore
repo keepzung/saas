@@ -14,3 +14,10 @@ PROGRESS.md
 ~$*
 data-import/*.xlsx
 data-import/*.sql
+
+# crawl artifacts (client data)
+tools/crawl-marketine/dumps/
+tools/crawl-marketine/.tokens/
+tesla/
+gree/
+dongfeng/

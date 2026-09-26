@@ -30,6 +30,9 @@ export class KoxController {
       status?: string;
       regionName?: string;
       saleArea?: string;
+      accountTag?: string;
+      createdAtStart?: string;
+      createdAtEnd?: string;
       keyword?: string;
       brandId?: string;
       page?: string;

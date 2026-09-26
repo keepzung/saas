@@ -10,11 +10,11 @@
       class="sider"
     >
 <div class="logo" @click="router.push('/welcome')">
-          <span v-if="isRoewe && !collapsed" class="logo-brand-chip">
+          <span v-if="theme?.logo && !collapsed" class="logo-brand-chip">
             <img
               class="logo-brand-img"
-              src="/images/login/roewe-logo.png"
-              alt="荣威"
+              :src="theme.logo"
+              :alt="theme.short"
             />
           </span>
           <template v-else>
@@ -148,13 +148,13 @@
             >
 <span
                   class="main-company-avatar"
-                  :class="{ 'is-logo': c.main_company_id === 2 }"
+                  :class="{ 'is-logo': brandTheme(c.main_company_id)?.logo }"
                 >
                   <img
-                    v-if="c.main_company_id === 2"
+                    v-if="brandTheme(c.main_company_id)?.logo"
                     class="company-card-logo"
-                    src="/images/login/roewe-logo.png"
-                    alt="荣威"
+                    :src="brandTheme(c.main_company_id).logo"
+                    :alt="brandTheme(c.main_company_id).short"
                   />
                   <template v-else>
                     {{ (c.company_name || '工').charAt(0) }}
@@ -220,6 +220,7 @@ import {
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
 import { getCompaniesByUserId } from '../api/auth';
+import { brandTheme, BRAND_HIDDEN_MENUS } from '../config/brands';
 
 const route = useRoute();
 const router = useRouter();
@@ -239,14 +240,7 @@ const iconMap = {
   MessageOutlined,
 };
 
-const BRAND_HIDDEN_MENUS = {
-  1: ['线索中心'],
-  2: ['任务管理', '线索中心'],
-  3: ['线索中心'],
-  4: ['线索中心'],
-};
-
-const isRoewe = computed(() => auth.currentBrandId === 2);
+const theme = computed(() => brandTheme(auth.currentBrandId));
 
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
@@ -254,7 +248,16 @@ const categories = computed(() => {
   return auth.moduleTree
     .map((cat) => ({
       ...cat,
-      children: (cat.children ?? []).filter((g) => !hidden.includes(g.name)),
+      children: (cat.children ?? [])
+        .map((g) => {
+          const hit = hidden.includes(g.name);
+          if (hit) return null;
+          if (!g.children?.length) return g;
+          const children = g.children.filter((f) => !hidden.includes(f.name));
+          if (!children.length) return null;
+          return { ...g, children };
+        })
+        .filter(Boolean),
     }))
     .filter((cat) => (cat.children ?? []).length > 0);
 });

@@ -159,9 +159,24 @@ const routes = [
         meta: { title: '车型销量' },
       },
       {
+        path: '/kox_df/campaign-analysis/cycle-report',
+        component: () => import('../views/kox/KoxCycleReportView.vue'),
+        meta: { title: '周报表' },
+      },
+      {
         path: '/kox_df/monitoring/list',
         component: () => import('../views/kox/KoxMonitoringView.vue'),
         meta: { title: '监测列表' },
+      },
+      {
+        path: '/kox_df/monitoring/add',
+        component: () => import('../views/kox/KoxMonitoringAddView.vue'),
+        meta: { title: '添加监测' },
+      },
+      {
+        path: '/kox_df/monitoring/records',
+        component: () => import('../views/kox/KoxMonitoringRecordsView.vue'),
+        meta: { title: '添加记录' },
       },
       {
         path: '/kox_df/content-task/task-list',

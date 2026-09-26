@@ -2,7 +2,10 @@ import request from './request';
 
 export const sparkSync = (data) => request.post('/spark/sync', data);
 
-export const getSparkStatus = () => request.get('/spark/status');
+export const getSparkStatus = (params) =>
+  request.get('/spark/status', { params });
+
+export const updateSparkCookie = (data) => request.post('/spark/cookie', data);
 
 export const getSparkLogs = (params) => request.get('/spark/logs', { params });
 

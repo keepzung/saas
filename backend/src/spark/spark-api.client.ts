@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { SparkOrgCtx } from './spark-org.registry';
 
 export interface RtbAccountMetrics {
   virtualSellerId: string;
@@ -85,8 +86,9 @@ export class SparkApiClient {
     body: Record<string, unknown> | null,
     referer = `${MCC_BASE}/micro/aurora-data`,
     method: 'POST' | 'GET' = 'POST',
+    ctx?: SparkOrgCtx,
   ): Promise<T> {
-    const cookie = this.cookie();
+    const cookie = ctx?.cookie ?? this.cookie();
     if (!cookie) {
       throw new Error('星火 API 未配置（SPARK_COOKIE 为空）');
     }
@@ -128,32 +130,43 @@ export class SparkApiClient {
     return json.data;
   }
 
-  /** 聚光投放账户指标（pageIndex 从 1 开始） */
-  async rtbMetrics(params: {
-    timeStart: string;
-    timeEnd: string;
-    pageIndex: number;
-    pageSize?: number;
-  }): Promise<RtbMetricsData> {
-    return this.request<RtbMetricsData>('/api/mcc/board/rtb_metrics', {
-      timeEnd: params.timeEnd,
-      timeStart: params.timeStart,
-      showStar: false,
-      accountOrgCode: this.orgCode,
-      accountCode: '',
-      pageIndex: params.pageIndex,
-      pageSize: params.pageSize ?? 500,
-      tagIds: [],
-      launchStatus: '',
-    });
+  /** 聚光投放账户指标（pageIndex 从 1 开始；ctx 指定组织，缺省用 .env 组织） */
+  async rtbMetrics(
+    params: {
+      timeStart: string;
+      timeEnd: string;
+      pageIndex: number;
+      pageSize?: number;
+    },
+    ctx?: SparkOrgCtx,
+  ): Promise<RtbMetricsData> {
+    return this.request<RtbMetricsData>(
+      '/api/mcc/board/rtb_metrics',
+      {
+        timeEnd: params.timeEnd,
+        timeStart: params.timeStart,
+        showStar: false,
+        accountOrgCode: ctx?.orgCode ?? this.orgCode,
+        accountCode: '',
+        pageIndex: params.pageIndex,
+        pageSize: params.pageSize ?? 500,
+        tagIds: [],
+        launchStatus: '',
+      },
+      undefined,
+      'POST',
+      ctx,
+    );
   }
 
   /** vision BI 通用明细（笔记/员工/线索等视图， Phase 2b 启用） */
-  async visionDetailList(body: Record<string, unknown>): Promise<unknown> {
+  async visionDetailList(body: Record<string, unknown>, ctx?: SparkOrgCtx) {
     return this.request<unknown>(
       '/api/vision/mcc_dashboard/target_detail_list',
       body,
       `${MCC_BASE}/micro/note-data`,
+      'POST',
+      ctx,
     );
   }
 
@@ -166,7 +179,7 @@ export class SparkApiClient {
     promotedOnly?: boolean;
     pageNo: number;
     pageSize?: number;
-  }): Promise<{ total: number; rows: Record<string, unknown>[] }> {
+  }, ctx?: SparkOrgCtx): Promise<{ total: number; rows: Record<string, unknown>[] }> {
     const body = {
       viewAlias: 'mcc_assets_creativityContent_noteAnalysisView',
       chart: 'noteList',
@@ -271,7 +284,7 @@ export class SparkApiClient {
         },
       ],
     };
-    const data = (await this.visionDetailList(body)) as {
+    const data = (await this.visionDetailList(body, ctx)) as {
       detailListVo?: {
         total?: number;
         detailDataList?: Record<string, unknown>[];
@@ -284,20 +297,22 @@ export class SparkApiClient {
   }
 
   /** 表格级最新计算分区日（如 2026-09-20）；无值时返回 null */
-  async getLatestCalculateDate(tableName: string): Promise<string | null> {
+  async getLatestCalculateDate(tableName: string, ctx?: SparkOrgCtx): Promise<string | null> {
     const data = await this.request<string | null>(
       `/api/mcc/board/get_table_latest_calculate_date?tableName=${encodeURIComponent(tableName)}`,
       null,
       `${MCC_BASE}/micro/clues-data`,
       'GET',
+      ctx,
     );
     return typeof data === 'string' && data ? data : null;
   }
 
   /** cookie 有效性探测 */
-  async ping(): Promise<boolean> {
+  async ping(ctx?: SparkOrgCtx): Promise<boolean> {
     const date = await this.getLatestCalculateDate(
       'redapp.app_ads_crm_mcc_org_brand_note_df',
+      ctx,
     );
     return date !== null;
   }

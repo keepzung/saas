@@ -40,6 +40,14 @@
           :options="regionOptions"
           @change="() => reload(true)"
         />
+        <a-select
+          v-model:value="accountTag"
+          style="width: 130px"
+          allow-clear
+          placeholder="账号标签"
+          :options="tagOptions"
+          @change="() => reload(true)"
+        />
         <template #actions>
           <a-button @click="importOpen = true">
             <FileExcelOutlined /> Excel 导入
@@ -377,6 +385,7 @@ const columns = [
   { key: 'author_id', title: 'UID', dataIndex: 'author_id', width: 160, ellipsis: true },
   { key: 'platform', title: '平台', width: 90 },
   { key: 'account_type', title: '账号类型', dataIndex: 'account_type', width: 100 },
+  { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 100 },
   { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 110, sorter: true },
   { key: 'region_name', title: '大区', dataIndex: 'region_name', width: 100, ellipsis: true },
   { key: 'sale_area', title: '销售区域', dataIndex: 'sale_area', width: 110, ellipsis: true },
@@ -396,6 +405,8 @@ const accountType = ref(undefined);
 const keyword = ref('');
 const regionName = ref(undefined);
 const regionOptions = ref([]);
+const accountTag = ref(undefined);
+const tagOptions = ref([]);
 const page = ref(1);
 const PAGE_SIZE = 20;
 const sortField = ref(undefined);
@@ -437,6 +448,7 @@ async function reload(resetPage = false) {
       accountType: accountType.value || undefined,
       keyword: keyword.value || undefined,
       regionName: regionName.value || undefined,
+      accountTag: accountTag.value || undefined,
       brandId: auth.currentBrandId ?? undefined,
       page: page.value,
       page_size: PAGE_SIZE,
@@ -450,6 +462,9 @@ async function reload(resetPage = false) {
     total.value = res.total;
     if (Array.isArray(res.region_facets)) {
       regionOptions.value = res.region_facets.map((x) => ({ label: x, value: x }));
+    }
+    if (Array.isArray(res.tag_facets)) {
+      tagOptions.value = res.tag_facets.map((x) => ({ label: x, value: x }));
     }
   } catch (e) {
     message.error(e.message || '加载失败');

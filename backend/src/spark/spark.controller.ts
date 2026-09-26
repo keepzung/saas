@@ -22,28 +22,56 @@ export class SparkController {
   constructor(private sparkService: SparkService) {}
 
   @Post('spark/sync')
-  sync(@Body() dto: { date?: string; type?: string; backfill?: boolean; full?: boolean; promoted?: boolean }) {
+  async sync(
+    @Body()
+    dto: {
+      date?: string;
+      type?: string;
+      backfill?: boolean;
+      full?: boolean;
+      promoted?: boolean;
+      brandId?: string | number;
+    },
+  ) {
     const type = dto?.type ?? 'all';
     const noteOpts = {
       backfill: !!dto?.backfill,
       full: !!dto?.full,
       promoted: !!dto?.promoted,
     };
-    if (type === 'campaign') return this.sparkService.syncCampaign(dto?.date);
-    if (type === 'notes') return this.sparkService.syncNotes(dto?.date, noteOpts);
-    return Promise.all([
-      this.sparkService.syncCampaign(dto?.date),
-      this.sparkService.syncNotes(dto?.date, noteOpts),
-    ]).then(([campaign, notes]) => ({ campaign, notes }));
+    // 指定 brandId → 只同步该组织；否则遍历全部活跃组织
+    const brandIds = dto?.brandId
+      ? [Number(dto.brandId)]
+      : (await this.sparkService.activeOrgBrandIds());
+    const results = [];
+    for (const brandId of brandIds) {
+      const ctx = await this.sparkService.orgCtx(brandId);
+      if (!ctx) continue;
+      if (type === 'campaign') {
+        results.push(await this.sparkService.syncCampaign(dto?.date, ctx));
+      } else if (type === 'notes') {
+        results.push(await this.sparkService.syncNotes(dto?.date, noteOpts, ctx));
+      } else {
+        results.push({
+          brandId,
+          campaign: await this.sparkService.syncCampaign(dto?.date, ctx),
+          notes: await this.sparkService.syncNotes(dto?.date, noteOpts, ctx),
+        });
+      }
+    }
+    return brandIds.length === 1 ? results[0] : results;
   }
 
   @Get('spark/status')
-  status() {
-    return this.sparkService.status();
+  status(@Query('brandId') brandId?: string) {
+    return this.sparkService.status(brandId);
   }
 
   @Get('spark/logs')
-  logs(@Query() query: { page?: string; page_size?: string; syncType?: string }) {
+  logs(
+    @Query()
+    query: { page?: string; page_size?: string; syncType?: string; brandId?: string },
+  ) {
     return this.sparkService.logs(query);
   }
 
@@ -97,11 +125,14 @@ export class SparkController {
   }
 
   @Post('spark/cookie')
-  updateCookie(@Body() dto: { cookie?: string }) {
+  updateCookie(@Body() dto: { cookie?: string; brandId?: string | number }) {
     if (!dto?.cookie || !dto.cookie.trim()) {
       throw new Error('cookie 不能为空');
     }
-    return this.sparkService.updateCookie(dto.cookie.trim());
+    return this.sparkService.updateCookie(
+      dto.cookie.trim(),
+      dto.brandId != null ? String(dto.brandId) : undefined,
+    );
   }
 
   @Get('spark/campaign/region')

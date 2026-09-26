@@ -64,6 +64,9 @@ export class KoxService {
     status?: string;
     regionName?: string;
     saleArea?: string;
+    accountTag?: string;
+    createdAtStart?: string;
+    createdAtEnd?: string;
     keyword?: string;
     brandId?: string;
     page?: string;
@@ -79,7 +82,14 @@ export class KoxService {
     if (query.status) where.status = query.status;
     if (query.regionName) where.regionName = query.regionName;
     if (query.saleArea) where.saleArea = query.saleArea;
+    if (query.accountTag) where.accountTag = query.accountTag;
     if (query.brandId) where.brandId = Number(query.brandId);
+    if (query.createdAtStart || query.createdAtEnd) {
+      where.createdAt = {
+        ...(query.createdAtStart ? { gte: new Date(query.createdAtStart) } : {}),
+        ...(query.createdAtEnd ? { lte: new Date(query.createdAtEnd) } : {}),
+      };
+    }
     if (query.keyword) {
       where.OR = [
         { nickname: { contains: query.keyword, mode: 'insensitive' } },
@@ -92,7 +102,7 @@ export class KoxService {
     const sort = SORT_FIELDS.includes(query.sort ?? '') ? query.sort! : 'id';
     const order: Prisma.SortOrder = query.order === 'desc' ? 'desc' : 'asc';
 
-    const [total, rows, regionFacets] = await Promise.all([
+    const [total, rows, regionFacets, tagFacets] = await Promise.all([
       this.prisma.kosAccount.count({ where }),
       this.prisma.kosAccount.findMany({
         where,
@@ -104,6 +114,13 @@ export class KoxService {
         (g) =>
           g
             .map((x) => x.regionName)
+            .filter((x): x is string => !!x)
+            .sort((a, b) => a.localeCompare(b, 'zh')),
+      ),
+      this.prisma.kosAccount.groupBy({ by: ['accountTag'], where }).then(
+        (g) =>
+          g
+            .map((x) => x.accountTag)
             .filter((x): x is string => !!x)
             .sort((a, b) => a.localeCompare(b, 'zh')),
       ),
@@ -131,6 +148,7 @@ export class KoxService {
       page,
       page_size: pageSize,
       region_facets: regionFacets,
+      tag_facets: tagFacets,
     };
   }
 
@@ -695,7 +713,7 @@ export class KoxService {
     page?: string;
     page_size?: string;
   }) {
-    const DIMENSIONS = ['region', 'saleArea', 'store', 'account'];
+    const DIMENSIONS = ['region', 'saleArea', 'store', 'account', 'tag'];
     const dimension = DIMENSIONS.includes(query.dimension ?? '')
       ? query.dimension!
       : 'region';
@@ -749,6 +767,7 @@ export class KoxService {
               saleArea: true,
               areaName: true,
               storeName: true,
+              accountTag: true,
             },
           },
         },
@@ -767,6 +786,7 @@ export class KoxService {
               saleArea: true,
               areaName: true,
               storeName: true,
+              accountTag: true,
             },
           },
         },
@@ -779,6 +799,7 @@ export class KoxService {
       saleArea: string | null;
       areaName: string | null;
       storeName: string | null;
+      accountTag?: string | null;
     }): string => {
       switch (dimension) {
         case 'saleArea':
@@ -787,6 +808,8 @@ export class KoxService {
           return a.storeName ?? '未知店铺';
         case 'account':
           return a.nickname;
+        case 'tag':
+          return a.accountTag ?? '未标签';
         default:
           return a.regionName ?? a.areaName ?? '未知大区';
       }
@@ -825,6 +848,7 @@ export class KoxService {
         saleArea: string | null;
         areaName: string | null;
         storeName: string | null;
+        accountTag?: string | null;
       },
       s: {
         itemCnt: number;
@@ -855,6 +879,77 @@ export class KoxService {
     const prevMap = new Map<string, Agg>();
     for (const r of prevRows) addRow(prevMap, r.account, r);
 
+    // 笔记累计回退：无日统计（如特斯拉旧数据导入区）时用 KoxNote 累计口径聚合
+    let metricSource: 'daily' | 'notes_cumulative' = 'daily';
+    let fallbackAccounts: {
+      id: number;
+      nickname: string;
+      regionName: string | null;
+      saleArea: string | null;
+      areaName: string | null;
+      storeName: string | null;
+      accountTag: string | null;
+      authorId: string;
+      accountType: string;
+    }[] = [];
+    if (!curRows.length && query.brandId) {
+      const brandIdNum = Number(query.brandId);
+      const noteCount = await this.prisma.koxNote.count({ where: { brandId: brandIdNum } });
+      if (noteCount > 0) {
+        metricSource = 'notes_cumulative';
+        const accounts = await this.prisma.kosAccount.findMany({
+          where: { brandId: brandIdNum },
+          select: {
+            id: true,
+            nickname: true,
+            regionName: true,
+            saleArea: true,
+            areaName: true,
+            storeName: true,
+            accountTag: true,
+            authorId: true,
+            accountType: true,
+          },
+        });
+        fallbackAccounts = accounts;
+        const acctByNickname = new Map(accounts.map((a) => [a.nickname, a]));
+        const notes = await this.prisma.koxNote.findMany({
+          where: { brandId: brandIdNum },
+          select: {
+            accountId: true,
+            authorName: true,
+            exposure: true,
+            views: true,
+            likes: true,
+            collects: true,
+            comments: true,
+            shares: true,
+            followCount: true,
+            pmLeads: true,
+          },
+        });
+        const acctById = new Map(accounts.map((a) => [a.id, a]));
+        for (const n of notes) {
+          const acct =
+            (n.accountId != null ? acctById.get(n.accountId) : undefined) ??
+            (n.authorName ? acctByNickname.get(n.authorName) : undefined);
+          if (!acct) continue;
+          const key = dimOf(acct);
+          const g = curMap.get(key) ?? newAgg(key);
+          g.accountIds.add(acct.id);
+          if (acct.storeName) g.storeNames.add(acct.storeName);
+          g.item_cnt += 1;
+          g.exposure_sum += n.exposure;
+          g.view_sum += n.views;
+          g.interaction_sum += n.likes + n.collects + n.comments + n.shares;
+          g.digg_sum += n.likes;
+          g.follow_sum += n.followCount;
+          g.pm_leads += n.pmLeads;
+          curMap.set(key, g);
+        }
+      }
+    }
+
     const accountInfo = new Map<
       string,
       {
@@ -874,6 +969,17 @@ export class KoxService {
           region_name: r.account.regionName,
           sale_area: r.account.saleArea,
         });
+      }
+      for (const a of fallbackAccounts) {
+        if (!accountInfo.has(a.nickname)) {
+          accountInfo.set(a.nickname, {
+            author_id: a.authorId,
+            account_type: a.accountType,
+            store_name: a.storeName,
+            region_name: a.regionName,
+            sale_area: a.saleArea,
+          });
+        }
       }
     }
 
@@ -931,6 +1037,7 @@ export class KoxService {
     return {
       dimension,
       metric,
+      metric_source: metricSource,
       start: start.toISOString().slice(0, 10),
       end: end.toISOString().slice(0, 10),
       summary: { ...summary, account_num: accountTotal, group_num: groups.length },

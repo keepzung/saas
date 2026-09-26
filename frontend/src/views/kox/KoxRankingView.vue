@@ -19,6 +19,7 @@
           <a-radio-button value="region">大区</a-radio-button>
           <a-radio-button value="saleArea">销售区域</a-radio-button>
           <a-radio-button value="store">店铺</a-radio-button>
+          <a-radio-button value="tag">账号标签</a-radio-button>
           <a-radio-button value="account">账号</a-radio-button>
         </a-radio-group>
         <a-select
@@ -48,7 +49,10 @@
       </FilterTopbar>
     </template>
 
-    <NoticeBar>榜单说明：统计周期内账号发布内容的曝光 / 阅读 / 互动 / 线索等指标汇总排行，环比对比等长上一周期。</NoticeBar>
+    <NoticeBar v-if="metricSource === 'notes_cumulative'">
+      数据说明：该工作区暂无日粒度统计，当前榜单按笔记累计口径实时聚合（历史累计值，无环比）。
+    </NoticeBar>
+    <NoticeBar v-else>榜单说明：统计周期内账号发布内容的曝光 / 阅读 / 互动 / 线索等指标汇总排行，环比对比等长上一周期。</NoticeBar>
 
     <a-card :bordered="false" size="small" class="sum-card">
       <a-row :gutter="16">
@@ -235,6 +239,7 @@ const list = ref([]);
 const total = ref(0);
 const summary = ref({});
 const loading = ref(false);
+const metricSource = ref('daily');
 
 const metricLabel = computed(() => METRIC_MAP[metric.value] ?? '');
 const typeColor = { KOS: 'blue', KOB: 'purple', KOC: 'cyan' };
@@ -273,6 +278,7 @@ const nameTitle = computed(
       region: '大区',
       saleArea: '销售区域',
       store: '店铺',
+      tag: '账号标签',
       account: '账号',
     })[dimension.value] ?? '名称',
 );
@@ -296,6 +302,7 @@ async function reload(resetPage = false) {
     list.value = res.list;
     total.value = res.total;
     summary.value = res.summary ?? {};
+    metricSource.value = res.metric_source ?? 'daily';
   } catch (e) {
     message.error(e.message || '加载失败');
   } finally {
