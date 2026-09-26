@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
+import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.client';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 
 const RTB_PAGE_SIZE = 500;
@@ -38,6 +39,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly api: SparkApiClient,
+    private readonly partnerApi: PartnerApiClient,
     private readonly configService: ConfigService,
     private readonly orgs: SparkOrgRegistry,
   ) {}
@@ -124,6 +126,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async safeSyncOrg(ctx: SparkOrgCtx) {
+    if (ctx.channel === 'partner') {
+      await this.safeSyncPartner(ctx);
+      return;
+    }
     const dates = this.lookbackDates();
     const statDate = dates[0];
     let cookieBroken = false;
@@ -190,6 +196,145 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       await this.alertCookieRecovered(ctx);
     }
     if (!cookieBroken) await this.orgs.markSynced(ctx.brandId);
+  }
+
+  /* ---------- partner 通道（商业化合作伙伴平台，代理商子账户投放） ---------- */
+
+  private partnerExcludes(ctx: SparkOrgCtx): string[] {
+    return (ctx.excludeKeywords ?? '')
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  private partnerNum(v: unknown): number {
+    const s = String(v ?? '').replace(/[,，\s]/g, '');
+    if (!s || s === '-' || s === '--') return 0;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /** partner 主表同步（公开：手动 sync 端点按通道分发）；昨日终值 + 今日日内快照 */
+  async syncCampaignPartner(ctx: SparkOrgCtx): Promise<SyncResult> {
+    const rows = await this.partnerApi.vsellerMonitor(ctx);
+
+    const excludes = this.partnerExcludes(ctx);
+    const skipped = rows.filter((r) => {
+      const name = String(r.virtual_seller_name ?? '');
+      return excludes.some((kw) => name.includes(kw));
+    });
+    const kept = rows.filter((r) => !skipped.includes(r));
+
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const yesterday = new Date(new Date(`${today}T00:00:00+08:00`).getTime() - 86400000)
+      .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+
+    let upserted = 0;
+    for (const r of kept) {
+      const sellerId = String(r.virtual_seller_id ?? '').trim();
+      if (!sellerId) continue;
+      const name = String(r.virtual_seller_name ?? '').trim() || sellerId;
+      const snapshots: { statDate: string; cost: string; imp: string; click: string; enter: string; open: string; leads: string }[] = [
+        {
+          statDate: yesterday,
+          cost: 'pre_1_day_cost',
+          imp: 'pre_1_day_imp_cnt',
+          click: 'pre_1_day_click_cnt',
+          enter: 'pre_1_day_msg_enter_cnt',
+          open: 'pre_1_day_msg_open_num',
+          leads: 'pre_1_day_msg_cvr_leads_cnt',
+        },
+        {
+          statDate: today,
+          cost: 'today_cost',
+          imp: 'today_imp_cnt',
+          click: 'today_click_cnt',
+          enter: 'today_msg_enter_cnt',
+          open: 'today_msg_open_num',
+          leads: 'today_msg_cvr_leads_cnt',
+        },
+      ];
+      for (const s of snapshots) {
+        const day = new Date(`${s.statDate}T00:00:00.000Z`);
+        await this.prisma.koxCampaignDailyStat.upsert({
+          where: { statDate_virtualSellerId: { statDate: day, virtualSellerId: sellerId } },
+          create: {
+            statDate: day,
+            virtualSellerId: sellerId,
+            brandUserName: name,
+            accountKind: 'partner_vseller',
+            fee: new Prisma.Decimal(this.partnerNum(r[s.cost])),
+            impression: this.partnerNum(r[s.imp]),
+            click: this.partnerNum(r[s.click]),
+            messageConsult: this.partnerNum(r[s.enter]),
+            msgChatUserCnt: this.partnerNum(r[s.open]),
+            msgLeadsNum: this.partnerNum(r[s.leads]),
+            brandId: ctx.brandId,
+            rawJson: r as Prisma.InputJsonValue,
+          },
+          update: {
+            fee: new Prisma.Decimal(this.partnerNum(r[s.cost])),
+            impression: this.partnerNum(r[s.imp]),
+            click: this.partnerNum(r[s.click]),
+            messageConsult: this.partnerNum(r[s.enter]),
+            msgChatUserCnt: this.partnerNum(r[s.open]),
+            msgLeadsNum: this.partnerNum(r[s.leads]),
+          },
+        });
+        upserted += 1;
+      }
+
+      const isActive = String(r.is_today_put ?? '') === '是';
+      await this.prisma.sparkAccount.upsert({
+        where: { virtualSellerId: sellerId },
+        create: {
+          virtualSellerId: sellerId,
+          name,
+          accountKind: 'partner_vseller',
+          brandUserId: String(r.brand_user_id ?? '') || null,
+          active: isActive,
+          lastSeenAt: new Date(),
+          brandId: ctx.brandId,
+          scope: 'dealer',
+        },
+        update: {
+          name,
+          active: isActive,
+          lastSeenAt: new Date(),
+        },
+      });
+    }
+
+    const result: SyncResult = {
+      syncType: 'campaign',
+      statDate: yesterday,
+      status: 'success',
+      fetched: kept.length,
+      upserted,
+      accountsAdded: 0,
+      accountsRemoved: 0,
+      message: `partner channel, excluded=${skipped.length}, snapshot dates ${yesterday}+${today}`,
+      brandId: ctx.brandId,
+    };
+    await this.prisma.sparkSyncLog.create({ data: { ...result, message: result.message } });
+    await this.orgs.markSynced(ctx.brandId);
+    this.logger.log(
+      `partner campaign 同步完成 brand=${ctx.brandId}：账户 ${kept.length}（排除 ${skipped.length}），写入 ${upserted} 行`,
+    );
+    return result;
+  }
+
+  private async safeSyncPartner(ctx: SparkOrgCtx) {
+    try {
+      await this.syncCampaignPartner(ctx);
+      await this.alertCookieRecovered(ctx);
+    } catch (error) {
+      if (error instanceof PartnerCookieExpiredError) {
+        await this.alertCookieExpired(ctx);
+        return;
+      }
+      this.logger.warn(`partner 同步失败 brand=${ctx.brandId}: ${(error as Error).message}`);
+    }
   }
 
   /* ---------- 企业微信机器人告警（WECOM_WEBHOOK_URL 为空时静默关闭） ---------- */
@@ -622,11 +767,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     if (cookieConfigured) {
       try {
         const ctx = await this.orgs.forBrand(brandId);
-        latestCalculate = await this.api.getLatestCalculateDate(
-          'redapp.app_ads_crm_mcc_org_brand_note_df',
-          ctx ?? undefined,
-        );
-        cookieValid = latestCalculate !== null;
+        if (ctx?.channel === 'partner') {
+          cookieValid = await this.partnerApi.ping(ctx);
+          latestCalculate = cookieValid ? this.syncDate() : null;
+        } else {
+          latestCalculate = await this.api.getLatestCalculateDate(
+            'redapp.app_ads_crm_mcc_org_brand_note_df',
+            ctx ?? undefined,
+          );
+          cookieValid = latestCalculate !== null;
+        }
       } catch (e) {
         error = (e as Error).message;
       }
@@ -644,6 +794,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       brand_id: o.brandId,
       org_code: o.orgCode,
       email: o.email,
+      channel: o.channel,
       active: o.active,
       cookie_configured: o.cookie.length > 0,
       last_sync_at: o.lastSyncAt,

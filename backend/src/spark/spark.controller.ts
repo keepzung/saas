@@ -47,6 +47,15 @@ export class SparkController {
     for (const brandId of brandIds) {
       const ctx = await this.sparkService.orgCtx(brandId);
       if (!ctx) continue;
+      if (ctx.channel === 'partner') {
+        // partner 通道：仅投放主表（无笔记/周期数据源）
+        if (type === 'notes') {
+          results.push({ brandId, skipped: 'partner 通道无笔记数据源' });
+          continue;
+        }
+        results.push(await this.sparkService.syncCampaignPartner(ctx));
+        continue;
+      }
       if (type === 'campaign') {
         results.push(await this.sparkService.syncCampaign(dto?.date, ctx));
       } else if (type === 'notes') {

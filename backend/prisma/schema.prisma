@@ -682,18 +682,22 @@ model SparkSyncLog {
 }
 
 // 星火多组织配置：每个工作区(brand)一个 MCC 组织（orgCode + 独立 cookie）
+// channel=mcc 走 mcc.xiaohongshu.com（rtb_metrics+vision 笔记）；channel=partner 走
+// partner.xiaohongshu.com 商业化合作伙伴平台（代理商子账户投放主表，如特斯拉/乐允）
 // 首次启动时若无记录且 .env 有 SPARK_COOKIE，则自动引导生成 brand 2 的记录（向后兼容旧部署）
 model SparkOrgConfig {
-  id         Int       @id @default(autoincrement())
-  brandId    Int       @unique
-  orgCode    String
-  email      String?
-  cookie     String    @default("")
-  active     Boolean   @default(true)
-  lastSyncAt DateTime?
-  remark     String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id             Int       @id @default(autoincrement())
+  brandId        Int       @unique
+  orgCode        String
+  email          String?
+  cookie         String    @default("")
+  channel        String    @default("mcc")
+  excludeKeywords String?
+  active         Boolean   @default(true)
+  lastSyncAt     DateTime?
+  remark         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model KoxCampaignProject {

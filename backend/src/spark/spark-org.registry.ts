@@ -2,12 +2,14 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** 单次星火 API 调用的组织上下文 */
+/** 单次星火 API 调用的组织上下文（channel=mcc|partner） */
 export interface SparkOrgCtx {
   brandId: number;
   orgCode: string;
   cookie: string;
   email?: string | null;
+  channel?: string;
+  excludeKeywords?: string | null;
 }
 
 interface OrgRow {
@@ -15,6 +17,8 @@ interface OrgRow {
   orgCode: string;
   email: string | null;
   cookie: string;
+  channel: string;
+  excludeKeywords: string | null;
   active: boolean;
   lastSyncAt: Date | null;
   remark: string | null;
@@ -93,6 +97,8 @@ export class SparkOrgRegistry implements OnModuleInit {
         orgCode: row.orgCode,
         cookie: row.cookie,
         email: row.email,
+        channel: row.channel,
+        excludeKeywords: row.excludeKeywords,
       };
     }
     if (targetId === 2) {
