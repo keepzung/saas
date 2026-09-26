@@ -1,7 +1,7 @@
 <template>
   <PageWrapper title="反馈分析" subtitle="评论互动与留资转化分析">
     <template #extra>
-      <a-radio-group v-model:value="days" size="small" @change="regenerate">
+      <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
         <a-radio-button :value="7">近7天</a-radio-button>
         <a-radio-button :value="30">近30天</a-radio-button>
       </a-radio-group>
@@ -9,23 +9,23 @@
 
     <a-card :bordered="false" class="pipeline-card" size="small">
       <div class="pipeline-bar">
-        <span class="pipeline-pulse"></span>
-        <span class="pipeline-status-text">评论采集正常运行</span>
+        <span class="pipeline-pulse" :class="{ off: isTesla && !laiguReal }"></span>
+        <span class="pipeline-status-text">{{ pipelineStatusText }}</span>
         <a-popover placement="bottomLeft" trigger="hover">
           <template #content>
             <div class="pipeline-popover">
               <div class="pipeline-popover-item">
                 <span class="pipeline-popover-num">1</span>
                 <div>
-                  <div class="pipeline-popover-label">内容采集</div>
-                  <div class="pipeline-popover-desc">定时抓取账号发布的笔记/视频及基础互动数据</div>
+                  <div class="pipeline-popover-label">{{ isTesla ? '来鼓私信接入' : '内容采集' }}</div>
+                  <div class="pipeline-popover-desc">{{ isTesla ? '来鼓渠道配置凭证后，私信会话定时同步入库' : '定时抓取账号发布的笔记/视频及基础互动数据' }}</div>
                 </div>
               </div>
               <div class="pipeline-popover-item">
                 <span class="pipeline-popover-num">2</span>
                 <div>
-                  <div class="pipeline-popover-label">评论抽取</div>
-                  <div class="pipeline-popover-desc">按内容维度抽取评论与 @回复，保留作者与时间信息</div>
+                  <div class="pipeline-popover-label">{{ isTesla ? '会话抽取' : '评论抽取' }}</div>
+                  <div class="pipeline-popover-desc">{{ isTesla ? '取用户最后一条消息作为评论内容，标记留资线索' : '按内容维度抽取评论与 @回复，保留作者与时间信息' }}</div>
                 </div>
               </div>
               <div class="pipeline-popover-item">
@@ -84,6 +84,16 @@
               <div class="cat-bar-fill" :style="{ background: c.color, width: c.pct + '%' }"></div>
             </div>
           </div>
+        </div>
+      </a-card>
+      <a-card v-if="topics.length" :bordered="false" size="small" title="高频话题" class="chart-card">
+        <div class="topics-cloud">
+          <span
+            v-for="t in topics"
+            :key="t.text"
+            class="topic-word"
+            :style="{ fontSize: topicSize(t.count) + 'px', color: topicColor(t.count) }"
+          >{{ t.text }}</span>
         </div>
       </a-card>
     </div>
@@ -170,6 +180,11 @@ import {
   FrownOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
+import { getLaiguFeedbackAnalysis } from '../../api/laigu';
+import { useAuthStore } from '../../stores/auth';
+
+const auth = useAuthStore();
+const isTesla = Number(auth.currentBrandId) === 6;
 
 const PAGE_SIZE = 12;
 
@@ -204,6 +219,9 @@ const REPLIES = ['发你！', '私信已发，注意查收～', '在的，价格
 const days = ref(30);
 const comments = ref([]);
 const page = ref(1);
+const topics = ref([]);
+const laiguReal = ref(false);
+const laiguNote = ref('');
 const sentimentFilter = ref('全部');
 const replyFilter = ref('全部');
 const syncTime = ref(dayjs().format('MM-DD HH:mm'));
@@ -231,6 +249,7 @@ const CAT_META = {
   产品咨询: { color: '#2563eb', bg: '#eff6ff' },
   正面评价: { color: '#059669', bg: '#ecfdf5' },
   负面评价: { color: '#dc2626', bg: '#fef2f2' },
+  闲聊互动: { color: '#64748b', bg: '#f8fafc' },
 };
 
 function regenerate() {
@@ -313,7 +332,72 @@ function onFilterChange() {
   page.value = 1;
 }
 
-onMounted(regenerate);
+function onDaysChange() {
+  if (isTesla) loadData();
+  else regenerate();
+}
+
+/** 特斯拉版：来鼓私信会话聚合（凭证未接入时回退演示数据） */
+async function loadData() {
+  try {
+    const res = await getLaiguFeedbackAnalysis({
+      brandId: auth.currentBrandId ?? 6,
+      days: days.value,
+    });
+    if ((res.total ?? 0) > 0 && (res.comments ?? []).length > 0) {
+      laiguReal.value = true;
+      laiguNote.value = res.scope_note ?? '';
+      topics.value = res.topics ?? [];
+      comments.value = (res.comments ?? []).map((c) => ({
+        id: c.id,
+        content: c.content,
+        category: c.category,
+        sentiment: c.sentiment,
+        color: (CAT_META[c.category] ?? CAT_META['闲聊互动']).color,
+        bg: (CAT_META[c.category] ?? CAT_META['闲聊互动']).bg,
+        author: c.author,
+        time: dayjs(c.time).format('MM-DD HH:mm'),
+        source: '来鼓私信',
+        isLead: c.isLead,
+        replied: c.replied,
+        replies: [],
+      }));
+      page.value = 1;
+      syncTime.value = dayjs().format('MM-DD HH:mm');
+      return;
+    }
+  } catch {
+    /* 来鼓通道不可用，回退演示 */
+  }
+  laiguReal.value = false;
+  laiguNote.value = '来鼓通道未接入（等待渠道凭证配置），当前为演示数据';
+  topics.value = [];
+  regenerate();
+}
+
+const pipelineStatusText = computed(() => {
+  if (!isTesla) return '评论采集正常运行';
+  if (laiguReal.value) return '来鼓私信接入正常';
+  return '来鼓通道未接入 · 演示数据';
+});
+
+function topicSize(count) {
+  const max = Math.max(...topics.value.map((t) => t.count), 1);
+  const min = Math.min(...topics.value.map((t) => t.count), max);
+  if (max === min) return 14;
+  return Math.round(12 + ((count - min) / (max - min)) * 12);
+}
+
+const TOPIC_COLORS = ['#2563eb', '#ea580c', '#059669', '#7c3aed', '#dc2626', '#0d9488', '#d97706'];
+function topicColor(count) {
+  const max = Math.max(...topics.value.map((t) => t.count), 1);
+  return TOPIC_COLORS[Math.max(0, TOPIC_COLORS.length - 1 - (count % TOPIC_COLORS.length))] ?? '#2563eb';
+}
+
+onMounted(() => {
+  if (isTesla) loadData();
+  else regenerate();
+});
 </script>
 
 <style scoped>
@@ -334,6 +418,24 @@ onMounted(regenerate);
   border-radius: 50%;
   display: inline-block;
   animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.pipeline-pulse.off {
+  background: #94a3b8;
+  animation: none;
+}
+
+.topics-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 4px 2px;
+}
+
+.topic-word {
+  line-height: 1.5;
+  cursor: default;
 }
 
 @keyframes pulse-glow {

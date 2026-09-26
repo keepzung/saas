@@ -18,26 +18,26 @@ const CATEGORY_KEY = 'm_kox';
 
 const OPERATION_FEATURES = [
   { name: '运营总览', path: '/kox_df/operation-analysis/overview' },
-  { name: '区域排行', path: '/kox_df/operation-analysis/region-ranking' },
+  { name: '代理商总览', path: '/kox_df/operation-analysis/dealer-ranking' },
+  { name: '账号表现分析', path: '/kox_df/operation-analysis/author-ranking' },
+  { name: '内容表现分析', path: '/kox_df/operation-analysis/note-ranking' },
+  { name: '用户反馈分析', path: '/kox_df/operation-analysis/feedback' },
   { name: '区域数据分析', path: '/kox_df/operation-analysis/region-data' },
-  { name: '经销商排行', path: '/kox_df/operation-analysis/dealer-ranking' },
-  { name: '账号排行', path: '/kox_df/operation-analysis/author-ranking' },
-  { name: '笔记排行', path: '/kox_df/operation-analysis/note-ranking' },
+  { name: '热门内容', path: '/kox_df/operation-analysis/hot-content' },
 ];
 
 const REMOVE_PATHS = [
   '/kox_df/operation-analysis/ranking',
   '/kox_df/operation-analysis/model-sales',
   '/kox_df/operation-analysis/dealer',
-  '/kox_df/operation-analysis/feedback',
+  '/kox_df/operation-analysis/region-ranking',
   '/kox_df/operation-analysis/ai-briefing',
 ];
 
 const CAMPAIGN_FEATURES = [
-  { name: '投放计划', path: '/kox_df/campaign-analysis/plans' },
-  { name: '项目报表', path: '/kox_df/campaign-analysis/project-reports' },
-  { name: '周报表', path: '/kox_df/campaign-analysis/cycle-report' },
-  { name: '新增项目', path: '/kox_df/campaign-analysis/add' },
+  { name: '投流总览', path: '/kox_df/campaign-analysis/plans' },
+  { name: '投流项目管理', path: '/kox_df/campaign-analysis/project-reports' },
+  { name: '周期报表', path: '/kox_df/campaign-analysis/cycle-report' },
 ];
 
 const MONITORING_FEATURES = [
@@ -46,10 +46,11 @@ const MONITORING_FEATURES = [
   { name: '添加记录', path: '/kox_df/monitoring/records' },
 ];
 
-// 曾经存在过的节点（本地曾短暂改成经销商/总部总览，需清理）
+// 曾经存在过的节点（需清理）
 const CAMPAIGN_STALE_PATHS = [
   '/kox_df/campaign-analysis/dealer-overview',
   '/kox_df/campaign-analysis/hq-overview',
+  '/kox_df/campaign-analysis/add',
 ];
 
 async function main() {

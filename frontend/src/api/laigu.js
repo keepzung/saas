@@ -6,6 +6,9 @@ export const getLaiguLeads = (params) =>
 export const getLaiguLeadStats = (params) =>
   request.get('/laigu/leads/stats', { params });
 
+export const getLaiguFeedbackAnalysis = (params) =>
+  request.get('/laigu/feedback/analysis', { params });
+
 export const getLaiguLeadDetail = (id) =>
   request.get(`/laigu/leads/${id}`);
 

@@ -5,7 +5,7 @@
       collapsible
       :trigger="null"
       theme="dark"
-      :width="172"
+      :width="siderWidth"
       :collapsed-width="60"
       class="sider"
     >
@@ -57,6 +57,12 @@
           <a-menu-item v-else :key="cat.id">{{ cat.name }}</a-menu-item>
         </template>
       </a-menu>
+      <div
+        v-if="!collapsed"
+        class="sider-resize-handle"
+        title="拖拽调整侧栏宽度"
+        @mousedown="onResizeStart"
+      ></div>
     </a-layout-sider>
 
     <a-layout>
@@ -198,7 +204,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import {
@@ -220,7 +226,7 @@ import {
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
 import { getCompaniesByUserId } from '../api/auth';
-import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_MENU_NAME_OVERRIDES } from '../config/brands';
+import { brandTheme, BRAND_HIDDEN_MENUS } from '../config/brands';
 
 const route = useRoute();
 const router = useRouter();
@@ -229,6 +235,35 @@ const auth = useAuthStore();
 const collapsed = ref(false);
 const selectedKeys = ref([route.path]);
 const openKeys = ref([]);
+
+// 侧栏宽度可拖拽调整（180–300px，持久化）
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 300;
+const savedWidth = Number(localStorage.getItem('sidebar_width'));
+const siderWidth = ref(savedWidth >= SIDEBAR_MIN && savedWidth <= SIDEBAR_MAX ? savedWidth : 200);
+let resizing = false;
+function onResizeStart() {
+  resizing = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+function onResizeMove(e) {
+  if (!resizing) return;
+  siderWidth.value = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(e.clientX)));
+}
+function onResizeEnd() {
+  if (!resizing) return;
+  resizing = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  localStorage.setItem('sidebar_width', String(siderWidth.value));
+}
+window.addEventListener('mousemove', onResizeMove);
+window.addEventListener('mouseup', onResizeEnd);
+onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', onResizeMove);
+  window.removeEventListener('mouseup', onResizeEnd);
+});
 
 const iconMap = {
   ProjectOutlined,
@@ -244,18 +279,7 @@ const theme = computed(() => brandTheme(auth.currentBrandId));
 
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
-  const renames = BRAND_MENU_NAME_OVERRIDES[auth.currentBrandId];
-  const renameLeaf = (f) => (renames && renames[f.name] ? { ...f, name: renames[f.name] } : f);
-  if (!hidden || hidden.length === 0) {
-    if (!renames) return auth.moduleTree;
-    return auth.moduleTree.map((cat) => ({
-      ...cat,
-      children: (cat.children ?? []).map((g) => ({
-        ...g,
-        children: (g.children ?? []).map(renameLeaf),
-      })),
-    }));
-  }
+  if (!hidden || hidden.length === 0) return auth.moduleTree;
   return auth.moduleTree
     .map((cat) => ({
       ...cat,
@@ -264,7 +288,7 @@ const categories = computed(() => {
           const hit = hidden.includes(g.name);
           if (hit) return null;
           if (!g.children?.length) return g;
-          const children = g.children.filter((f) => !hidden.includes(f.name)).map(renameLeaf);
+          const children = g.children.filter((f) => !hidden.includes(f.name));
           if (!children.length) return null;
           return { ...g, children };
         })
@@ -279,17 +303,12 @@ const avatarText = computed(() => {
 });
 
 const breadcrumbs = computed(() => {
-  const renames = BRAND_MENU_NAME_OVERRIDES[auth.currentBrandId];
   const crumbs = [];
   for (const cat of auth.moduleTree) {
     for (const group of cat.children ?? []) {
       for (const feature of group.children ?? []) {
         if (feature.path === route.path) {
-          crumbs.push(
-            cat.name,
-            group.name,
-            renames && renames[feature.name] ? renames[feature.name] : feature.name,
-          );
+          crumbs.push(cat.name, group.name, feature.name);
           return crumbs;
         }
       }
@@ -412,6 +431,22 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+.sider-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 60;
+  transition: background 0.15s;
+}
+
+.sider-resize-handle:hover {
+  background: rgba(82, 116, 246, 0.45);
 }
 
 .sider :deep(.ant-menu) {

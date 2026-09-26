@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { extractKeywords } from '../common/text-keywords';
 import { LaiguApiClient, LaiguSession } from './laigu-api.client';
 
 const MAX_PAGES_PER_SYNC = 100;
@@ -254,6 +255,115 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
     return { total, resourced, with_phone: withPhone, today };
+  }
+
+  /** 用户反馈分析聚合（特斯拉面板）：会话级评论分类/情感/高频话题，规则引擎无外部依赖 */
+  async feedbackAnalysis(query: { brandId?: string; days?: string }) {
+    const brandId = Number(query.brandId ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
+    const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
+    const since = new Date(Date.now() - days * 86400000);
+    const rows = await this.prisma.laiguLead.findMany({
+      where: {
+        brandId,
+        OR: [{ lastMessageAt: { gte: since } }, { sessionCreatedAt: { gte: since } }],
+      },
+      select: {
+        id: true,
+        clientName: true,
+        lastClientContent: true,
+        isResource: true,
+        phone: true,
+        messageCount: true,
+        clientMessageCount: true,
+        lastMessageAt: true,
+        sessionCreatedAt: true,
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 5000,
+    });
+
+    const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金'];
+    const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '油耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装'];
+    const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮'];
+    const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞'];
+
+    const classify = (text: string): { category: string; sentiment: '正面' | '中性' | '负面' } => {
+      const s = text ?? '';
+      const has = (list: string[]) => list.some((w) => s.includes(w));
+      if (has(NEG_WORDS)) return { category: '负面评价', sentiment: '负面' };
+      if (has(POS_WORDS)) return { category: '正面评价', sentiment: '正面' };
+      if (has(PRICE_WORDS)) return { category: '价格咨询', sentiment: '中性' };
+      if (has(PRODUCT_WORDS)) return { category: '产品咨询', sentiment: '中性' };
+      return { category: '闲聊互动', sentiment: '中性' };
+    };
+
+    const catCount = new Map<string, number>();
+    const sentiCount = new Map<string, number>();
+    let leads = 0;
+    let withPhone = 0;
+    let replied = 0;
+    const detail: {
+      id: number;
+      author: string;
+      content: string;
+      category: string;
+      sentiment: string;
+      isLead: boolean;
+      replied: boolean;
+      time: string;
+    }[] = [];
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    let today = 0;
+    const contents: string[] = [];
+    for (const r of rows) {
+      const text = r.lastClientContent ?? '';
+      const { category, sentiment } = classify(text);
+      catCount.set(category, (catCount.get(category) ?? 0) + 1);
+      sentiCount.set(sentiment, (sentiCount.get(sentiment) ?? 0) + 1);
+      if (r.isResource) leads += 1;
+      if (r.phone) withPhone += 1;
+      const repliedRow = r.messageCount - r.clientMessageCount > 0;
+      if (repliedRow) replied += 1;
+      const lastAt = r.lastMessageAt ?? r.sessionCreatedAt;
+      if (lastAt && lastAt >= dayStart) today += 1;
+      if (text) contents.push(text);
+      if (detail.length < 500) {
+        detail.push({
+          id: r.id,
+          author: r.clientName ?? '匿名用户',
+          content: text || '（无文字内容）',
+          category,
+          sentiment,
+          isLead: !!r.isResource,
+          replied: repliedRow,
+          time: (r.lastMessageAt ?? r.sessionCreatedAt ?? new Date()).toISOString(),
+        });
+      }
+    }
+    const total = rows.length;
+    const pct = (n: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
+    return {
+      days,
+      total,
+      today,
+      leads,
+      with_phone: withPhone,
+      replied,
+      pending: total - replied,
+      reply_rate: pct(replied),
+      sentiment: (['正面', '中性', '负面'] as const).map((name) => ({
+        name,
+        count: sentiCount.get(name) ?? 0,
+        pct: pct(sentiCount.get(name) ?? 0),
+      })),
+      categories: [...catCount.entries()]
+        .map(([name, count]) => ({ name, count, pct: pct(count) }))
+        .sort((a, b) => b.count - a.count),
+      comments: detail,
+      topics: extractKeywords(contents, 30),
+      scope_note: '数据源=来鼓私信会话（用户最后一条消息），非小红书笔记评论；分类/情感为关键词规则引擎判定',
+    };
   }
 
   async leadDetail(id: number) {

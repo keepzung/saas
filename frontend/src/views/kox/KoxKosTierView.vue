@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="KOS 账号留资分层" subtitle="按周度留资分层 · 代理商综合排行">
+  <PageWrapper title="代理商总览" subtitle="KOS 账号留资分层 · 代理商综合排行">
     <template #extra>
       <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
         <a-radio-button value="7">近7天</a-radio-button>
@@ -197,9 +197,9 @@ const columns = [
   { title: '发布数', dataIndex: 'item_cnt', width: 84, sorter: (a, b) => a.item_cnt - b.item_cnt },
   { key: 'content', title: '内容完成度（周度≥3篇）', width: 190, sorter: (a, b) => a.content_pct - b.content_pct },
   { title: '曝光量', dataIndex: 'exposure_sum', width: 104, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
-  { title: '进线', dataIndex: 'pm_inquiries', width: 84, sorter: (a, b) => a.pm_inquiries - b.pm_inquiries },
-  { title: '开口', dataIndex: 'pm_openings', width: 84, sorter: (a, b) => a.pm_openings - b.pm_openings },
   { title: '留资数', dataIndex: 'pm_leads', width: 84, sorter: (a, b) => a.pm_leads - b.pm_leads },
+  { title: '进线数', dataIndex: 'pm_inquiries', width: 84, sorter: (a, b) => a.pm_inquiries - b.pm_inquiries },
+  { title: '开口数', dataIndex: 'pm_openings', width: 84, sorter: (a, b) => a.pm_openings - b.pm_openings },
   { title: '综合得分', dataIndex: 'score', width: 90, sorter: (a, b) => a.score - b.score },
 ];
 
@@ -291,9 +291,9 @@ function exportDetail() {
     发布数: r.item_cnt,
     '内容完成度(%)': r.content_pct,
     曝光量: r.exposure_sum,
-    进线: r.pm_inquiries,
-    开口: r.pm_openings,
     留资数: r.pm_leads,
+    进线数: r.pm_inquiries,
+    开口数: r.pm_openings,
     综合得分: r.score,
   }));
   exportExcel([{ name: 'KOS账号留资分层', rows }], 'KOS账号留资分层');

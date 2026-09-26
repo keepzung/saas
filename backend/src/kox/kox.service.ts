@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { calcCes, classifyTier, KOS_TIERS, KosTierMeta } from './kos-tier.service';
+import { extractKeywords } from '../common/text-keywords';
 
 export interface AccountDto {
   nickname: string;
@@ -353,6 +354,77 @@ export class KoxService {
     const campaignClick = campaignRows.reduce((acc, r) => acc + r.click, 0);
     const hasCampaign = campaignRows.length > 0;
 
+    // 全量口径（顶部账号总览两卡，不随筛选）：账号三卡 + 大区分布 + 大区内容发布数
+    const [gAccs, gNotes] = await Promise.all([
+      this.prisma.kosAccount.findMany({
+        where: brandId ? { brandId } : {},
+        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true },
+      }),
+      this.prisma.koxNote.findMany({
+        where: {
+          publishTime: { gte: start, lte: end },
+          ...(brandId ? { brandId } : {}),
+        },
+        select: {
+          accountId: true,
+          authorName: true,
+          exposure: true,
+          views: true,
+          likes: true,
+          comments: true,
+          shares: true,
+          collects: true,
+          pmLeads: true,
+        },
+      }),
+    ]);
+    const regionOfId = new Map<number, string>();
+    const regionOfName = new Map<string, string>();
+    for (const a of gAccs) {
+      const r = a.regionName ?? a.storeName ?? '未知区域';
+      regionOfId.set(a.id, r);
+      if (a.nickname && !regionOfName.has(a.nickname)) regionOfName.set(a.nickname, r);
+    }
+    const kosByRegion = new Map<string, number>();
+    for (const a of gAccs) {
+      const r = a.regionName ?? a.storeName ?? '未知区域';
+      kosByRegion.set(r, (kosByRegion.get(r) ?? 0) + 1);
+    }
+    interface RegionContent {
+      item_cnt: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_sum: number;
+      pm_leads: number;
+    }
+    const contentByRegion = new Map<string, RegionContent>();
+    for (const n of gNotes) {
+      const r =
+        (n.accountId != null ? regionOfId.get(n.accountId) : undefined) ??
+        (n.authorName ? regionOfName.get(n.authorName) : undefined) ??
+        '未匹配';
+      const cur =
+        contentByRegion.get(r) ??
+        { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
+      cur.item_cnt += 1;
+      cur.exposure_sum += n.exposure;
+      cur.view_sum += n.views;
+      cur.interaction_sum += n.likes + n.comments + n.shares + n.collects;
+      cur.pm_leads += n.pmLeads;
+      contentByRegion.set(r, cur);
+    }
+    const globalBlock = {
+      kos_num: gAccs.length,
+      store_num: new Set(gAccs.filter((a) => a.storeName).map((a) => a.storeName)).size,
+      fans_sum: gAccs.reduce((s, a) => s + a.fans, 0),
+      region_kos: [...kosByRegion.entries()]
+        .map(([region, cnt]) => ({ region, kos_cnt: cnt }))
+        .sort((a, b) => b.kos_cnt - a.kos_cnt),
+      region_content: [...contentByRegion.entries()]
+        .map(([region, v]) => ({ region, ...v }))
+        .sort((a, b) => b.item_cnt - a.item_cnt),
+    };
+
     const ad = hasCampaign
       ? {
           ad_cost: r2(campaignFee),
@@ -380,6 +452,7 @@ export class KoxService {
         };
 
     return {
+      global: globalBlock,
       store_num: await this.prisma.kosAccount.groupBy({
         by: ['storeName'],
         where: { storeName: { not: null }, ...accountWhere },
@@ -1298,6 +1371,7 @@ export class KoxService {
         author_name: n.account?.nickname ?? n.authorName ?? '-',
         account_type: n.account?.accountType ?? n.accountType ?? 'KOS',
         store_name: n.account?.storeName ?? null,
+        is_rtb_adver: n.isRtbAdver === true,
         category: n.category,
         model_tag: n.modelTag,
         exposure: n.exposure,
@@ -1340,6 +1414,7 @@ export class KoxService {
     const rows = await this.prisma.koxNote.findMany({
       where,
       select: {
+        title: true,
         likes: true,
         comments: true,
         formLeads: true,
@@ -1405,10 +1480,13 @@ export class KoxService {
       model_distribution: [...byModel.entries()]
         .map(([model, cnt]) => ({ model, cnt }))
         .sort((a, b) => b.cnt - a.cnt),
-      keywords: [...kwFreq.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 42)
-        .map(([text, count]) => ({ text, count })),
+      keywords:
+        kwFreq.size > 0
+          ? [...kwFreq.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 42)
+              .map(([text, count]) => ({ text, count }))
+          : extractKeywords(rows.map((r) => r.title), 42),
     };
   }
 

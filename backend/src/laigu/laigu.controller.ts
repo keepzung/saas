@@ -12,6 +12,11 @@ export class LaiguController {
     return this.laiguService.stats(brandId);
   }
 
+  @Get('laigu/feedback/analysis')
+  feedbackAnalysis(@Query() query: { brandId?: string; days?: string }) {
+    return this.laiguService.feedbackAnalysis(query);
+  }
+
   @Get('laigu/leads')
   leads(
     @Query()
