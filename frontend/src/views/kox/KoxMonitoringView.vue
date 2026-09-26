@@ -320,7 +320,7 @@ import { parseAccountWorkbook } from '../../utils/xlsx-import';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 
 const importOpen = ref(false);
 const importing = ref(false);

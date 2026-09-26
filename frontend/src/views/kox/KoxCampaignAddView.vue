@@ -105,7 +105,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
 const auth = useAuthStore();
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const DF_REGIONS = ['全国', '北部大区', '东部大区', '南部大区', '西部大区', '中部大区'];
 
 const accounts = ref([]);

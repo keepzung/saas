@@ -110,7 +110,7 @@ const props = defineProps({
 });
 
 const auth = useAuthStore();
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const CROWNS = ['👑', '🥈', '🥉'];
 const pageTitle = computed(() => props.embeddedTitle || '区域数据分析');
 

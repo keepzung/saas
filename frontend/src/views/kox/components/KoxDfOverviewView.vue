@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="运营总览" subtitle="东风奕境 KOS 运营数据">
+  <PageWrapper title="运营总览" :subtitle="`${brandShort} KOS 运营数据`">
     <div class="df-ov">
       <a-card size="small" class="filter-card">
         <div class="filter-row">
@@ -164,10 +164,14 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import { QuestionCircleOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../../components/PageWrapper.vue';
+import { brandTheme } from '../../../config/brands';
 import { getKoxAccounts, getKoxNotes, getKoxOverview } from '../../../api/kox';
 import { useAuthStore } from '../../../stores/auth';
 
 const auth = useAuthStore();
+const brandShort = computed(
+  () => brandTheme(auth.currentBrandId)?.short ?? (Number(auth.currentBrandId) === 7 ? '东风奕境' : '格力'),
+);
 
 const quick = ref('7');
 const range = ref([dayjs().subtract(6, 'day'), dayjs()]);

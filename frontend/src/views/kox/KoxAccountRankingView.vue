@@ -112,7 +112,7 @@ import { exportExcel } from '../../utils/excel';
 
 const auth = useAuthStore();
 const router = useRouter();
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const CROWNS = ['👑', '🥈', '🥉'];
 
 const quick = ref('7');

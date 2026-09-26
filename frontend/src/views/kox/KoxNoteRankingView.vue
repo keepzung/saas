@@ -263,7 +263,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const route = useRoute();
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 

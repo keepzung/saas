@@ -127,7 +127,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
-const isDf = computed(() => Number(auth.currentBrandId) === 7);
+const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
 
 const ov = ref({});
 const platform = ref('all');

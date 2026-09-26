@@ -183,7 +183,7 @@ const budgetRate = computed(() =>
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
-const isDf = Number(auth.currentBrandId) === 7;
+const isDf = [7, 8].includes(Number(auth.currentBrandId));
 
 const columns = computed(() => {
   const base = [

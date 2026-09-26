@@ -198,7 +198,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const authStore = useAuthStore();
 const isTesla = computed(() => Number(authStore.currentBrandId) === 6);
-const isDf = computed(() => Number(authStore.currentBrandId) === 7);
+const isDf = computed(() => [7, 8].includes(Number(authStore.currentBrandId)));
 const brandOptions = (authStore.brands ?? []).map((b) => ({
   value: b.id,
   label: b.name,
