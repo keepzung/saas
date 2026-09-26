@@ -15,6 +15,14 @@
 
     <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实投放数据。</NoticeBar>
     <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新。</NoticeBar>
+    <a-alert
+      v-if="cookieValid === false"
+      type="error"
+      show-icon
+      style="margin-bottom: 12px"
+      message="星火登录态已失效，投放数据暂停更新"
+      description="数据断档期间星火侧历史完整，重新登录换新后可补回任意断档日期。请联系管理员处理。"
+    />
 
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
       <div class="section-title"><span class="bar"></span>投流情况总览</div>
@@ -253,7 +261,7 @@ import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
-import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion } from '../../api/spark';
+import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion, getSparkStatus } from '../../api/spark';
 import { getKoxNotes } from '../../api/kox';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
@@ -275,6 +283,7 @@ const days = ref(7);
 const range = ref([]);
 const mode = ref('loading');
 const loading = ref(false);
+const cookieValid = ref(undefined);
 const page = ref(1);
 const leadTab = ref('inquiries');
 const detailTab = ref('account');
@@ -340,6 +349,11 @@ function applyData(sumRes, listRes) {
 async function probeAndLoad() {
   loading.value = true;
   try {
+    getSparkStatus({ brandId: auth.currentBrandId ?? undefined })
+      .then((s) => {
+        cookieValid.value = s.cookie_valid;
+      })
+      .catch(() => {});
     const probe = await getSparkCampaignSummary(realParams());
     if ((probe.total ?? 0) > 0) {
       mode.value = 'real';
