@@ -1,5 +1,6 @@
 <template>
-  <div class="tesla-ov">
+  <PageWrapper title="运营总览" subtitle="特斯拉 KOS 运营数据">
+    <div class="tesla-ov">
     <a-card size="small" class="filter-card">
       <div class="filter-row">
         <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
@@ -180,6 +181,7 @@
       </a-col>
     </a-row>
   </div>
+  </PageWrapper>
 </template>
 
 <script setup>
@@ -189,6 +191,7 @@ import { Empty } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import { QuestionCircleOutlined } from '@ant-design/icons-vue';
+import PageWrapper from '../../../components/PageWrapper.vue';
 import {
   getKoxAccountRanking,
   getKoxAccounts,
@@ -413,16 +416,20 @@ onBeforeUnmount(() => {
 
 .hero-banner {
   display: flex;
-  align-items: center;
-  gap: 40px;
-  padding: 8px 12px;
-  flex-wrap: wrap;
+  align-items: stretch;
+  padding: 8px 0;
 }
 
 .hero-item {
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 2px;
+  min-width: 0;
+  padding: 4px 12px;
 }
 
 .hero-label {
@@ -456,6 +463,8 @@ onBeforeUnmount(() => {
   width: 1px;
   height: 44px;
   background: #e2e8f0;
+  align-self: center;
+  flex-shrink: 0;
 }
 
 .metric-grid {
