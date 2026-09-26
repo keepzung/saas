@@ -29,21 +29,7 @@
           </a-tooltip>
         </div>
       </template>
-      <div class="pyramid">
-        <div
-          v-for="(t, i) in TIERS"
-          :key="t.label"
-          class="py-tier"
-          :style="{
-            width: `${34 + i * 22}%`,
-            background: t.color,
-            clipPath: trapezoid(i),
-          }"
-        >
-          <div class="py-label">{{ t.label }}</div>
-          <div class="py-count">{{ tierStat[t.label] ?? 0 }} 家</div>
-        </div>
-      </div>
+      <div ref="tierEl" class="tier-chart" />
     </a-card>
 
     <a-card size="small" :bordered="false">
@@ -132,8 +118,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
+import * as echarts from 'echarts';
 import {
   QuestionCircleOutlined,
   EditOutlined,
@@ -161,14 +148,11 @@ const monthOptions = ref([]);
 const regionOptions = ref([]);
 const loading = ref(false);
 const data = ref({ list: [], summary: {}, tier_stat: {} });
+const tierEl = ref(null);
+let tierChart = null;
 
 const fmt = (n) => (n ?? 0).toLocaleString();
 const pct = (v) => Math.min(100, Math.round(Number(v ?? 0)));
-
-function trapezoid(i) {
-  const inset = 6 + i * 2;
-  return `polygon(${inset}% 0, ${100 - inset}% 0, 100% 100%, 0 100%)`;
-}
 
 function tierColor(tier) {
   return TIERS.find((t) => t.label === tier)?.color ?? '#94a3b8';
@@ -179,6 +163,42 @@ function progColor(v) {
   if (v >= 60) return '#3456E6';
   if (v >= 30) return '#d97706';
   return '#dc2626';
+}
+
+function renderTierChart() {
+  if (!tierEl.value) return;
+  if (!tierChart) tierChart = echarts.init(tierEl.value);
+  const counts = TIERS.map((t) => data.value.tier_stat?.[t.label] ?? 0);
+  tierChart.setOption(
+    {
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v) => `${v} 家` },
+      grid: { left: 64, right: 56, top: 12, bottom: 16 },
+      xAxis: { type: 'value', max: 'dataMax' },
+      yAxis: {
+        type: 'category',
+        inverse: true,
+        data: TIERS.map((t) => `${t.label}代理商`),
+        axisLabel: { color: '#475569' },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: TIERS.map((t, i) => ({
+            value: counts[i],
+            itemStyle: { color: t.color, borderRadius: [0, 6, 6, 0] },
+          })),
+          barWidth: 26,
+          label: {
+            show: true,
+            position: 'right',
+            formatter: (p) => `${p.value} 家`,
+            color: '#475569',
+          },
+        },
+      ],
+    },
+    { notMerge: true },
+  );
 }
 
 const tierStat = computed(() => data.value.tier_stat ?? {});
@@ -233,11 +253,17 @@ async function reload() {
         ...new Set((res.list ?? []).map((r) => r.region_name).filter(Boolean)),
       ].map((r) => ({ label: r, value: r }));
     }
+    await nextTick();
+    renderTierChart();
   } catch (e) {
     message.error(e.message || '加载经销商排行失败');
   } finally {
     loading.value = false;
   }
+}
+
+function onResize() {
+  tierChart?.resize();
 }
 
 function exportDetail() {
@@ -263,7 +289,15 @@ function exportDetail() {
   exportExcel([{ name: '代理商综合排行', rows }], '经销商排行');
 }
 
-onMounted(reload);
+onMounted(() => {
+  reload();
+  window.addEventListener('resize', onResize);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize);
+  tierChart?.dispose();
+});
 </script>
 
 <style scoped>
@@ -300,31 +334,9 @@ onMounted(reload);
   gap: 8px;
 }
 
-.pyramid {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 0 4px;
-}
-
-.py-tier {
-  min-height: 58px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-}
-
-.py-label {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.py-count {
-  font-size: 12px;
-  opacity: 0.92;
+.tier-chart {
+  width: 100%;
+  height: 240px;
 }
 
 .funnel3 {
