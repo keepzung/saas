@@ -3,7 +3,7 @@
 // 默认品牌(1)与未配置品牌回退系统默认样式（蓝方块 + 系统名/首字）
 export const BRAND_THEMES = {
   2: { name: '荣威项目工作区', logo: '/images/login/roewe-logo.png', short: '荣威' },
-  6: { name: '特斯拉项目工作区', logo: null, short: '特斯拉' },
+  6: { name: '特斯拉项目工作区', logo: '/images/login/leyun-logo.jpg', short: '特斯拉' },
   7: { name: '东风奕境项目工作区', logo: '/images/login/dongfeng-logo.png', short: '东风奕境' },
   8: { name: '格力项目工作区', logo: '/images/login/gree-logo.png', short: '格力' },
 };
