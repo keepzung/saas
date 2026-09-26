@@ -6,16 +6,6 @@
         <a-radio-button value="30">近30天</a-radio-button>
       </a-radio-group>
       <a-range-picker v-model:value="range" size="small" @change="reload" />
-      <a-select
-        v-model:value="tag"
-        size="small"
-        style="width: 140px"
-        allow-clear
-        placeholder="账号标签"
-        :options="tagOptions"
-        @change="reload"
-      />
-      <a-button size="small" type="primary" @click="exportDetail">导出数据</a-button>
     </template>
 
     <NoticeBar>
@@ -44,7 +34,22 @@
 
     <a-card size="small" :bordered="false">
       <template #title>
-        <div class="sec-head"><span class="bar"></span>代理商综合排行</div>
+        <div class="rank-toolbar">
+          <div class="sec-head"><span class="bar"></span>代理商综合排行</div>
+          <div class="toolbar-right">
+            <span class="tb-label">账号标签：</span>
+            <a-select
+              v-model:value="tag"
+              size="small"
+              style="width: 150px"
+              allow-clear
+              placeholder="全部"
+              :options="tagOptions"
+              @change="reload"
+            />
+            <a-button size="small" type="primary" @click="exportDetail">导出数据</a-button>
+          </div>
+        </div>
       </template>
       <a-table
         :columns="columns"
@@ -320,6 +325,26 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.rank-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tb-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 .sec-head .bar {
