@@ -1,5 +1,6 @@
 <template>
   <KoxKosTierView v-if="isTesla" />
+  <KoxDfDealerView v-else-if="isDf" />
   <PageWrapper v-else title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
     <template #extra>
       <a-range-picker
@@ -175,11 +176,13 @@ import {
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
 import KoxKosTierView from './KoxKosTierView.vue';
+import KoxDfDealerView from './KoxDfDealerView.vue';
 import { getKoxRanking } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
+const isDf = computed(() => Number(auth.currentBrandId) === 7);
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);

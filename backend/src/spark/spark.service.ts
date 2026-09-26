@@ -1370,6 +1370,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           id: p.id,
           name: p.name,
           remark: p.remark,
+          region: p.region ?? null,
           period: `${p.startDate.toISOString().slice(0, 10)} ~ ${p.endDate.toISOString().slice(0, 10)}`,
           start_date: p.startDate.toISOString().slice(0, 10),
           end_date: p.endDate.toISOString().slice(0, 10),
@@ -1411,6 +1412,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   async createProject(
     dto: {
       name?: string;
+      region?: string;
       startDate?: string;
       endDate?: string;
       budget?: number;
@@ -1441,6 +1443,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const project = await this.prisma.koxCampaignProject.create({
       data: {
         name,
+        region: (dto?.region ?? '').trim() || null,
         startDate: start,
         endDate: end,
         budget: dto?.budget != null && dto.budget > 0 ? dto.budget : null,

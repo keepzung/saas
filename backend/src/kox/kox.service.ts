@@ -358,7 +358,7 @@ export class KoxService {
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
         where: brandId ? { brandId } : {},
-        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true },
+        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true },
       }),
       this.prisma.koxNote.findMany({
         where: {
@@ -417,6 +417,7 @@ export class KoxService {
       kos_num: gAccs.length,
       store_num: new Set(gAccs.filter((a) => a.storeName).map((a) => a.storeName)).size,
       fans_sum: gAccs.reduce((s, a) => s + a.fans, 0),
+      quality_num: gAccs.filter((a) => (a.noteQuality ?? 0) >= 30).length,
       region_kos: [...kosByRegion.entries()]
         .map(([region, cnt]) => ({ region, kos_cnt: cnt }))
         .sort((a, b) => b.kos_cnt - a.kos_cnt),
@@ -588,6 +589,7 @@ export class KoxService {
             view_sum: number;
             exposure_sum: number;
             interaction_sum: number;
+            ces_sum: number;
           }
         >();
         for (const n of noteRows) {
@@ -599,11 +601,19 @@ export class KoxService {
               view_sum: 0,
               exposure_sum: 0,
               interaction_sum: 0,
+              ces_sum: 0,
             };
           cur.item_cnt += 1;
           cur.view_sum += n.views;
           cur.exposure_sum += n.exposure;
           cur.interaction_sum += n.likes + n.comments + n.shares + n.collects;
+          cur.ces_sum += calcCes(
+            n.likes,
+            n.collects,
+            n.comments,
+            n.shares,
+            n.followCount,
+          );
           noteByDate.set(key, cur);
         }
         const byDate = new Map<
@@ -613,6 +623,7 @@ export class KoxService {
             view_sum: number;
             exposure_sum: number;
             interaction_sum: number;
+            ces_sum: number;
             total_pm_leads: number;
             ad_cost: number;
             ad_impression: number;
@@ -627,6 +638,7 @@ export class KoxService {
           view_sum: 0,
           exposure_sum: 0,
           interaction_sum: 0,
+          ces_sum: 0,
           total_pm_leads: 0,
         });
         const campPart = (camp?: {
@@ -652,6 +664,7 @@ export class KoxService {
             view_sum: r.viewSum,
             exposure_sum: r.exposureSum,
             interaction_sum: r.interactionSum,
+            ces_sum: 0,
             total_pm_leads: r.totalPmLeads,
             ...campPart(camp),
           });
@@ -1704,7 +1717,10 @@ export class KoxService {
         accountType: true,
         accountTag: true,
         regionName: true,
+        areaName: true,
         storeName: true,
+        storeCode: true,
+        noteQuality: true,
         fans: true,
         authorUrl: true,
       },
@@ -1739,6 +1755,7 @@ export class KoxService {
       likes: number;
       collects: number;
       comments: number;
+      shares: number;
       ces: number;
       pm_inquiries: number;
       pm_openings: number;
@@ -1755,6 +1772,7 @@ export class KoxService {
       likes: 0,
       collects: 0,
       comments: 0,
+      shares: 0,
       ces: 0,
       pm_inquiries: 0,
       pm_openings: 0,
@@ -1781,6 +1799,7 @@ export class KoxService {
         a.likes += n.likes;
         a.collects += n.collects;
         a.comments += n.comments;
+        a.shares += n.shares;
         a.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
         a.pm_inquiries += n.pmInquiries;
         a.pm_openings += n.pmOpenings;
@@ -1798,7 +1817,10 @@ export class KoxService {
         account_type: a.accountType,
         account_tag: a.accountTag,
         region_name: a.regionName,
+        province_name: (a.areaName ?? '').split('·')[0] || null,
         store_name: a.storeName,
+        store_code: a.storeCode,
+        note_quality: a.noteQuality,
         fans: a.fans,
         author_url: a.authorUrl,
         item_cnt: g.item_cnt,
@@ -1808,6 +1830,7 @@ export class KoxService {
         likes_sum: g.likes,
         collects_sum: g.collects,
         comments_sum: g.comments,
+        shares_sum: g.shares,
         ces: g.ces,
         pm_inquiries: g.pm_inquiries,
         pm_openings: g.pm_openings,
@@ -1866,6 +1889,100 @@ export class KoxService {
       ],
       metric_note: '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
+    };
+  }
+
+  /** 东风·经销商快照排行（旧系统导出聚合，真实完成度/得分） */
+  async dealerSnapshot(query: { brandId?: string; statMonth?: string }) {
+    const brandId = query.brandId ? Number(query.brandId) : 7;
+    const months = await this.prisma.koxDealerSnapshot.findMany({
+      where: { brandId },
+      distinct: ['statMonth'],
+      select: { statMonth: true },
+      orderBy: { statMonth: 'desc' },
+    });
+    const statMonth = query.statMonth || months[0]?.statMonth || undefined;
+    const rows = await this.prisma.koxDealerSnapshot.findMany({
+      where: { brandId, ...(statMonth ? { statMonth } : {}) },
+      orderBy: { score: 'desc' },
+    });
+    const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((s, r) => s + f(r), 0);
+    const tierCount: Record<string, number> = { 头部: 0, 腰部: 0, 尾部: 0, 沉默: 0 };
+    for (const r of rows) {
+      const t = r.tier ?? '沉默';
+      tierCount[t] = (tierCount[t] ?? 0) + 1;
+    }
+    const wavg = (f: (r: (typeof rows)[number]) => number | null) => {
+      const valid = rows.filter((r) => f(r) != null);
+      const total = valid.reduce((s, r) => s + r.accountCnt, 0);
+      return total ? Math.round((valid.reduce((s, r) => s + (f(r) ?? 0) * r.accountCnt, 0) / total) * 10) / 10 : 0;
+    };
+    return {
+      stat_month: statMonth ?? null,
+      stat_months: months.map((m) => m.statMonth).filter((m): m is string => !!m),
+      tier_stat: tierCount,
+      summary: {
+        dealer_cnt: rows.length,
+        account_cnt: sum((r) => r.accountCnt),
+        publish_cnt: sum((r) => r.publishCnt),
+        content_pct: wavg((r) => (r.contentPct != null ? Number(r.contentPct) : null)),
+        exposure: sum((r) => r.exposure),
+        inquiries: sum((r) => r.inquiries),
+        openings: sum((r) => r.openings),
+        leads: sum((r) => r.leads),
+        deals: sum((r) => r.deals),
+        avg_exposure_per_note: sum((r) => r.publishCnt)
+          ? Math.round((sum((r) => r.exposure) / sum((r) => r.publishCnt)) * 10) / 10
+          : 0,
+        interaction_rate: 0,
+      },
+      list: rows.map((r, i) => ({
+        rank: i + 1,
+        dealer_name: r.dealerName,
+        region_name: r.regionName,
+        city_name: r.cityName,
+        tier: r.tier,
+        score: r.score != null ? Number(r.score) : 0,
+        account_cnt: r.accountCnt,
+        publish_cnt: r.publishCnt,
+        content_pct: r.contentPct != null ? Number(r.contentPct) : 0,
+        exposure: r.exposure,
+        exposure_pct: r.exposurePct != null ? Number(r.exposurePct) : 0,
+        inquiries: r.inquiries,
+        openings: r.openings,
+        leads: r.leads,
+        leads_pct: r.leadsPct != null ? Number(r.leadsPct) : 0,
+        deals: r.deals,
+        deals_pct: r.dealsPct != null ? Number(r.dealsPct) : 0,
+      })),
+    };
+  }
+
+  /** 东风·区域投放快照（旧系统导出） */
+  async regionAdSnapshot(query: { brandId?: string }) {
+    const brandId = query.brandId ? Number(query.brandId) : 7;
+    const rows = await this.prisma.koxRegionAdSnapshot.findMany({
+      where: { brandId },
+      orderBy: { fee: 'desc' },
+    });
+    return {
+      list: rows.map((r, i) => ({
+        rank: i + 1,
+        region: r.regionName,
+        fee: Number(r.fee),
+        account_cnt: r.accountCnt,
+        note_cnt: r.noteCnt,
+        reply_rate: r.replyRate != null ? Number(r.replyRate) : null,
+        inquiries: r.inquiries,
+        openings: r.openings,
+        leads: r.leads,
+        open_rate: r.openRate != null ? Number(r.openRate) : null,
+        open_lead_rate: r.openLeadRate != null ? Number(r.openLeadRate) : null,
+        inquiry_cost: r.inquiryCost != null ? Number(r.inquiryCost) : null,
+        open_cost: r.openCost != null ? Number(r.openCost) : null,
+        lead_cost: r.leadCost != null ? Number(r.leadCost) : null,
+      })),
+      metric_note: '数据源=旧系统导出快照（投放明细为账号维度 TOP20 汇总口径）',
     };
   }
 

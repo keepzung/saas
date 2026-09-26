@@ -1,9 +1,9 @@
 <template>
   <KoxRegionAnalysisView
-    v-if="isTesla && fixedDimension === 'region'"
-    embedded-title="区域排行"
+    v-if="(isTesla || isDf) && fixedDimension === 'region'"
+    :embedded-title="isDf ? '区域排行' : '区域排行'"
   />
-  <KoxAccountRankingView v-else-if="isTesla && fixedDimension === 'account'" />
+  <KoxAccountRankingView v-else-if="(isTesla || isDf) && fixedDimension === 'account'" />
   <PageWrapper v-else :title="pageTitle" :subtitle="pageSubtitle">
     <template #filters>
       <FilterTopbar>
@@ -198,6 +198,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const authStore = useAuthStore();
 const isTesla = computed(() => Number(authStore.currentBrandId) === 6);
+const isDf = computed(() => Number(authStore.currentBrandId) === 7);
 const brandOptions = (authStore.brands ?? []).map((b) => ({
   value: b.id,
   label: b.name,

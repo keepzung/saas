@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="账号排行" subtitle="按 KOS 留资分层排序">
+  <PageWrapper title="账号排行" :subtitle="isDf ? '账号表现与私信转化' : '按 KOS 留资分层排序'">
     <template #extra>
       <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
         <a-radio-button value="7">近7天</a-radio-button>
@@ -16,6 +16,7 @@
         @change="reload"
       />
       <a-select
+        v-if="!isDf"
         v-model:value="accountType"
         size="small"
         style="width: 110px"
@@ -30,6 +31,7 @@
         @change="reload"
       />
       <a-select
+        v-if="!isDf"
         v-model:value="tag"
         size="small"
         style="width: 130px"
@@ -49,7 +51,7 @@
       <a-button size="small" type="primary" @click="exportDetail">导出数据明细</a-button>
     </template>
 
-    <div class="tier-strip">
+    <div v-if="!isDf" class="tier-strip">
       <div
         v-for="t in tierStat"
         :key="t.key"
@@ -110,6 +112,7 @@ import { exportExcel } from '../../utils/excel';
 
 const auth = useAuthStore();
 const router = useRouter();
+const isDf = Number(auth.currentBrandId) === 7;
 const CROWNS = ['👑', '🥈', '🥉'];
 
 const quick = ref('7');
@@ -136,25 +139,50 @@ const ncol = (title, key, width = 96) => ({
   align: 'right',
 });
 
-const columns = [
-  { title: '排名', key: 'rank', width: 64, fixed: 'left' },
-  { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
-  { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 92, fixed: 'left' },
-  ncol('粉丝数', 'fans', 90),
-  { title: '账号标签', key: 'account_tag', dataIndex: 'account_tag', width: 100 },
-  { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
-  ncol('私信进线', 'pm_inquiries'),
-  ncol('私信开口', 'pm_openings'),
-  ncol('私信留资', 'pm_leads'),
-  ncol('内容发布数', 'item_cnt'),
-  ncol('内容曝光数', 'exposure_sum', 110),
-  ncol('内容阅读数', 'view_sum', 110),
-  ncol('内容点赞数', 'likes_sum', 110),
-  ncol('内容收藏数', 'collects_sum', 110),
-  ncol('内容评论数', 'comments_sum', 110),
-  { title: '所属门店/团队', key: 'store', width: 220 },
-  { title: '操作', key: 'action', width: 90, fixed: 'right' },
-];
+const columns = computed(() => {
+  if (isDf) {
+    return [
+      { title: '排名', key: 'rank', width: 64, fixed: 'left' },
+      { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 190, fixed: 'left' },
+      ncol('笔记质量', 'note_quality', 92),
+      ncol('私信进线数', 'pm_inquiries', 104),
+      ncol('私信开口数', 'pm_openings', 104),
+      ncol('私信留资数', 'pm_leads', 104),
+      ncol('粉丝数', 'fans', 90),
+      ncol('内容发布数', 'item_cnt', 104),
+      ncol('内容互动数', 'interaction_sum', 104),
+      ncol('内容曝光数', 'exposure_sum', 110),
+      ncol('内容阅读数', 'view_sum', 110),
+      ncol('内容点赞数', 'likes_sum', 110),
+      ncol('内容评论数', 'comments_sum', 110),
+      ncol('内容分享数', 'shares_sum', 110),
+      ncol('内容收藏数', 'collects_sum', 110),
+      { title: '大区', key: 'region', dataIndex: 'region_name', width: 100 },
+      { title: '省份', key: 'province', dataIndex: 'province_name', width: 80 },
+      { title: '所属经销商门店', key: 'store', dataIndex: 'store_name', width: 200, ellipsis: true },
+      { title: '操作', key: 'action', width: 90, fixed: 'right' },
+    ];
+  }
+  return [
+    { title: '排名', key: 'rank', width: 64, fixed: 'left' },
+    { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
+    { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 92, fixed: 'left' },
+    ncol('粉丝数', 'fans', 90),
+    { title: '账号标签', key: 'account_tag', dataIndex: 'account_tag', width: 100 },
+    { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
+    ncol('私信进线', 'pm_inquiries'),
+    ncol('私信开口', 'pm_openings'),
+    ncol('私信留资', 'pm_leads'),
+    ncol('内容发布数', 'item_cnt'),
+    ncol('内容曝光数', 'exposure_sum', 110),
+    ncol('内容阅读数', 'view_sum', 110),
+    ncol('内容点赞数', 'likes_sum', 110),
+    ncol('内容收藏数', 'collects_sum', 110),
+    ncol('内容评论数', 'comments_sum', 110),
+    { title: '所属门店/团队', key: 'store', width: 220 },
+    { title: '操作', key: 'action', width: 90, fixed: 'right' },
+  ];
+});
 
 function dateParams() {
   const p = { brandId: auth.currentBrandId ?? undefined };

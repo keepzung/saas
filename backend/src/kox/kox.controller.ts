@@ -117,6 +117,16 @@ export class KoxController {
     return this.koxService.accountRanking(query);
   }
 
+  @Get('kox/dealer-snapshot')
+  dealerSnapshot(@Query() query: { brandId?: string; statMonth?: string }) {
+    return this.koxService.dealerSnapshot(query);
+  }
+
+  @Get('kox/region-ad-snapshot')
+  regionAdSnapshot(@Query() query: { brandId?: string }) {
+    return this.koxService.regionAdSnapshot(query);
+  }
+
   @Get('kox/ranking')
   ranking(
     @Query()

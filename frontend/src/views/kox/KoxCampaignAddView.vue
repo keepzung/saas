@@ -8,6 +8,13 @@
           <a-form-item label="项目名称" required>
             <a-input v-model:value="form.name" placeholder="请输入项目名称" :maxlength="30" />
           </a-form-item>
+          <a-form-item v-if="isDf" label="所属大区" required>
+            <a-select
+              v-model:value="form.region"
+              placeholder="请选择大区"
+              :options="DF_REGIONS.map((r) => ({ label: r, value: r }))"
+            />
+          </a-form-item>
           <a-form-item label="项目周期" required>
             <a-range-picker
               v-model:value="form.period"
@@ -98,6 +105,8 @@ import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
 const auth = useAuthStore();
+const isDf = Number(auth.currentBrandId) === 7;
+const DF_REGIONS = ['全国', '北部大区', '东部大区', '南部大区', '西部大区', '中部大区'];
 
 const accounts = ref([]);
 const accountsLoading = ref(false);
@@ -107,6 +116,7 @@ const submitting = ref(false);
 
 const form = reactive({
   name: '',
+  region: undefined,
   period: [dayjs().subtract(29, 'day'), dayjs()],
   budget: undefined,
   remark: '',
@@ -178,6 +188,7 @@ async function submit() {
     await createSparkProject(
       {
         name: form.name.trim(),
+        region: isDf ? form.region || undefined : undefined,
         startDate: form.period[0].format('YYYY-MM-DD'),
         endDate: form.period[1].format('YYYY-MM-DD'),
         budget: form.budget ?? undefined,

@@ -51,7 +51,32 @@
       </div>
     </div>
 
-    <div class="note-analysis-row">
+    <a-card v-if="isDf" :bordered="false" size="small" class="ces-top-card">
+      <template #title>
+        <div class="card-header">
+          <span class="bar"></span>
+          <span class="title">CES TOP10 笔记</span>
+        </div>
+      </template>
+      <div class="ces-top-grid">
+        <div v-for="(n, i) in cesTop" :key="n.id" class="ces-item">
+          <span :class="['ces-rank', i < 3 ? `top${i + 1}` : '']">{{ i + 1 }}</span>
+          <div class="ces-thumb">
+            <img v-if="n.cover" :src="n.cover" loading="lazy" />
+            <span v-else class="ces-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</span>
+          </div>
+          <div class="ces-main">
+            <div class="ces-title" :title="n.title">{{ n.title }}</div>
+            <div class="ces-meta">@{{ n.author }} · {{ n.publishTime }}</div>
+          </div>
+          <span class="ces-badge">CES</span>
+          <span class="ces-value">{{ n.ces }}</span>
+        </div>
+        <div v-if="!cesTop.length" class="empty-feed">暂无数据</div>
+      </div>
+    </a-card>
+
+    <div v-if="!isDf" class="note-analysis-row">
       <a-card :bordered="false" size="small" title="内容类型效率对比分析" class="note-analysis-card-left">
         <div ref="typeEffEl" class="type-efficiency-chart" />
       </a-card>
@@ -74,7 +99,7 @@
       </a-card>
     </div>
 
-    <a-card :bordered="false" size="small" title="提及车型分布">
+    <a-card v-if="!isDf" :bordered="false" size="small" title="提及车型分布">
       <div ref="modelPieEl" class="mention-model-chart" />
     </a-card>
 
@@ -126,7 +151,7 @@
       </a-table>
     </a-card>
 
-    <a-card :bordered="false" size="small">
+    <a-card v-if="!isDf" :bordered="false" size="small">
       <template #title>
         <div class="summary-row">
           <div class="left">
@@ -238,6 +263,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const route = useRoute();
+const isDf = Number(auth.currentBrandId) === 7;
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 
@@ -396,6 +422,21 @@ function wordColor(text) {
   return WORD_COLORS[h % WORD_COLORS.length];
 }
 const wordWeight = (size) => (size >= 30 ? 800 : size >= 22 ? 700 : 600);
+const calcCes = (n) =>
+  Number(n.digg ?? 0) +
+  Number(n.collect ?? 0) +
+  Number(n.comment ?? 0) * 4 +
+  Number(n.share ?? 0) * 4 +
+  Number(n.follow ?? 0) * 8;
+const dfAllNotes = ref([]);
+const cesTop = computed(() => {
+  if (!isDf) return [];
+  const pool = dfAllNotes.value.length ? dfAllNotes.value : notes.value;
+  return pool
+    .map((n) => ({ ...n, ces: calcCes(n) }))
+    .sort((a, b) => b.ces - a.ces)
+    .slice(0, 10);
+});
 const wordCloud = computed(() => {
   let list;
   if (mode.value === 'real' && summaryData.value) {
@@ -620,6 +661,13 @@ async function loadReal({ fetchSummary = true } = {}) {
     };
     if (sumRes) summaryData.value = sumRes;
     notes.value = (listRes.list ?? []).map(mapRealRow);
+    if (isDf) {
+      getKoxNotes({ ...realParams(), page_size: 500 })
+        .then((all) => {
+          dfAllNotes.value = (all.list ?? []).map(mapRealRow);
+        })
+        .catch(() => {});
+    }
     nextTick(renderCharts);
   } catch {
     message.error('加载笔记数据失败');
@@ -930,6 +978,115 @@ onBeforeUnmount(() => {
   gap: 1px 11px;
   padding: 0 6px;
   overflow: hidden;
+}
+
+.ces-top-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  padding: 4px 2px;
+}
+
+.ces-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.ces-item:nth-child(4n + 2),
+.ces-item:nth-child(4n + 3) {
+  background: #f8fafc;
+}
+
+.ces-rank {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ces-rank.top1 {
+  background: #dc2626;
+}
+
+.ces-rank.top2 {
+  background: #ea580c;
+}
+
+.ces-rank.top3 {
+  background: #d97706;
+}
+
+.ces-thumb {
+  width: 42px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.ces-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ces-thumb-ph {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.ces-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ces-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ces-meta {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.ces-badge {
+  font-size: 11px;
+  color: #3456e6;
+  background: #eef2ff;
+  border-radius: 8px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+
+.ces-value {
+  width: 34px;
+  text-align: right;
+  font-weight: 700;
+  color: #3456e6;
+  font-variant-numeric: tabular-nums;
 }
 
 .cloud-word {

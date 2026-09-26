@@ -183,18 +183,26 @@ const budgetRate = computed(() =>
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
-const columns = [
-  { key: 'name', title: '项目名称' },
-  { title: '项目周期', dataIndex: 'period', width: 200 },
-  { key: 'budget', title: '预算 / 消耗', width: 180 },
-  { title: '展现量', dataIndex: 'impressions', width: 100, sorter: (a, b) => a.impressions - b.impressions },
-  { title: '点击量', dataIndex: 'clicks', width: 90 },
-  { title: '点击率', dataIndex: 'ctr', width: 85 },
-  { title: '互动量', dataIndex: 'interactions', width: 90 },
-  { title: '私信留资', dataIndex: 'pm_leads', width: 95 },
-  { title: '留资成本', dataIndex: 'lead_cost', width: 95 },
-  { key: 'actions', title: '操作', width: 80 },
-];
+const isDf = Number(auth.currentBrandId) === 7;
+
+const columns = computed(() => {
+  const base = [
+    { key: 'name', title: '项目名称' },
+  ];
+  if (isDf) base.push({ title: '大区', dataIndex: 'region', width: 100 });
+  base.push(
+    { title: '项目周期', dataIndex: 'period', width: 200 },
+    { key: 'budget', title: '预算 / 消耗', width: 180 },
+    { title: '展现量', dataIndex: 'impressions', width: 100, sorter: (a, b) => a.impressions - b.impressions },
+    { title: '点击量', dataIndex: 'clicks', width: 90 },
+    { title: '点击率', dataIndex: 'ctr', width: 85 },
+    { title: '互动量', dataIndex: 'interactions', width: 90 },
+    { title: '私信留资', dataIndex: 'pm_leads', width: 95 },
+    { title: '留资成本', dataIndex: 'lead_cost', width: 95 },
+    { key: 'actions', title: '操作', width: 80 },
+  );
+  return base;
+});
 
 async function load() {
   loading.value = true;

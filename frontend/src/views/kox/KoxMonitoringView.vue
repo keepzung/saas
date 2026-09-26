@@ -85,6 +85,7 @@
                     {{ record.account_type }}
                   </a-tag>
                 </div>
+                <div v-if="isDf" class="acc-uid">{{ record.author_id }}</div>
                 <div class="muted mini">
                   <a
                     v-if="record.author_url"
@@ -319,6 +320,7 @@ import { parseAccountWorkbook } from '../../utils/xlsx-import';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
+const isDf = Number(auth.currentBrandId) === 7;
 
 const importOpen = ref(false);
 const importing = ref(false);
@@ -586,7 +588,17 @@ onMounted(reload);
 }
 
 .acc-name {
-  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acc-uid {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  word-break: break-all;
+  line-height: 1.3;
 }
 
 .mini {

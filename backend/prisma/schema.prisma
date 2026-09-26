@@ -446,6 +446,8 @@ model KosAccount {
   saleArea       String?
   areaName       String?
   storeName      String?
+  storeCode      String?
+  noteQuality    Int?
   accountTag     String?
   operatorName   String?
   operatorMobile String?
@@ -703,6 +705,7 @@ model SparkOrgConfig {
 model KoxCampaignProject {
   id            Int       @id @default(autoincrement())
   name          String
+  region        String?
   startDate     DateTime
   endDate       DateTime
   budget        Decimal?  @db.Decimal(14, 2)
@@ -716,6 +719,55 @@ model KoxCampaignProject {
   accounts      KoxCampaignProjectAccount[]
 
   @@index([brandId])
+}
+
+model KoxDealerSnapshot {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(7)
+  dealerName   String
+  regionName   String?
+  cityName     String?
+  tier         String?
+  score        Decimal? @db.Decimal(10, 2)
+  accountCnt   Int      @default(0)
+  publishCnt   Int      @default(0)
+  contentPct   Decimal? @db.Decimal(10, 2)
+  exposure     Int      @default(0)
+  exposurePct  Decimal? @db.Decimal(10, 2)
+  inquiries    Int      @default(0)
+  openings     Int      @default(0)
+  leads        Int      @default(0)
+  leadsPct     Decimal? @db.Decimal(10, 2)
+  deals        Int      @default(0)
+  dealsPct     Decimal? @db.Decimal(10, 2)
+  statMonth    String?
+  rawJson      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([brandId, statMonth])
+}
+
+model KoxRegionAdSnapshot {
+  id          Int      @id @default(autoincrement())
+  brandId     Int      @default(7)
+  regionName  String
+  fee         Decimal  @default(0) @db.Decimal(14, 2)
+  accountCnt  Int      @default(0)
+  noteCnt     Int      @default(0)
+  replyRate   Decimal? @db.Decimal(10, 2)
+  inquiries   Int      @default(0)
+  openings    Int      @default(0)
+  leads       Int      @default(0)
+  openRate    Decimal? @db.Decimal(10, 2)
+  openLeadRate Decimal? @db.Decimal(10, 2)
+  inquiryCost Decimal? @db.Decimal(14, 2)
+  openCost    Decimal? @db.Decimal(14, 2)
+  leadCost    Decimal? @db.Decimal(14, 2)
+  statDate    DateTime?
+  rawJson     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([brandId, statDate])
 }
 
 model KoxCampaignProjectAccount {
