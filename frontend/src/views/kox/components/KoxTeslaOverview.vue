@@ -124,9 +124,9 @@
       </a-col>
     </a-row>
 
-    <a-row :gutter="12">
+    <a-row :gutter="12" align="stretch" class="bottom-row">
       <a-col :span="13">
-        <a-card size="small">
+        <a-card size="small" class="fill-card">
           <div class="rank-head">
             <div class="rank-tabs">
               <span class="bar"></span><b>账号排行</b>
@@ -151,7 +151,7 @@
         </a-card>
       </a-col>
       <a-col :span="11">
-        <a-card size="small">
+        <a-card size="small" class="fill-card">
           <div class="rank-head">
             <div class="rank-tabs">
               <span class="bar"></span><b>热门内容</b>
@@ -381,6 +381,24 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.bottom-row {
+  margin-top: 0;
+}
+
+.bottom-row :deep(.ant-col) {
+  display: flex;
+}
+
+.fill-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fill-card :deep(.ant-card-body) {
+  flex: 1;
 }
 
 .f-label {
