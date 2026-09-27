@@ -987,4 +987,23 @@ onMounted(async () => {
     padding: 24px;
   }
 }
+
+@media (max-width: 640px) {
+  .resource-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-card {
+    padding: 24px 18px;
+  }
+
+  .pf-status-grid {
+    grid-template-columns: repeat(3, 1fr);
+    row-gap: 10px;
+  }
+
+  .scenario-content {
+    padding: 16px;
+  }
+}
 </style>

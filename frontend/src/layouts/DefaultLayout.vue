@@ -1,6 +1,7 @@
 <template>
   <a-layout class="layout">
     <a-layout-sider
+      v-if="!isMobile"
       v-model:collapsed="collapsed"
       collapsible
       :trigger="null"
@@ -9,54 +10,16 @@
       :collapsed-width="60"
       class="sider"
     >
-<div class="logo" @click="router.push('/welcome')">
-          <span v-if="theme?.logo && !collapsed" class="logo-brand-chip">
-            <img
-              class="logo-brand-img"
-              :src="theme.logo"
-              :alt="theme.short"
-            />
-          </span>
-          <template v-else>
-            <span class="logo-logo"></span>
-            <span v-if="!collapsed">{{ auth.systemName }}</span>
-            <span v-else>{{ auth.systemName.slice(0, 2) }}</span>
-          </template>
-        </div>
-      <a-menu
+      <SideNav
         v-model:selectedKeys="selectedKeys"
         v-model:openKeys="openKeys"
-        theme="dark"
-        mode="inline"
-        @click="onMenuClick"
-      >
-        <template v-for="cat in categories" :key="cat.id">
-          <a-sub-menu
-            v-if="cat.children?.length"
-            :key="cat.id"
-          >
-            <template #title>
-              <span>
-                <component :is="iconMap[cat.icon] || AppstoreOutlined" />
-                <span>{{ cat.name }}</span>
-              </span>
-            </template>
-            <template v-for="group in cat.children" :key="group.id">
-              <a-sub-menu v-if="group.children?.length" :key="group.id">
-                <template #title>{{ group.name }}</template>
-                <a-menu-item
-                  v-for="feature in group.children"
-                  :key="feature.path"
-                >
-                  {{ feature.name }}
-                </a-menu-item>
-              </a-sub-menu>
-              <a-menu-item v-else :key="group.id">{{ group.name }}</a-menu-item>
-            </template>
-          </a-sub-menu>
-          <a-menu-item v-else :key="cat.id">{{ cat.name }}</a-menu-item>
-        </template>
-      </a-menu>
+        :collapsed="collapsed"
+        :categories="categories"
+        :theme="theme"
+        :system-name="auth.systemName"
+        @menu-click="onMenuClick"
+        @logo-click="router.push('/welcome')"
+      />
       <div
         v-if="!collapsed"
         class="sider-resize-handle"
@@ -68,21 +31,17 @@
     <a-layout>
       <a-layout-header class="header">
         <div class="header-left">
-          <menu-unfold-outlined
-            v-if="collapsed"
-            class="trigger"
-            @click="collapsed = false"
-          />
           <menu-fold-outlined
-            v-else
+            v-if="!isMobile && !collapsed"
             class="trigger"
             @click="collapsed = true"
           />
+          <menu-unfold-outlined v-else class="trigger" @click="onTriggerClick" />
           <a-breadcrumb>
-            <a-breadcrumb-item>
+            <a-breadcrumb-item v-if="!isMobile">
               <router-link to="/welcome">{{ auth.systemName }}</router-link>
             </a-breadcrumb-item>
-            <a-breadcrumb-item v-for="item in breadcrumbs" :key="item">
+            <a-breadcrumb-item v-for="item in displayBreadcrumbs" :key="item">
               {{ item }}
             </a-breadcrumb-item>
           </a-breadcrumb>
@@ -111,16 +70,52 @@
         </a-dropdown>
       </a-layout-header>
 
+      <!-- 顶部工作区 Tab（东风奕境/格力：智能内容工厂Pro | KOX运营管理中心 | 内容创作任务） -->
+      <div v-if="workspaceTabs" class="workspace-tabbar" :class="{ 'is-mobile': isMobile }">
+        <button
+          v-for="t in workspaceTabs"
+          :key="t.key"
+          type="button"
+          class="workspace-tab"
+          :class="{ active: activeTabKey === t.key }"
+          @click="router.push(t.path)"
+        >
+          {{ t.name }}
+        </button>
+      </div>
+
       <a-layout-content class="content">
         <router-view />
       </a-layout-content>
     </a-layout>
 
+    <!-- 手机端侧栏抽屉 -->
+    <a-drawer
+      v-model:open="mobileMenuOpen"
+      root-class-name="mobile-menu-drawer"
+      placement="left"
+      :width="282"
+      :closable="false"
+      :body-style="{ padding: '0' }"
+      :header-style="{ display: 'none' }"
+    >
+      <SideNav
+        v-model:selectedKeys="selectedKeys"
+        v-model:openKeys="openKeys"
+        :collapsed="false"
+        :categories="categories"
+        :theme="theme"
+        :system-name="auth.systemName"
+        @menu-click="onMenuClick"
+        @logo-click="router.push('/welcome')"
+      />
+    </a-drawer>
+
     <a-drawer
       v-model:open="switchOpen"
       class="main-company-drawer"
       placement="right"
-      :width="600"
+      :width="switchDrawerWidth"
       :closable="false"
       :mask-style="{ background: 'rgba(15,23,42,0.28)' }"
       :body-style="{ padding: '0', overflow: 'hidden' }"
@@ -208,13 +203,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import {
-  ProjectOutlined,
-  TeamOutlined,
-  AppstoreOutlined,
-  CarOutlined,
-  GlobalOutlined,
-  UserOutlined,
-  MessageOutlined,
   DownOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -226,15 +214,29 @@ import {
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
 import { getCompaniesByUserId } from '../api/auth';
-import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_MENU_NAME_OVERRIDES } from '../config/brands';
+import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_MENU_NAME_OVERRIDES, BRAND_WORKSPACE_TABS } from '../config/brands';
+import { useBreakpoint } from '../composables/useBreakpoint';
+import SideNav from '../components/SideNav.vue';
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const { isMobile } = useBreakpoint();
 
 const collapsed = ref(false);
 const selectedKeys = ref([route.path]);
 const openKeys = ref([]);
+const mobileMenuOpen = ref(false);
+
+function onTriggerClick() {
+  if (isMobile.value) {
+    mobileMenuOpen.value = true;
+  } else {
+    collapsed.value = false;
+  }
+}
+
+const switchDrawerWidth = computed(() => (isMobile.value ? '100%' : 600));
 
 // 侧栏宽度可拖拽调整（180–300px，持久化）
 const SIDEBAR_MIN = 180;
@@ -265,25 +267,49 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', onResizeEnd);
 });
 
-const iconMap = {
-  ProjectOutlined,
-  TeamOutlined,
-  AppstoreOutlined,
-  CarOutlined,
-  GlobalOutlined,
-  UserOutlined,
-  MessageOutlined,
-};
-
 const theme = computed(() => brandTheme(auth.currentBrandId));
+
+// 顶部工作区 Tab（仅东风奕境/格力），按路由前缀推导激活态
+const workspaceTabs = computed(() => BRAND_WORKSPACE_TABS[auth.currentBrandId] ?? null);
+const activeTabKey = computed(() => {
+  if (!workspaceTabs.value) return null;
+  const path = route.path;
+  const hit = workspaceTabs.value.find((t) => path.startsWith(t.prefix));
+  return hit?.key ?? 'kox';
+});
+
+// 内容工厂Pro / 内容创作任务 菜单在模块树中的位置约定
+const isFactoryCat = (cat) => cat.key === 'm_factory';
+const isTaskGroup = (g) => g.name === '内容创作任务';
 
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId];
   const renames = BRAND_MENU_NAME_OVERRIDES[auth.currentBrandId];
   const renameLeaf = (f) => (renames && renames[f.name] ? { ...f, name: renames[f.name] } : f);
+  let tree = auth.moduleTree;
+  // 顶部 Tab 工作区：侧栏菜单按激活 Tab 切换
+  if (workspaceTabs.value) {
+    if (activeTabKey.value === 'factory') {
+      tree = tree.filter((cat) => isFactoryCat(cat));
+    } else if (activeTabKey.value === 'task') {
+      tree = tree
+        .map((cat) => ({
+          ...cat,
+          children: (cat.children ?? []).filter(isTaskGroup),
+        }))
+        .filter((cat) => (cat.children ?? []).length > 0);
+    } else {
+      tree = tree
+        .map((cat) => ({
+          ...cat,
+          children: (cat.children ?? []).filter((g) => !isTaskGroup(g)),
+        }))
+        .filter((cat) => !isFactoryCat(cat) && (cat.children ?? []).length > 0);
+    }
+  }
   if (!hidden || hidden.length === 0) {
-    if (!renames) return auth.moduleTree;
-    return auth.moduleTree.map((cat) => ({
+    if (!renames) return tree;
+    return tree.map((cat) => ({
       ...cat,
       children: (cat.children ?? []).map((g) => ({
         ...g,
@@ -291,7 +317,7 @@ const categories = computed(() => {
       })),
     }));
   }
-  return auth.moduleTree
+  return tree
     .map((cat) => ({
       ...cat,
       children: (cat.children ?? [])
@@ -305,7 +331,7 @@ const categories = computed(() => {
         })
         .filter(Boolean),
     }))
-    .filter((cat) => (cat.children ?? []).length > 0);
+    .filter((cat) => (cat.children ?? []).length > 0 && !hidden.includes(cat.name));
 });
 
 const avatarText = computed(() => {
@@ -334,10 +360,15 @@ const breadcrumbs = computed(() => {
   return crumbs;
 });
 
+const displayBreadcrumbs = computed(() =>
+  isMobile.value ? breadcrumbs.value.slice(-1) : breadcrumbs.value,
+);
+
 watch(
   () => route.path,
   (path) => {
     selectedKeys.value = [path];
+    mobileMenuOpen.value = false;
     for (const cat of auth.moduleTree) {
       for (const group of cat.children ?? []) {
         for (const feature of group.children ?? []) {
@@ -443,13 +474,6 @@ onMounted(async () => {
   background: var(--sidebar-bg);
 }
 
-.sider :deep(.ant-layout-sider-children) {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
-}
-
 .sider-resize-handle {
   position: absolute;
   right: 0;
@@ -464,66 +488,6 @@ onMounted(async () => {
 .sider-resize-handle:hover {
   background: rgba(82, 116, 246, 0.45);
 }
-
-.sider :deep(.ant-menu) {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-inline-end: none !important;
-}
-
-.sider :deep(.ant-menu::-webkit-scrollbar) {
-  width: 4px;
-}
-
-.sider :deep(.ant-menu::-webkit-scrollbar-thumb) {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 2px;
-}
-
-.logo {
-  height: var(--header-height);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.logo-logo {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-    background: linear-gradient(135deg, #3456e6, #6683c3);
-    margin-right: 8px;
-    flex-shrink: 0;
-  }
-
-  .logo-brand-chip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #fff;
-    border-radius: 6px;
-    padding: 3px 8px;
-    max-width: 152px;
-    flex-shrink: 0;
-  }
-
-  .logo-brand-img {
-    height: 24px;
-    width: auto;
-    max-width: 136px;
-    object-fit: contain;
-    display: block;
-  }
 
 .header {
   display: flex;
@@ -553,6 +517,39 @@ onMounted(async () => {
   color: var(--color-primary);
 }
 
+@media (max-width: 767px) {
+  .header {
+    padding-right: 8px;
+  }
+
+  .header-left {
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .header-left :deep(.ant-breadcrumb) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .trigger {
+    padding: 0 10px;
+  }
+
+  .user-info {
+    padding: 4px 6px;
+    flex-shrink: 0;
+  }
+
+  .user-name {
+    max-width: 72px;
+  }
+}
+
 .user-info {
   display: flex;
   align-items: center;
@@ -573,6 +570,66 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+
+.workspace-tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workspace-tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-tab {
+  position: relative;
+  padding: 0 6px;
+  margin-right: 18px;
+  border: none;
+  background: none;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.workspace-tab:hover {
+  color: var(--color-primary);
+}
+
+.workspace-tab.active {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.workspace-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-primary);
+}
+
+.workspace-tabbar.is-mobile {
+  padding: 0 12px;
+  gap: 4px;
+}
+
+.workspace-tabbar.is-mobile .workspace-tab {
+  margin-right: 8px;
+  font-size: 14px;
 }
 
 .content {

@@ -40,32 +40,32 @@
     </template>
 
     <a-card :bordered="false" class="stat-card">
-      <a-row :gutter="16">
-        <a-col :span="5">
+      <a-row :gutter="[16, 12]">
+        <a-col :xs="8" :md="5">
           <a-statistic title="监测内容量" :value="ov.content_cnt" />
         </a-col>
-        <a-col :span="5">
+        <a-col :xs="8" :md="5">
           <a-statistic
             title="总曝光"
             :value="ov.view_sum"
             :value-style="{ color: '#3456E6' }"
           />
         </a-col>
-        <a-col :span="5">
+        <a-col :xs="8" :md="5">
           <a-statistic
             title="总互动"
             :value="ov.interaction_sum"
             :value-style="{ color: '#16a34a' }"
           />
         </a-col>
-        <a-col :span="5">
+        <a-col :xs="8" :md="5">
           <a-statistic
             title="负面内容"
             :value="ov.negative_cnt"
             :value-style="{ color: '#dc2626' }"
           />
         </a-col>
-        <a-col :span="4">
+        <a-col :xs="8" :md="4">
           <a-statistic
             title="负面占比"
             :value="ov.negative_rate"
@@ -80,7 +80,8 @@
       <div ref="chartEl" style="height: 280px" />
     </a-card>
 
-    <a-card :bordered="false">
+    <!-- 桌面：内容列表表格 -->
+    <a-card v-if="!isMobile" :bordered="false">
       <a-table
         :columns="columns"
         :data-source="list"
@@ -127,6 +128,58 @@
       </a-table>
     </a-card>
 
+    <!-- 手机：内容列表卡片 -->
+    <div v-else class="insight-mobile-list">
+      <a-spin :spinning="loading">
+        <div v-for="record in list" :key="record.id" class="insight-card">
+          <div class="ic-head" @click="openDetail(record)">
+            <a-tag :color="record.platform === 'douyin' ? 'blue' : 'red'" class="mini">
+              {{ record.platform === 'douyin' ? '抖音' : '小红书' }}
+            </a-tag>
+            <a-tag class="mini">{{ typeLabel[record.content_type] ?? record.content_type }}</a-tag>
+            <a-tag :color="sentimentColor[record.sentiment]" class="mini">
+              {{ sentimentLabel[record.sentiment] }}
+            </a-tag>
+            <span class="muted mini ic-time">{{ record.publish_at }}</span>
+          </div>
+          <div class="ic-title">{{ record.title }}</div>
+          <div class="ic-author">
+            <span>{{ record.author_name }}</span>
+            <a-tag class="mini" :color="authorColor[record.author_type]">
+              {{ record.author_type }}
+            </a-tag>
+          </div>
+          <div class="ic-metrics">
+            <span>阅读 <b>{{ fmt(record.views) }}</b></span>
+            <span>点赞 <b>{{ fmt(record.likes) }}</b></span>
+            <span>评论 <b>{{ fmt(record.comments) }}</b></span>
+            <span>分享 <b>{{ fmt(record.shares) }}</b></span>
+          </div>
+          <div class="ic-actions">
+            <a @click="openDetail(record)">详情</a>
+            <a-divider type="vertical" />
+            <a-popconfirm
+              title="确定该内容与本监测项目无关?"
+              @confirm="mark(record)"
+            >
+              <a class="danger">无关</a>
+            </a-popconfirm>
+          </div>
+        </div>
+        <a-empty v-if="!loading && !list.length" />
+      </a-spin>
+      <div class="mobile-pager">
+        <a-pagination
+          :current="page"
+          :total="total"
+          :page-size="pageSize"
+          :show-size-changer="false"
+          simple
+          @change="onMobilePageChange"
+        />
+      </div>
+    </div>
+
     <a-drawer v-model:open="detailOpen" width="520" title="内容详情">
       <template v-if="detailRow">
         <a-descriptions :column="1" size="small" bordered>
@@ -172,6 +225,9 @@ import {
   getInsightOverview,
   markIrrelevant,
 } from '../../api/insight';
+import { useBreakpoint } from '../../composables/useBreakpoint';
+
+const { isMobile } = useBreakpoint();
 
 const typeLabel = { note: '图文', video: '视频', live: '直播' };
 const sentimentLabel = { positive: '正面', neutral: '中性', negative: '负面' };
@@ -263,6 +319,11 @@ function reloadAll() {
 
 function onTableChange(p) {
   page.value = p.current;
+  reloadContents();
+}
+
+function onMobilePageChange(p) {
+  page.value = p;
   reloadContents();
 }
 
@@ -382,5 +443,81 @@ onBeforeUnmount(() => {
 
 .danger {
   color: var(--color-error);
+}
+
+/* ==================== 手机内容卡片 ==================== */
+
+.insight-mobile-list {
+  background: var(--color-bg-container);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 4px 12px;
+}
+
+.insight-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.insight-card:last-of-type {
+  border-bottom: none;
+}
+
+.ic-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ic-time {
+  margin-left: auto;
+}
+
+.ic-title {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.ic-author {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.ic-metrics {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.ic-metrics b {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ic-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.mobile-pager {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 8px;
 }
 </style>

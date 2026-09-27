@@ -46,6 +46,7 @@
             class="module-card"
             @mouseenter="activeCard = cat.id"
             @mouseleave="activeCard = null"
+            @click="onCardClick(cat.id)"
           >
             <div class="card-cover">
               <div class="cover-inner">
@@ -114,7 +115,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
-import { brandTheme } from '../config/brands';
+import { brandTheme, BRAND_HIDDEN_MENUS } from '../config/brands';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -125,7 +126,17 @@ const systemName = computed(() => auth.systemName);
 const headerLogo = computed(() =>
   brandTheme(auth.currentBrandId)?.logo || '/images/login/logo.png',
 );
-const categories = computed(() => auth.moduleTree);
+const categories = computed(() => {
+  const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId] ?? [];
+  if (!hidden.length) return auth.moduleTree;
+  return auth.moduleTree
+    .filter((cat) => !hidden.includes(cat.name))
+    .map((cat) => ({
+      ...cat,
+      children: (cat.children ?? []).filter((g) => !hidden.includes(g.name)),
+    }))
+    .filter((cat) => (cat.children ?? []).length > 0);
+});
 const isAdmin = computed(() => auth.user?.admin_flag === 1);
 const adminPath = '/users/manage';
 
@@ -158,6 +169,16 @@ function featureCount(cat) {
 
 function goFeature(node) {
   if (node.path) router.push(node.path);
+}
+
+// 触屏设备无 hover，点击卡片切换功能子菜单
+const isTouch =
+  typeof window !== 'undefined' &&
+  (window.matchMedia?.('(hover: none)').matches || 'ontouchstart' in window);
+
+function onCardClick(catId) {
+  if (!isTouch) return;
+  activeCard.value = activeCard.value === catId ? null : catId;
 }
 
 function onUserMenuClick({ key }) {
@@ -550,5 +571,59 @@ onMounted(async () => {
   justify-content: center;
   height: 60vh;
   margin: auto;
+}
+
+@media (max-width: 640px) {
+  .welcome-header {
+    padding: 0 12px;
+  }
+
+  .header-logo {
+    margin-right: 8px;
+    gap: 8px;
+  }
+
+  .company-logo {
+    height: 30px;
+    max-width: 120px;
+  }
+
+  .header-system-name {
+    font-size: 14px;
+  }
+
+  .admin-btn {
+    margin-right: 8px;
+  }
+
+  .page-content {
+    padding: 16px 12px;
+  }
+
+  .module-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .card-cover {
+    width: 96px;
+    padding: 10px;
+  }
+
+  .card-info {
+    padding: 12px 14px 12px 4px;
+  }
+
+  .card-title {
+    font-size: 17px;
+  }
+
+  .card-desc {
+    font-size: 13px;
+  }
+
+  .info-submenu {
+    padding: 12px 14px 12px 4px;
+  }
 }
 </style>

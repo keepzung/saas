@@ -60,31 +60,31 @@
     <NoticeBar v-else>榜单说明：统计周期内账号发布内容的曝光 / 阅读 / 互动 / 线索等指标汇总排行，环比对比等长上一周期。</NoticeBar>
 
     <a-card :bordered="false" size="small" class="sum-card">
-      <a-row :gutter="16">
-        <a-col :span="4">
+      <a-row :gutter="[16, 12]">
+        <a-col :xs="8" :md="4">
           <a-statistic title="参与账号" :value="summary.account_num" />
         </a-col>
-        <a-col :span="4">
+        <a-col :xs="8" :md="4">
           <a-statistic title="内容数" :value="summary.item_cnt" />
         </a-col>
-        <a-col :span="5">
+        <a-col :xs="8" :md="5">
           <a-statistic
             title="总曝光"
             :value="summary.exposure_sum"
             :value-style="{ color: '#3456E6' }"
           />
         </a-col>
-        <a-col :span="5">
+        <a-col :xs="8" :md="5">
           <a-statistic
             title="总阅读"
             :value="summary.view_sum"
             :value-style="{ color: '#0d9488' }"
           />
         </a-col>
-        <a-col :span="3">
+        <a-col :xs="8" :md="3">
           <a-statistic title="总互动" :value="summary.interaction_sum" />
         </a-col>
-        <a-col :span="3">
+        <a-col :xs="8" :md="3">
           <a-statistic
             title="总线索"
             :value="summary.pm_leads"
@@ -94,8 +94,8 @@
       </a-row>
     </a-card>
 
-    <a-row v-if="top3.length" :gutter="12" class="podium-row">
-      <a-col v-for="(item, i) in top3" :key="item.name" :span="8">
+    <a-row v-if="top3.length" :gutter="[12, 12]" class="podium-row">
+      <a-col v-for="(item, i) in top3" :key="item.name" :xs="24" :sm="8">
         <a-card :bordered="false" size="small" :class="['podium', `podium-${i + 1}`]">
           <div class="podium-head">
             <span :class="['rank-badge', `rank-${i + 1}`]">{{ i + 1 }}</span>
@@ -116,7 +116,8 @@
       </a-col>
     </a-row>
 
-    <a-card :bordered="false">
+    <!-- 桌面：榜单表格 -->
+    <a-card v-if="!isMobile" :bordered="false">
       <a-table
         :columns="columns"
         :data-source="list"
@@ -180,6 +181,76 @@
         </template>
       </a-table>
     </a-card>
+
+    <!-- 手机：榜单卡片列表 -->
+    <div v-else class="rank-mobile-list">
+      <a-spin :spinning="loading">
+        <div v-for="record in list" :key="record.rank" class="rank-card">
+          <div class="rank-card-head">
+            <span :class="['rank-badge', `rank-${record.rank}`]">{{ record.rank }}</span>
+            <div class="rank-card-name">
+              <template v-if="dimension === 'account'">
+                <div class="rc-title">
+                  {{ record.name }}
+                  <a-tag
+                    v-if="record.account_type"
+                    :color="typeColor[record.account_type] || 'blue'"
+                    class="mini"
+                  >
+                    {{ record.account_type }}
+                  </a-tag>
+                </div>
+                <div class="muted mini">{{ record.store_name || '未关联门店' }}</div>
+              </template>
+              <template v-else>
+                <div class="rc-title">{{ record.name }}</div>
+                <div class="muted mini">{{ record.account_num }} 个账号 · {{ record.store_num || record.account_num }} 门店</div>
+              </template>
+            </div>
+            <span v-if="record.growth != null" :class="['growth', record.growth >= 0 ? 'up' : 'down']">
+              {{ record.growth >= 0 ? '↑' : '↓' }} {{ Math.abs(record.growth) }}%
+            </span>
+          </div>
+          <div class="rank-card-metrics">
+            <div class="rc-metric">
+              <span class="muted mini">{{ metricLabel }}</span>
+              <b>{{ fmt(record[metric]) }}</b>
+            </div>
+            <div class="rc-metric">
+              <span class="muted mini">内容数</span>
+              <b>{{ fmt(record.item_cnt) }}</b>
+            </div>
+            <div class="rc-metric">
+              <span class="muted mini">曝光量</span>
+              <b>{{ fmt(record.exposure_sum) }}</b>
+            </div>
+            <div class="rc-metric">
+              <span class="muted mini">互动量</span>
+              <b>{{ fmt(record.interaction_sum) }}</b>
+            </div>
+          </div>
+          <div class="bar-cell mobile-bar">
+            <div class="bar-track">
+              <div
+                class="bar-fill"
+                :style="{ width: `${(record[metric] / maxMetric) * 100}%` }"
+              />
+            </div>
+          </div>
+        </div>
+        <a-empty v-if="!loading && !list.length" />
+      </a-spin>
+      <div class="mobile-pager">
+        <a-pagination
+          :current="page"
+          :total="total"
+          :page-size="PAGE_SIZE"
+          :show-size-changer="false"
+          simple
+          @change="onMobilePageChange"
+        />
+      </div>
+    </div>
   </PageWrapper>
 </template>
 
@@ -195,8 +266,10 @@ import KoxRegionAnalysisView from './KoxRegionAnalysisView.vue';
 import KoxAccountRankingView from './KoxAccountRankingView.vue';
 import { getKoxRanking } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
+import { useBreakpoint } from '../../composables/useBreakpoint';
 
 const authStore = useAuthStore();
+const { isMobile } = useBreakpoint();
 const isTesla = computed(() => Number(authStore.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(authStore.currentBrandId)));
 const brandOptions = (authStore.brands ?? []).map((b) => ({
@@ -324,6 +397,11 @@ function onTableChange(pag) {
   reload();
 }
 
+function onMobilePageChange(p) {
+  page.value = p;
+  reload();
+}
+
 onMounted(reload);
 </script>
 
@@ -434,5 +512,86 @@ onMounted(reload);
 
 .down {
   color: #52c41a;
+}
+
+/* ==================== 手机榜单卡片 ==================== */
+
+.rank-mobile-list {
+  background: var(--color-bg-container);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 8px 12px;
+}
+
+.rank-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.rank-card:last-of-type {
+  border-bottom: none;
+}
+
+.rank-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.rank-card-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.rc-title {
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.growth {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.rank-card-metrics {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.rc-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rc-metric b {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-metric:first-child b {
+  color: var(--color-primary);
+  font-size: 15px;
+}
+
+.mobile-bar {
+  margin-top: 8px;
+}
+
+.mobile-bar .bar-track {
+  min-width: 0;
+}
+
+.mobile-pager {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 8px;
 }
 </style>

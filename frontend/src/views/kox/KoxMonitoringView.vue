@@ -59,7 +59,8 @@
       </FilterTopbar>
     </template>
 
-    <a-card :bordered="false">
+    <!-- 桌面：监测列表表格 -->
+    <a-card v-if="!isMobile" :bordered="false">
       <a-table
         :columns="columns"
         :data-source="list"
@@ -134,6 +135,84 @@
         </template>
       </a-table>
     </a-card>
+
+    <!-- 手机：监测列表卡片 -->
+    <div v-else class="monitor-mobile-list">
+      <a-spin :spinning="loading">
+        <div v-for="record in list" :key="record.id" class="monitor-card">
+          <div class="mc-head">
+            <a-avatar :size="36">{{ record.nickname.slice(0, 1) }}</a-avatar>
+            <div class="mc-title">
+              <div class="mc-name">
+                {{ record.nickname }}
+                <a-tag :color="typeColor[record.account_type]" class="mini">
+                  {{ record.account_type }}
+                </a-tag>
+                <a-tag :color="record.platform === 'douyin' ? 'blue' : 'red'" class="mini">
+                  {{ record.platform === 'douyin' ? '抖音' : '小红书' }}
+                </a-tag>
+              </div>
+              <div class="muted mini">
+                <a
+                  v-if="record.author_url"
+                  :href="record.author_url"
+                  target="_blank"
+                  rel="noopener"
+                >跳转主页</a>
+                <template v-if="record.author_url">
+                  <a-divider type="vertical" />
+                  <a @click="copyUrl(record)">复制链接</a>
+                </template>
+              </div>
+            </div>
+            <a-switch
+              :checked="record.status === 'enabled'"
+              size="small"
+              @change="(v) => toggleStatus(record, v)"
+            />
+          </div>
+          <div class="mc-meta">
+            <div class="mc-meta-item">
+              <span class="muted mini">粉丝数</span>
+              <b>{{ record.fans.toLocaleString() }}</b>
+            </div>
+            <div class="mc-meta-item">
+              <span class="muted mini">大区</span>
+              <b>{{ record.region_name || '-' }}</b>
+            </div>
+            <div class="mc-meta-item">
+              <span class="muted mini">销售区域</span>
+              <b>{{ record.sale_area || '-' }}</b>
+            </div>
+            <div class="mc-meta-item">
+              <span class="muted mini">门店</span>
+              <b class="mc-ellipsis">{{ record.store_name || '-' }}</b>
+            </div>
+          </div>
+          <div class="mc-footer">
+            <span class="muted mini">{{ record.operator_name || '未填运营人' }} · 添加于 {{ record.add_time }}</span>
+            <span class="mc-actions">
+              <a @click="openManage(record)">管理</a>
+              <a-divider type="vertical" />
+              <a-popconfirm title="确认移除该监测账号？" @confirm="removeAcc(record)">
+                <a class="danger">移除</a>
+              </a-popconfirm>
+            </span>
+          </div>
+        </div>
+        <a-empty v-if="!loading && !list.length" />
+      </a-spin>
+      <div class="mobile-pager">
+        <a-pagination
+          :current="page"
+          :total="total"
+          :page-size="PAGE_SIZE"
+          :show-size-changer="false"
+          simple
+          @change="onMobilePageChange"
+        />
+      </div>
+    </div>
 
     <a-modal
       v-model:open="addOpen"
@@ -318,8 +397,10 @@ import {
 } from '../../api/kox';
 import { parseAccountWorkbook } from '../../utils/xlsx-import';
 import { useAuthStore } from '../../stores/auth';
+import { useBreakpoint } from '../../composables/useBreakpoint';
 
 const auth = useAuthStore();
+const { isMobile } = useBreakpoint();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
 
 const importOpen = ref(false);
@@ -483,6 +564,11 @@ function onTableChange(pag, _filters, sorter) {
   reload();
 }
 
+function onMobilePageChange(p) {
+  page.value = p;
+  reload();
+}
+
 function copyUrl(record) {
   navigator.clipboard
     ?.writeText(record.author_url ?? '')
@@ -619,5 +705,88 @@ onMounted(reload);
 
 .danger {
   color: var(--color-error);
+}
+
+/* ==================== 手机监测卡片 ==================== */
+
+.monitor-mobile-list {
+  background: var(--color-bg-container);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 4px 12px;
+}
+
+.monitor-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.monitor-card:last-of-type {
+  border-bottom: none;
+}
+
+.mc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.mc-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.mc-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.mc-meta {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+}
+
+.mc-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mc-meta-item b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mc-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-footer {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mc-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.mobile-pager {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 8px;
 }
 </style>

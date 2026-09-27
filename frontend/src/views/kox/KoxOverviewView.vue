@@ -44,8 +44,8 @@
       </div>
     </a-card>
 
-    <a-row :gutter="12">
-      <a-col :span="12">
+    <a-row :gutter="[12, 12]">
+      <a-col :xs="24" :md="12">
         <a-card size="small" title="内容发布 & 互动">
           <div class="kv-grid">
             <div class="kv"><span>发帖账号</span><b>{{ fmt(ov.publish?.author_num) }}</b></div>
@@ -61,7 +61,7 @@
           </div>
         </a-card>
       </a-col>
-      <a-col :span="12">
+      <a-col :xs="24" :md="12">
         <a-card size="small" title="线索转化">
           <div class="kv-grid">
             <div class="kv"><span>私信咨询数</span><b>{{ fmt(ov.lead?.total_pm_inquiries_sum) }}</b></div>
@@ -73,7 +73,7 @@
           </div>
         </a-card>
       </a-col>
-      <a-col :span="12">
+      <a-col :xs="24" :md="12">
         <a-card size="small" title="投放效率">
           <div class="kv-grid">
             <div class="kv"><span>投放消耗</span><b>¥{{ fmt(ov.ad?.ad_cost) }}</b></div>
@@ -87,7 +87,7 @@
           </div>
         </a-card>
       </a-col>
-      <a-col :span="12">
+      <a-col :xs="24" :md="12">
         <a-card size="small" title="直播运营">
           <div class="kv-grid">
             <div class="kv"><span>开播账号</span><b>{{ fmt(ov.live?.live_account_num) }}</b></div>
@@ -297,5 +297,22 @@ onBeforeUnmount(() => {
 
 .kv span {
   color: var(--color-text-secondary);
+}
+
+@media (max-width: 767px) {
+  .hero-banner {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px 8px;
+    padding: 0;
+  }
+
+  .hero-divider {
+    display: none;
+  }
+
+  .hero-value {
+    font-size: 20px;
+  }
 }
 </style>

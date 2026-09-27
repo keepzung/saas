@@ -1,25 +1,25 @@
 <template>
   <PageWrapper title="数据总览" :subtitle="`欢迎回来，${auth.user?.nickname || '用户'}`">
     <a-card :bordered="false">
-      <a-row :gutter="16">
-        <a-col :span="6">
+      <a-row :gutter="[16, 16]">
+        <a-col :xs="12" :md="6">
           <a-statistic title="客户总数" :value="stats.customers" />
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="12" :md="6">
           <a-statistic
             title="VIP 客户"
             :value="stats.vipCustomers"
             :value-style="{ color: '#d97706' }"
           />
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="12" :md="6">
           <a-statistic
             title="订单总数"
             :value="stats.orders"
             :value-style="{ color: '#3456E6' }"
           />
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="12" :md="6">
           <a-statistic
             title="待支付订单"
             :value="stats.pendingPayments"

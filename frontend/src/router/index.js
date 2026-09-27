@@ -16,6 +16,27 @@ const routes = [
     meta: { public: false, title: '欢迎' },
   },
   {
+    path: '/m',
+    component: () => import('../layouts/MobileLayout.vue'),
+    children: [
+      {
+        path: 'kox-task/task-list',
+        component: () => import('../views/mobile/MTaskListView.vue'),
+        meta: { title: '任务领用' },
+      },
+      {
+        path: 'aigc/create',
+        component: () => import('../views/mobile/MCreateView.vue'),
+        meta: { title: 'AI 创作' },
+      },
+      {
+        path: 'aigc/articles',
+        component: () => import('../views/mobile/MArticlesView.vue'),
+        meta: { title: '我的作品' },
+      },
+    ],
+  },
+  {
     path: '/',
     component: DefaultLayout,
     redirect: '/dashboard',
@@ -194,6 +215,66 @@ const routes = [
         meta: { title: '任务列表' },
       },
       {
+        path: '/content-pro/workbench',
+        component: () => import('../views/factory/WorkbenchView.vue'),
+        meta: { title: '工作台总览' },
+      },
+      {
+        path: '/content-pro/config/products',
+        component: () => import('../views/factory/DataLibraryView.vue'),
+        meta: { title: '资料库' },
+      },
+      {
+        path: '/content-pro/config/material',
+        component: () => import('../views/factory/MaterialLibraryView.vue'),
+        meta: { title: '素材库' },
+      },
+      {
+        path: '/content-pro/config/strategies',
+        component: () => import('../views/factory/StrategyView.vue'),
+        meta: { title: '创作策略Pro' },
+      },
+      {
+        path: '/content-pro/content-factory/xhs-image-text-single',
+        component: () => import('../views/factory/XhsSingleView.vue'),
+        meta: { title: '小红书图文' },
+      },
+      {
+        path: '/content-pro/content-factory/xhs-image-text-batch',
+        component: () => import('../views/factory/XhsBatchView.vue'),
+        meta: { title: '小红书图文(批量)' },
+      },
+      {
+        path: '/content-pro/comment',
+        component: () => import('../views/factory/CommentMaintainView.vue'),
+        meta: { title: '评论维护' },
+      },
+      {
+        path: '/content-pro/history',
+        component: () => import('../views/factory/HistoryView.vue'),
+        meta: { title: '历史记录' },
+      },
+      {
+        path: '/content-pro/hot-content',
+        component: () => import('../views/factory/HotContentAnalysisView.vue'),
+        meta: { title: '热门内容分析' },
+      },
+      {
+        path: '/kox_task/content-task/task-list',
+        component: () => import('../views/task/ContentTaskListView.vue'),
+        meta: { title: '任务列表' },
+      },
+      {
+        path: '/kox_task/content-task/create-task',
+        component: () => import('../views/task/ContentTaskCreateView.vue'),
+        meta: { title: '派发新任务' },
+      },
+      {
+        path: '/kox_task/content-task/task-detail',
+        component: () => import('../views/task/ContentTaskDetailView.vue'),
+        meta: { title: '任务详情' },
+      },
+      {
         path: '/brandcosinsight/monitor/brand',
         component: () => import('../views/insight/InsightBrandView.vue'),
         meta: { title: '品牌监测' },
@@ -229,7 +310,11 @@ router.beforeEach((to) => {
   if (to.path === '/login' && auth.isLoggedIn) {
     return { path: '/welcome' };
   }
-  if (to.path !== '/welcome' && to.meta.public === undefined) {
+  if (
+    to.path !== '/welcome' &&
+    !to.path.startsWith('/m/') &&
+    to.meta.public === undefined
+  ) {
     if (auth.moduleTree.length > 0) {
       const allowed = new Set(['/welcome']);
       const walk = (nodes) => {

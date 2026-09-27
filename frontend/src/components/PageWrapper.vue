@@ -123,4 +123,31 @@ defineProps({
 .page-container :deep(.ant-card) {
   margin-bottom: 0 !important;
 }
+
+@media (max-width: 767px) {
+  .page-header {
+    padding: 0 12px;
+  }
+
+  .page-header-left {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .page-header-extra {
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .page-header-extra::-webkit-scrollbar {
+    display: none;
+  }
+
+  .page-container {
+    padding: 8px;
+    gap: 8px;
+  }
+}
 </style>

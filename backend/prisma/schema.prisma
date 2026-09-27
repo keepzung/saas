@@ -80,6 +80,7 @@ model User {
   kolLogs        KolLog[]       @relation("KolLogOperator")
   koxTasksCreated KoxTask[]     @relation("KoxTaskCreator")
   campaignProjects KoxCampaignProject[] @relation("CampaignProjectCreator")
+  contentTasksCreated ContentTask[] @relation("ContentTaskCreator")
   createdById     Int?
   createdBy       User?         @relation("UserCreator", fields: [createdById], references: [id])
   createdUsers    User[]        @relation("UserCreator")
@@ -426,12 +427,15 @@ model BatchTask {
   failedCount Int       @default(0)
   model       String    @default("random")
   packageId   Int?
+  config      Json?
+  brandId     Int       @default(1)
   createdById Int
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   @@index([status])
   @@index([productId])
+  @@index([brandId])
 }
 
 model KosAccount {
@@ -460,6 +464,7 @@ model KosAccount {
   taskRecords    KoxTaskAuthor[]
   dailyStats     KoxAccountDailyStat[]
   notes          KoxNote[]
+  contentTaskTargets ContentTaskTarget[] @relation("ContentTaskTargetAccount")
 
   @@index([platform])
   @@index([accountType])
@@ -832,6 +837,125 @@ model InsightReport {
   createdAt  DateTime @default(now())
 
   @@index([brandId])
+}
+
+// ─── 内容工厂Pro（东风奕境/格力工作区 AIGC）───────────────────────────
+
+model MaterialTypeTag {
+  id         Int             @id @default(autoincrement())
+  brandId    Int             @default(7)
+  parentId   Int             @default(0)
+  name       String
+  status     Int             @default(1)
+  perSetting Int             @default(0)
+  createdAt  DateTime        @default(now())
+  images     MaterialImage[]
+
+  @@index([brandId])
+}
+
+model MaterialImageSet {
+  id        Int             @id @default(autoincrement())
+  brandId   Int             @default(7)
+  name      String
+  status    Int             @default(1)
+  createdAt DateTime        @default(now())
+  images    MaterialImage[]
+
+  @@index([brandId])
+}
+
+model MaterialImage {
+  id            Int               @id @default(autoincrement())
+  brandId       Int               @default(7)
+  url           String
+  name          String?
+  setId         Int?
+  set           MaterialImageSet? @relation(fields: [setId], references: [id], onDelete: SetNull)
+  typeId        Int?
+  type          MaterialTypeTag?  @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  productNodeId Int?
+  status        Int               @default(1)
+  createdAt     DateTime          @default(now())
+
+  @@index([brandId])
+  @@index([setId])
+  @@index([typeId])
+  @@index([productNodeId])
+}
+
+model WritingStrategy {
+  id                Int      @id @default(autoincrement())
+  brandId           Int      @default(7)
+  productId         Int?
+  name              String
+  description       String?  @db.Text
+  persona           Json?
+  sellingPoints     Json?
+  audience          Json?
+  contentDirections Json?
+  enabled           Boolean  @default(true)
+  sort              Int      @default(0)
+  createdById       Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([brandId])
+}
+
+model XhsHistory {
+  id             Int      @id @default(autoincrement())
+  brandId        Int      @default(7)
+  title          String
+  content        String   @db.Text
+  tags           String[] @default([])
+  imgList        String[] @default([])
+  coverUrl       String?
+  batchTaskId    Int?
+  status         Int      @default(0)
+  conversationId String?
+  source         String   @default("ai")
+  uploadTime     DateTime @default(now())
+  createdById    Int?
+
+  @@index([brandId, uploadTime])
+}
+
+// ─── 内容创作任务（任务分发）───────────────────────────────────────────
+
+model ContentTask {
+  id            Int                 @id @default(autoincrement())
+  brandId       Int                 @default(7)
+  name          String
+  platform      String              @default("xhs")
+  scopeType     String              @default("all")
+  regions       String[]            @default([])
+  accountTypes  String[]            @default([])
+  startTime     DateTime
+  endTime       DateTime
+  exampleImages String[]            @default([])
+  exampleLink   String?
+  instructions  String?             @db.Text
+  reward        String?             @db.Text
+  status        String              @default("active")
+  createdById   Int
+  createdBy     User                @relation("ContentTaskCreator", fields: [createdById], references: [id])
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  targets       ContentTaskTarget[]
+
+  @@index([brandId, status])
+}
+
+model ContentTaskTarget {
+  id        Int         @id @default(autoincrement())
+  taskId    Int
+  task      ContentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  accountId Int
+  account   KosAccount  @relation("ContentTaskTargetAccount", fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, accountId])
+  @@index([accountId])
 }
 
 model LaiguLead {
