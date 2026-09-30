@@ -86,7 +86,13 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
       for (const cfg of cfgs) {
         if (cfg.lastSyncAt && Date.now() - cfg.lastSyncAt.getTime() < 20 * 3600_000) continue;
         try {
-          const r = await this.sync(cfg.brandId);
+          // 超时保护：Playwright 被 shield 卡住时不无限挂起，下轮重试
+          const r = await Promise.race([
+            this.sync(cfg.brandId),
+            new Promise<never>((_, rej) =>
+              setTimeout(() => rej(new Error('同步超时（15分钟），下轮重试')), 15 * 60_000).unref(),
+            ),
+          ]);
           this.logger.log(`专业号自动同步完成 brand=${cfg.brandId}: ${JSON.stringify(r).slice(0, 200)}`);
         } catch (e) {
           this.logger.warn(`专业号自动同步失败 brand=${cfg.brandId}: ${String(e?.message ?? e).slice(0, 200)}`);
