@@ -296,7 +296,7 @@ const loading = ref(false);
 const cookieValid = ref(undefined);
 const page = ref(1);
 const leadTab = ref('inquiries');
-const detailTab = ref(isTesla ? 'note' : 'account');
+const detailTab = ref(isTesla.value ? 'note' : 'account');
 const summary = ref({});
 const trend = ref([]);
 const platform = ref(null);
@@ -359,10 +359,14 @@ function realParams(extra = {}) {
 
 function onDaysChange() {
   range.value = [];
+  page.value = 1;
   reload();
 }
 function onRangeChange() {
-  if (range.value?.[0] && range.value?.[1]) reload();
+  if (range.value?.[0] && range.value?.[1]) {
+    page.value = 1;
+    reload();
+  }
 }
 
 async function reload() {
@@ -376,6 +380,13 @@ async function reload() {
     applyData(sumRes, listRes);
   } finally {
     loading.value = false;
+  }
+  // 时间筛选变化后同步刷新当前明细页签，避免明细数据停留旧区间
+  if (detailTab.value === 'note') {
+    notePage.value = 1;
+    loadNoteTab();
+  } else if (detailTab.value === 'region') {
+    loadRegionTab();
   }
 }
 
@@ -404,11 +415,20 @@ async function probeAndLoad() {
         realParams({ metric: 'fee', page: page.value, page_size: PAGE_SIZE }),
       );
       applyData(probe, listRes);
+    } else if (isTesla.value) {
+      // 特斯拉工作区不降级为演示数据：该区间无投放就如实显示 0
+      mode.value = 'real';
+      applyData(probe, { total: 0, list: [] });
     } else {
       mode.value = 'demo';
     }
   } catch {
-    mode.value = 'demo';
+    if (isTesla.value) {
+      mode.value = 'real';
+      applyData({ summary: {}, trend: [] }, { total: 0, list: [] });
+    } else {
+      mode.value = 'demo';
+    }
   } finally {
     loading.value = false;
   }

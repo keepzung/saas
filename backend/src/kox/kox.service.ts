@@ -209,9 +209,14 @@ export class KoxService {
     accountTag?: string;
     regionName?: string;
   }) {
-    const end = query.end ? new Date(query.end) : new Date();
+    // 时间边界按东八区解析（与周度快照口径一致）；UTC 解析会导致结束日 08:00 后的数据被截掉
+    const asDayStart = (s: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00.000+08:00`) : new Date(s);
+    const asDayEnd = (s: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T23:59:59.999+08:00`) : new Date(s);
+    const end = query.end ? asDayEnd(query.end) : new Date();
     const start = query.start
-      ? new Date(query.start)
+      ? asDayStart(query.start)
       : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
     const platform = query.platform || 'all';
     const brandId = query.brandId ? Number(query.brandId) : undefined;
@@ -243,18 +248,17 @@ export class KoxService {
       publishTime: { gte: start, lte: end },
       ...(brandId ? { brandId } : {}),
     };
-    let filteredAccountNames: string[] | null = null;
+    let filteredAccounts: { id: number; nickname: string }[] | null = null;
     if (accountTag || regionName) {
-      const filteredAccounts = await this.prisma.kosAccount.findMany({
+      filteredAccounts = await this.prisma.kosAccount.findMany({
         where: accountWhere,
         select: { id: true, nickname: true },
       });
-      filteredAccountNames = filteredAccounts.map((a) => a.nickname);
       noteWhere = {
         ...noteWhere,
         OR: [
           { account: { id: { in: filteredAccounts.map((a) => a.id) } } },
-          { authorName: { in: filteredAccountNames } },
+          { authorName: { in: filteredAccounts.map((a) => a.nickname) } },
         ],
       };
     }
@@ -360,17 +364,19 @@ export class KoxService {
     const campaignClick = campaignRows.reduce((acc, r) => acc + r.click, 0);
     const hasCampaign = campaignRows.length > 0;
 
-    // 全量口径（顶部账号总览两卡，不随筛选）：账号三卡 + 大区分布 + 大区内容发布数
+    // 账号总览两卡 + 大区分布 + 大区内容发布数：随大区/标签筛选联动（与前端 tooltip 口径一致）
+    const globalAccountWhere: Prisma.KosAccountWhereInput = filteredAccounts
+      ? { id: { in: filteredAccounts.map((a) => a.id) } }
+      : brandId
+        ? { brandId }
+        : {};
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
-        where: brandId ? { brandId } : {},
+        where: globalAccountWhere,
         select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true, accountTag: true },
       }),
       this.prisma.koxNote.findMany({
-        where: {
-          publishTime: { gte: start, lte: end },
-          ...(brandId ? { brandId } : {}),
-        },
+        where: noteWhere,
         select: {
           accountId: true,
           authorName: true,
@@ -1520,12 +1526,19 @@ export class KoxService {
     start: Date;
     end: Date;
   }> {
-    const end = query.end ? new Date(query.end) : new Date();
-    end.setHours(23, 59, 59, 999);
+    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+    const end = query.end
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date(query.end)
+      : new Date();
+    if (!query.end) end.setHours(23, 59, 59, 999);
     const start = query.start
-      ? new Date(query.start)
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
-    start.setHours(0, 0, 0, 0);
+    if (!query.start) start.setHours(0, 0, 0, 0);
 
     const base: Prisma.KoxNoteWhereInput = {
       publishTime: { gte: start, lte: end },
@@ -1755,9 +1768,9 @@ export class KoxService {
     end?: string;
     accountType?: string;
   }) {
-    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const end = query.end ? new Date(`${query.end}T23:59:59.999+08:00`) : new Date();
     const start = query.start
-      ? new Date(`${query.start}T00:00:00.000`)
+      ? new Date(`${query.start}T00:00:00.000+08:00`)
       : new Date(end.getTime() - 6 * 86400000);
     const brandId = query.brandId ? Number(query.brandId) : undefined;
     const days = Math.max(
@@ -1927,14 +1940,15 @@ export class KoxService {
     accountType?: string;
     regionName?: string;
     tag?: string;
+    accountTag?: string;
     keyword?: string;
     metric?: string;
     page?: string;
     page_size?: string;
   }) {
-    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const end = query.end ? new Date(`${query.end}T23:59:59.999+08:00`) : new Date();
     const start = query.start
-      ? new Date(`${query.start}T00:00:00.000`)
+      ? new Date(`${query.start}T00:00:00.000+08:00`)
       : new Date(end.getTime() - 6 * 86400000);
     const brandId = query.brandId ? Number(query.brandId) : undefined;
     const days = Math.max(
@@ -1948,7 +1962,9 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
       ...(query.accountType ? { accountType: query.accountType } : {}),
       ...(query.regionName ? { regionName: query.regionName } : {}),
-      ...(query.tag ? { accountTag: query.tag } : {}),
+      ...(query.tag || query.accountTag
+        ? { accountTag: query.tag || query.accountTag }
+        : {}),
       ...(query.keyword
         ? { nickname: { contains: query.keyword, mode: 'insensitive' } }
         : {}),
@@ -2415,9 +2431,9 @@ export class KoxService {
     regionName?: string;
     keyword?: string;
   }) {
-    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const end = query.end ? new Date(`${query.end}T23:59:59.999+08:00`) : new Date();
     const start = query.start
-      ? new Date(`${query.start}T00:00:00.000`)
+      ? new Date(`${query.start}T00:00:00.000+08:00`)
       : new Date(end.getTime() - 6 * 86400000);
     const brandId = query.brandId ? Number(query.brandId) : 6;
     const days = Math.max(

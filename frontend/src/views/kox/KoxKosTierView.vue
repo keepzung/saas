@@ -64,6 +64,7 @@
               placeholder="账号/门店搜索"
               allow-clear
               @search="reload"
+              @change="(e) => { if (!e.target.value) reload(); }"
             />
             <a-button size="small" type="primary" @click="exportDetail">导出数据</a-button>
           </div>

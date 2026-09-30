@@ -5,7 +5,7 @@
         <a-radio-button value="7">近7天</a-radio-button>
         <a-radio-button value="30">近30天</a-radio-button>
       </a-radio-group>
-      <a-range-picker v-model:value="range" size="small" @change="reload" />
+      <a-range-picker v-model:value="range" size="small" @change="onFilterChange" />
       <a-select
         v-model:value="regionName"
         size="small"
@@ -13,7 +13,7 @@
         allow-clear
         placeholder="大区"
         :options="regionOptions"
-        @change="reload"
+        @change="onFilterChange"
       />
       <a-select
         v-if="!isDf"
@@ -28,7 +28,7 @@
           { label: 'KOB', value: 'KOB' },
           { label: 'KOC', value: 'KOC' },
         ]"
-        @change="reload"
+        @change="onFilterChange"
       />
       <a-select
         v-if="!isDf"
@@ -38,7 +38,7 @@
         allow-clear
         placeholder="账号标签"
         :options="tagOptions"
-        @change="reload"
+        @change="onFilterChange"
       />
       <a-input-search
         v-model:value="keyword"
@@ -46,7 +46,8 @@
         style="width: 180px"
         placeholder="账号名称搜索"
         allow-clear
-        @search="reload"
+        @search="onFilterChange"
+        @change="(e) => { if (!e.target.value) onFilterChange(); }"
       />
       <a-button size="small" type="primary" @click="exportDetail">导出数据明细</a-button>
     </template>
@@ -232,6 +233,11 @@ async function loadFacets() {
   } catch {
     /* 忽略筛选项错误 */
   }
+}
+
+function onFilterChange() {
+  pagination.value.current = 1;
+  reload();
 }
 
 function onTableChange(pag) {

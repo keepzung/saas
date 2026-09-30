@@ -123,6 +123,7 @@ export class KoxController {
       accountType?: string;
       regionName?: string;
       tag?: string;
+      accountTag?: string;
       keyword?: string;
       metric?: string;
       page?: string;

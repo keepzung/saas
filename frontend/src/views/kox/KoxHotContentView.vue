@@ -42,6 +42,7 @@
         placeholder="标题关键字"
         allow-clear
         @search="reload"
+        @change="(e) => { if (!e.target.value) reload(); }"
       />
     </template>
 

@@ -976,12 +976,19 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     scope?: string;
   }) {
-    const end = query.end ? new Date(query.end) : new Date();
-    end.setHours(23, 59, 59, 999);
+    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+    const end = query.end
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date(query.end)
+      : new Date();
+    if (!query.end) end.setHours(23, 59, 59, 999);
     const start = query.start
-      ? new Date(query.start)
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
-    start.setHours(0, 0, 0, 0);
+    if (!query.start) start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
@@ -1128,12 +1135,19 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     scope?: string;
   }) {
-    const end = query.end ? new Date(query.end) : new Date();
-    end.setHours(23, 59, 59, 999);
+    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+    const end = query.end
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date(query.end)
+      : new Date();
+    if (!query.end) end.setHours(23, 59, 59, 999);
     const start = query.start
-      ? new Date(query.start)
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
-    start.setHours(0, 0, 0, 0);
+    if (!query.start) start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
@@ -1396,12 +1410,19 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const groupby = ['region', 'store'].includes(query.groupby ?? '')
       ? (query.groupby as string)
       : 'region';
-    const end = query.end ? new Date(query.end) : new Date();
-    end.setHours(23, 59, 59, 999);
+    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+    const end = query.end
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date(query.end)
+      : new Date();
+    if (!query.end) end.setHours(23, 59, 59, 999);
     const start = query.start
-      ? new Date(query.start)
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(query.start)
       : new Date(end.getTime() - 29 * 86400000);
-    start.setHours(0, 0, 0, 0);
+    if (!query.start) start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
@@ -1424,9 +1445,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const regionByStore = new Map<string, string>();
     const regionByNick = new Map<string, string>();
+    const storeByNick = new Map<string, string>();
     for (const k of kos) {
       if (k.storeName) regionByStore.set(k.storeName, k.regionName ?? '未匹配');
-      if (k.nickname) regionByNick.set(k.nickname, k.regionName ?? '未匹配');
+      if (k.nickname) {
+        regionByNick.set(k.nickname, k.regionName ?? '未匹配');
+        if (k.storeName) storeByNick.set(k.nickname, k.storeName);
+      }
     }
     const attrBySeller = new Map<string, { region: string; store: string }>();
     for (const s of sparks) {
@@ -1436,6 +1461,18 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         store: region === '未匹配' ? '未匹配' : s.name,
       });
     }
+    // kos_author（乐允 xlsx 导入）行没有 SparkAccount 镜像：按行上昵称回退映射大区/门店
+    const attrForRow = (r: {
+      virtualSellerId: string;
+      brandUserName: string | null;
+    }): { region: string; store: string } => {
+      const direct = attrBySeller.get(r.virtualSellerId);
+      if (direct) return direct;
+      const nick = r.brandUserName ?? '';
+      const region = regionByNick.get(nick) ?? '未匹配';
+      const store = storeByNick.get(nick) ?? (region === '未匹配' ? '未匹配' : nick);
+      return { region, store };
+    };
 
     type Agg = {
       name: string;
@@ -1451,10 +1488,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     };
     const groups = new Map<string, Agg>();
     for (const r of rows) {
-      const attr = attrBySeller.get(r.virtualSellerId) ?? {
-        region: '未匹配',
-        store: '未匹配',
-      };
+      const attr = attrForRow(r);
       const key = groupby === 'store' ? `${attr.region}·${attr.store}` : attr.region;
       const cur =
         groups.get(key) ??
