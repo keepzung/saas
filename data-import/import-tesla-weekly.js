@@ -4,6 +4,8 @@
 // 用法:
 //   node import-tesla-weekly.js                     # 导入 tesla/ 下两张周度表（按文件名 0914/0921 识别周期）
 //   node import-tesla-weekly.js --dry-run           # 只统计不写库
+//   node import-tesla-weekly.js --file <xlsx路径> --sheet <sheet名> --week 2026-09-14:2026-09-20
+//     （显式模式可重复传多组 --file/--sheet/--week；服务器上文件名无需中文）
 // 幂等：每周 deleteMany + createMany
 const path = require('path');
 const fs = require('fs');
@@ -14,6 +16,23 @@ const XLSX = createRequire(path.join(ROOT, 'frontend', 'noop.js'))('xlsx');
 const { PrismaClient } = createRequire(path.join(ROOT, 'backend', 'noop.js'))('@prisma/client');
 const BRAND_ID = 6;
 const DRY_RUN = process.argv.includes('--dry-run');
+
+function parseArgsTargets() {
+  const targets = [];
+  const idxOf = (flag, from = 0) => process.argv.indexOf(flag, from);
+  let i = idxOf('--file');
+  while (i > -1) {
+    const file = process.argv[i + 1];
+    const sheetIdx = idxOf('--sheet', i);
+    const weekIdx = idxOf('--week', i);
+    const nextFile = idxOf('--file', i + 1);
+    const sheet = sheetIdx > -1 && (nextFile === -1 || sheetIdx < nextFile) ? process.argv[sheetIdx + 1] : null;
+    const week = weekIdx > -1 && (nextFile === -1 || weekIdx < nextFile) ? process.argv[weekIdx + 1] : null;
+    if (file && week) targets.push({ file, sheet, explicitWeek: week });
+    i = idxOf('--file', i + 1);
+  }
+  return targets;
+}
 
 const num = (v) => (typeof v === 'number' ? v : Number(String(v ?? '0').replace(/[,，\s]/g, '')) || 0);
 
@@ -28,8 +47,19 @@ function weekOf(fileName) {
   return { start, end, startKey: `${year}-${mm(m[1])}`, endKey: `${year}-${mm(m[2])}` };
 }
 
+function weekOfExplicit(spec) {
+  const [s, e] = String(spec).split(':');
+  if (!s || !e) return null;
+  return {
+    start: new Date(`${s}T00:00:00.000+08:00`),
+    end: new Date(`${e}T23:59:59.999+08:00`),
+    startKey: s,
+    endKey: e,
+  };
+}
+
 function readWeekly(file, sheetName) {
-  const wb = XLSX.readFile(path.join(ROOT, 'tesla', file), { cellDates: true });
+  const wb = XLSX.readFile(file, { cellDates: true });
   const sheet = wb.Sheets[sheetName] || wb.Sheets[wb.SheetNames[0]];
   return XLSX.utils.sheet_to_json(sheet, { defval: null });
 }
@@ -37,20 +67,32 @@ function readWeekly(file, sheetName) {
 async function main() {
   const prisma = new PrismaClient();
   try {
-    const targets = [
-      { file: '0914-0920特斯拉周度数据（含投流）.xlsx', sheet: 'Sheet1' },
-      { file: '0921-0927小红书周度数据（含投流）.xlsx', sheet: '周报' },
-    ];
+    const explicit = parseArgsTargets();
+    let targets = explicit.map((t) => ({
+      file: path.resolve(t.file),
+      sheet: t.sheet,
+      week: weekOfExplicit(t.explicitWeek),
+      label: path.basename(t.file),
+    }));
+    if (!explicit.length) {
+      const defaults = [
+        { file: '0914-0920特斯拉周度数据（含投流）.xlsx', sheet: 'Sheet1' },
+        { file: '0921-0927小红书周度数据（含投流）.xlsx', sheet: '周报' },
+      ];
+      targets = defaults
+        .filter((d) => fs.existsSync(path.join(ROOT, 'tesla', d.file)))
+        .map((d) => ({ file: path.join(ROOT, 'tesla', d.file), sheet: d.sheet, week: weekOf(d.file), label: d.file }));
+    }
     for (const t of targets) {
-      if (!fs.existsSync(path.join(ROOT, 'tesla', t.file))) {
-        console.log(`（缺少 ${t.file}，跳过）`);
+      if (!t.week) {
+        console.log(`（${t.label} 周期无法识别，跳过）`);
         continue;
       }
-      const week = weekOf(t.file);
-      if (!week) {
-        console.log(`（${t.file} 文件名无法识别周期，跳过）`);
+      if (!fs.existsSync(t.file)) {
+        console.log(`（缺少 ${t.label}，跳过）`);
         continue;
       }
+      const week = t.week;
       const rows = readWeekly(t.file, t.sheet);
       const records = [];
       for (const r of rows) {
