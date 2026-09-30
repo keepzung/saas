@@ -730,6 +730,39 @@ model KoxCampaignProject {
   @@index([brandId])
 }
 
+// 特斯拉周度快照（客户周度表权威口径：按账号×周，含服务卡/个微复制等留资分量）
+model KoxWeeklySnapshot {
+  id               Int      @id @default(autoincrement())
+  brandId          Int      @default(6)
+  weekStart        DateTime
+  weekEnd          DateTime
+  accountId        Int?
+  uid              String?
+  accountName      String
+  accountType      String?
+  regionName       String?
+  storeName        String?
+  tierLabel        String?
+  certifyUser      String?
+  publishNotes     Int      @default(0)
+  promotedNotes    Int      @default(0)
+  spend            Decimal  @default(0) @db.Decimal(14, 2)
+  interaction      Int      @default(0)
+  exposure         Int      @default(0)
+  clicks           Int      @default(0)
+  inquiries        Int      @default(0)
+  openings         Int      @default(0)
+  totalLeads       Int      @default(0)
+  pmLeads          Int      @default(0)
+  serviceCardLeads Int      @default(0)
+  appointmentLeads Int      @default(0)
+  wecomCopyLeads   Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  @@unique([brandId, weekStart, accountName])
+  @@index([brandId, weekStart, weekEnd])
+}
+
 model KoxDealerSnapshot {
   id           Int      @id @default(autoincrement())
   brandId      Int      @default(7)

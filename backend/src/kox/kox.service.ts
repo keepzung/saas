@@ -385,6 +385,62 @@ export class KoxService {
       }),
     ]);
 
+    // 特斯拉周度快照（客户周度表权威口径）：查询窗口与快照周完全重合时，summary/线索漏斗直接用快照
+    const padDay2 = (n: number) => String(n).padStart(2, '0');
+    const dayKey2 = (d: Date) => `${d.getFullYear()}-${padDay2(d.getMonth() + 1)}-${padDay2(d.getDate())}`;
+    let weeklySnap: {
+      weekStart: Date;
+      weekEnd: Date;
+      item_cnt: number;
+      promoted_cnt: number;
+      spend: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_sum: number;
+      inquiries: number;
+      openings: number;
+      total_leads: number;
+      pm_leads: number;
+      service_card_leads: number;
+      wecom_copy_leads: number;
+      account_cnt: number;
+    } | null = null;
+    if (brandId === 6) {
+      const snaps = await this.prisma.koxWeeklySnapshot.findMany({
+        where: {
+          brandId: 6,
+          weekStart: { gte: new Date(`${dayKey2(start)}T00:00:00.000+08:00`) },
+          weekEnd: { lte: new Date(`${dayKey2(end)}T23:59:59.999+08:00`) },
+        },
+      });
+      const hit = snaps.find(
+        (s) => dayKey2(s.weekStart) === dayKey2(start) && dayKey2(s.weekEnd) === dayKey2(end),
+      );
+      if (hit) {
+        const rows = snaps.filter((s) => dayKey2(s.weekStart) === dayKey2(hit.weekStart));
+        const nSum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
+        const dSum = (f: (r: (typeof rows)[number]) => number) =>
+          Math.round(rows.reduce((acc, r) => acc + f(r), 0) * 100) / 100;
+        weeklySnap = {
+          weekStart: hit.weekStart,
+          weekEnd: hit.weekEnd,
+          item_cnt: nSum((r) => r.publishNotes),
+          promoted_cnt: nSum((r) => r.promotedNotes),
+          spend: dSum((r) => Number(r.spend)),
+          exposure_sum: nSum((r) => r.exposure),
+          view_sum: nSum((r) => r.clicks),
+          interaction_sum: nSum((r) => r.interaction),
+          inquiries: nSum((r) => r.inquiries),
+          openings: nSum((r) => r.openings),
+          total_leads: nSum((r) => r.totalLeads),
+          pm_leads: nSum((r) => r.pmLeads),
+          service_card_leads: nSum((r) => r.serviceCardLeads),
+          wecom_copy_leads: nSum((r) => r.wecomCopyLeads),
+          account_cnt: rows.length,
+        };
+      }
+    }
+
     // 特斯拉：快捷 7/30 天窗口内容指标改用专业号真实窗口数据（员工矩阵汇总，支持大区/标签过滤）
     // 守卫：快照窗口必须与查询窗口大致重合（快捷档），历史自定义区间不套用
     let proContent: {
@@ -610,23 +666,54 @@ export class KoxService {
           }),
           this.prisma.kosAccount.count({ where: accountWhere }),
         ]);
-        const itemCntN = proContent ? proContent.item_cnt : noteRows.length;
+        const itemCntN = weeklySnap
+          ? weeklySnap.item_cnt
+          : proContent
+            ? proContent.item_cnt
+            : noteRows.length;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: proContent ? proContent.exposure_sum : noteExposureSum,
-          view_sum: proContent ? proContent.view_sum : noteViewSum,
-          interaction_sum: proContent ? proContent.interaction_sum : noteInteractionSum,
+          exposure_sum: weeklySnap
+            ? weeklySnap.exposure_sum
+            : proContent
+              ? proContent.exposure_sum
+              : noteExposureSum,
+          view_sum: weeklySnap ? weeklySnap.view_sum : proContent ? proContent.view_sum : noteViewSum,
+          interaction_sum: weeklySnap
+            ? weeklySnap.interaction_sum
+            : proContent
+              ? proContent.interaction_sum
+              : noteInteractionSum,
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
-      content_source: proContent
-        ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${proContent.stat_date.toISOString().slice(0, 10)})`
-        : 'spark_notes',
-      // 特斯拉版线索转化漏斗：投放（partner 通道，品牌级）+ 自然（未投流笔记，随筛选）
+      content_source: weeklySnap
+        ? `weekly_snapshot(${dayKey2(weeklySnap.weekStart)}~${dayKey2(weeklySnap.weekEnd)})`
+        : proContent
+          ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${proContent.stat_date.toISOString().slice(0, 10)})`
+          : 'spark_notes',
+      // 特斯拉版线索转化漏斗：周度快照（客户口径）> 专业号总数据 > 投放+自然
       lead_funnel: (() => {
+        if (weeklySnap) {
+          const { inquiries, openings } = weeklySnap;
+          return {
+            pm_inquiries: inquiries,
+            pm_openings: openings,
+            pm_leads: weeklySnap.pm_leads,
+            total_leads: weeklySnap.total_leads,
+            service_card_leads: weeklySnap.service_card_leads,
+            wecom_copy_leads: weeklySnap.wecom_copy_leads,
+            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+            lead_rate: inquiries ? r2((weeklySnap.pm_leads / inquiries) * 100) : 0,
+            campaign: { enter: 0, open: 0, leads: 0 },
+            organic: { inquiries: 0, openings: 0, leads: 0 },
+            scope_note: '周度快照（客户口径）：总留资=私信留资+服务卡留资+个微复制留资',
+            source: 'weekly_snapshot',
+          };
+        }
         // G2：专业号线索总数据口径优先（进线/开口/留资为专业号平台全量）
         if (proLeads) {
           const inquiries = proLeads.messageOpenCnt;
@@ -1885,10 +1972,44 @@ export class KoxService {
       },
     });
 
-    // 特斯拉近7天：笔记快照无新数据（乐允导出截至 09-24），改用专业号员工矩阵真实窗口数据
+    // 特斯拉周度快照（客户周度表权威口径）：窗口与快照周完全重合时按账号输出快照数据
     let metric_source = 'spark_notes';
-    const useProStaff = brandId === 6 && days <= 7;
-    const notes = useProStaff
+    const padDayA = (n: number) => String(n).padStart(2, '0');
+    const dayKeyA = (d: Date) => `${d.getFullYear()}-${padDayA(d.getMonth() + 1)}-${padDayA(d.getDate())}`;
+    const startKeyA = dayKeyA(start);
+    const endKeyA = dayKeyA(end);
+    let weeklySnapRows: {
+      accountId: number | null;
+      uid: string | null;
+      accountName: string;
+      tierLabel: string | null;
+      publishNotes: number;
+      exposure: number;
+      clicks: number;
+      interaction: number;
+      inquiries: number;
+      openings: number;
+      totalLeads: number;
+      pmLeads: number;
+      serviceCardLeads: number;
+      wecomCopyLeads: number;
+    }[] = [];
+    if (brandId === 6) {
+      const snaps = await this.prisma.koxWeeklySnapshot.findMany({
+        where: {
+          brandId: 6,
+          weekStart: { gte: new Date(`${startKeyA}T00:00:00.000+08:00`) },
+          weekEnd: { lte: new Date(`${endKeyA}T23:59:59.999+08:00`) },
+        },
+      });
+      const hit = snaps.find(
+        (s) => dayKeyA(s.weekStart) === startKeyA && dayKeyA(s.weekEnd) === endKeyA,
+      );
+      if (hit) weeklySnapRows = snaps.filter((s) => dayKeyA(s.weekStart) === startKeyA);
+    }
+    const useWeeklySnap = weeklySnapRows.length > 0;
+    const useProStaff = !useWeeklySnap && brandId === 6 && days <= 7;
+    const notes = useWeeklySnap || useProStaff
       ? []
       : await this.prisma.koxNote.findMany({
           where: {
@@ -1950,6 +2071,32 @@ export class KoxService {
       }
       fn(cur);
     };
+    // 周度快照：按账号名/uid 映射进聚合，附带客户口径总留资分量
+    const weeklyExtra = new Map<number, { total_leads: number; service_card_leads: number; wecom_copy_leads: number }>();
+    const weeklySnapTierByAccount = new Map<number, string>();
+    if (useWeeklySnap) {
+      const uidToId = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]));
+      for (const s of weeklySnapRows) {
+        const accId = nameToId.get(s.accountName) ?? (s.uid ? uidToId.get(s.uid) : null) ?? null;
+        if (accId == null) continue;
+        bump(accId, (a) => {
+          a.item_cnt += s.publishNotes;
+          a.exposure += s.exposure;
+          a.view += s.clicks;
+          a.interaction += s.interaction;
+          a.pm_inquiries += s.inquiries;
+          a.pm_openings += s.openings;
+          a.pm_leads += s.pmLeads;
+        });
+        weeklyExtra.set(accId, {
+          total_leads: s.totalLeads,
+          service_card_leads: s.serviceCardLeads,
+          wecom_copy_leads: s.wecomCopyLeads,
+        });
+        if (s.tierLabel) weeklySnapTierByAccount.set(accId, s.tierLabel);
+      }
+      metric_source = `weekly_snapshot(${startKeyA}~${endKeyA})`;
+    }
     if (useProStaff) {
       const proDateType = days <= 1 ? 1 : 2;
       const latestPro = await this.prisma.proKosStaff.findFirst({
@@ -2001,7 +2148,9 @@ export class KoxService {
 
     const rows = accounts.map((a) => {
       const g = aggById.get(a.id) ?? blank();
-      const tier: KosTierMeta = classifyTier(g.pm_leads, days);
+      const wx = weeklyExtra.get(a.id);
+      const snapTier = wx ? KOS_TIERS.find((t) => t.label === (weeklySnapTierByAccount.get(a.id) ?? '')) : undefined;
+      const tier: KosTierMeta = snapTier ?? classifyTier(g.pm_leads, days);
       return {
         account_id: a.id,
         author_id: a.authorId,
@@ -2028,6 +2177,9 @@ export class KoxService {
         pm_inquiries: g.pm_inquiries,
         pm_openings: g.pm_openings,
         pm_leads: g.pm_leads,
+        total_leads: wx?.total_leads ?? null,
+        service_card_leads: wx?.service_card_leads ?? null,
+        wecom_copy_leads: wx?.wecom_copy_leads ?? null,
         weekly_leads: Math.round((g.pm_leads / (days / 7)) * 100) / 100,
         tier_key: tier.key,
         tier_label: tier.label,
@@ -2081,9 +2233,11 @@ export class KoxService {
           accounts.map((a) => a.accountTag).filter((t): t is string => !!t),
         ),
       ],
-      metric_note: metric_source.startsWith('pro_staff')
-        ? '近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算'
-        : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
+      metric_note: metric_source.startsWith('weekly_snapshot')
+        ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
+        : metric_source.startsWith('pro_staff')
+          ? '近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算'
+          : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
   }

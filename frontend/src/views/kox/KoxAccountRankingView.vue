@@ -130,7 +130,8 @@ const tagOptions = ref([]);
 const loading = ref(false);
 const list = ref([]);
 const tierStat = ref([]);
-const data = ref({ metric_note: '' });
+const data = ref({ metric_note: '', metric_source: '' });
+const isWeeklySnap = computed(() => String(data.value.metric_source || '').startsWith('weekly_snapshot'));
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'] });
 
 const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
@@ -177,6 +178,9 @@ const columns = computed(() => {
     ncol('私信进线', 'pm_inquiries'),
     ncol('私信开口', 'pm_openings'),
     ncol('私信留资', 'pm_leads'),
+    ...(isWeeklySnap.value
+      ? [ncol('总留资（未去重）', 'total_leads'), ncol('服务卡留资', 'service_card_leads'), ncol('个微复制留资', 'wecom_copy_leads')]
+      : []),
     ncol('内容发布数', 'item_cnt'),
     ncol('内容曝光数', 'exposure_sum', 110),
     ncol('内容阅读数', 'view_sum', 110),
@@ -261,6 +265,9 @@ function exportDetail() {
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
     私信留资: r.pm_leads,
+    ...(r.total_leads != null
+      ? { 总留资: r.total_leads, 服务卡留资: r.service_card_leads ?? 0, 个微复制留资: r.wecom_copy_leads ?? 0 }
+      : {}),
     内容发布数: r.item_cnt,
     内容曝光数: r.exposure_sum,
     内容阅读数: r.view_sum,

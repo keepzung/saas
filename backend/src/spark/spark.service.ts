@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
 import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.client';
@@ -207,6 +209,99 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       .filter(Boolean);
   }
 
+  /**
+   * partner 会话短效（约一天）：cookie 失效时用 hall 账密自动重登换新。
+   * 凭据来自环境变量 PARTNER_LOGIN_USER / PARTNER_LOGIN_PASS，未配置则返回 null（维持人工运维路径）。
+   */
+  private async partnerAutoRelogin(): Promise<string | null> {
+    const user = process.env.PARTNER_LOGIN_USER;
+    const pass = process.env.PARTNER_LOGIN_PASS;
+    if (!user || !pass) return null;
+    const { chromium } = require('playwright-core') as typeof import('playwright-core');
+    const exe = (() => {
+      try {
+        const p = chromium.executablePath();
+        if (p && fs.existsSync(p)) return p;
+      } catch { /* fallthrough */ }
+      const base = process.env.LOCALAPPDATA
+        ? path.join(process.env.LOCALAPPDATA, 'ms-playwright')
+        : path.join(process.env.HOME ?? '', '.cache', 'ms-playwright');
+      try {
+        const dirs = fs
+          .readdirSync(base)
+          .filter((d) => d.startsWith('chromium-'))
+          .sort()
+          .reverse();
+        for (const d of dirs) {
+          for (const sub of ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-win/chrome.exe', 'chrome-win64/chrome.exe']) {
+            const p = path.join(base, d, sub);
+            if (fs.existsSync(p)) return p;
+          }
+        }
+      } catch { /* ignore */ }
+      return null;
+    })();
+    const browser = await chromium.launch({
+      executablePath: exe || undefined,
+      headless: true,
+      args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'],
+    });
+    try {
+      const ctx = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        locale: 'zh-CN',
+        viewport: { width: 1600, height: 1000 },
+      });
+      const page = await ctx.newPage();
+      const loginUrl =
+        'https://partner.xiaohongshu.com/login?service=https%3A%2F%2Fpartner.xiaohongshu.com%2Fpartner%2Fwatch-dashboard';
+      let landed = false;
+      for (let i = 1; i <= 3; i++) {
+        try {
+          await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 50000 });
+          landed = true;
+          break;
+        } catch {
+          await page.waitForTimeout(4000);
+        }
+      }
+      if (!landed) throw new Error('partner 登录页加载失败（网络）');
+      await page.waitForTimeout(4000);
+      if (/login/i.test(page.url())) {
+        const u = page
+          .locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[placeholder*="手机"]')
+          .locator('visible=true')
+          .first();
+        const p = page.locator('input[type="password"]').locator('visible=true').first();
+        if (!(await u.count()) || !(await p.count())) throw new Error('partner 登录页未找到输入框');
+        await u.fill(user);
+        await p.fill(pass);
+        const agree = page.locator('text=同意').first();
+        if (await agree.count()) {
+          const box = await agree.boundingBox({ timeout: 2000 }).catch(() => null);
+          if (box) await page.mouse.click(box.x - 18, box.y + box.height / 2).catch(() => {});
+        }
+        const btn = page.locator('button:has-text("登录"), button:has-text("登 录")').first();
+        if (await btn.count()) await btn.click().catch(() => {});
+        else await page.keyboard.press('Enter');
+        await page.waitForTimeout(10000);
+      }
+      if (/login/i.test(page.url())) throw new Error('partner 自动登录未成功');
+      const state = await ctx.storageState();
+      const ck = state.cookies
+        .filter((c) => /xiaohongshu\.com/.test(c.domain))
+        .map((c) => `${c.name}=${c.value}`)
+        .join('; ');
+      if (ck.length < 100) throw new Error('partner 登录态 cookie 异常');
+      await this.orgs.setCookie(6, ck);
+      this.logger.log('partner 自动重登成功，cookie 已热更+落库');
+      return ck;
+    } finally {
+      await browser.close();
+    }
+  }
+
   private partnerNum(v: unknown): number {
     const s = String(v ?? '').replace(/[,，\s]/g, '');
     if (!s || s === '-' || s === '--') return 0;
@@ -214,9 +309,22 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return Number.isFinite(n) ? n : 0;
   }
 
-  /** partner 主表同步（公开：手动 sync 端点按通道分发）；昨日终值 + 今日日内快照 */
+  /** partner 主表同步（公开：手动 sync 端点按通道分发）；昨日终值 + 今日日内快照；cookie 失效自动重登一次 */
   async syncCampaignPartner(ctx: SparkOrgCtx): Promise<SyncResult> {
-    const rows = await this.partnerApi.vsellerMonitor(ctx);
+    let rows: Awaited<ReturnType<typeof this.partnerApi.vsellerMonitor>>;
+    try {
+      rows = await this.partnerApi.vsellerMonitor(ctx);
+    } catch (e) {
+      if (e instanceof PartnerCookieExpiredError) {
+        const ck = await this.partnerAutoRelogin();
+        if (!ck) throw e;
+        this.logger.log(`brand=${ctx.brandId} partner cookie 失效，已自动重登并热更，重试同步`);
+        ctx = { ...ctx, cookie: ck };
+        rows = await this.partnerApi.vsellerMonitor(ctx);
+      } else {
+        throw e;
+      }
+    }
 
     const excludes = this.partnerExcludes(ctx);
     const skipped = rows.filter((r) => {

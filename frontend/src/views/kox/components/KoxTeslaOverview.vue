@@ -54,7 +54,7 @@
               <div class="ov6-item" :class="{ active: ovMetric === 'view' }" @click="ovMetric = 'view'"><span>内容总阅读量</span><b>{{ fmt(ov.summary?.view_sum) }}</b></div>
               <div class="ov6-item" :class="{ active: ovMetric === 'interaction' }" @click="ovMetric = 'interaction'"><span>内容总互动量</span><b>{{ fmt(ov.summary?.interaction_sum) }}</b></div>
               <div class="ov6-item"><span>平均发布数</span><b>{{ ov.summary?.avg_publish ?? 0 }}</b></div>
-              <div class="ov6-item" :class="{ active: ovMetric === 'leads' }" @click="ovMetric = 'leads'"><span>线索数据之和</span><b class="c-green">{{ fmt(ov.lead_funnel?.pm_leads) }}</b></div>
+              <div class="ov6-item" :class="{ active: ovMetric === 'leads' }" @click="ovMetric = 'leads'"><span>线索数据之和</span><b class="c-green">{{ fmt(ov.lead_funnel?.total_leads ?? ov.lead_funnel?.pm_leads) }}</b></div>
             </div>
             <div ref="regionLineEl" style="height: 240px" />
           </a-card>
@@ -102,7 +102,7 @@
           <div class="hero-divider"></div>
           <div class="hero-item">
             <div class="hero-label">全部线索/留资数</div>
-            <div class="hero-value green">{{ fmt(ov.lead_funnel?.pm_leads) }}</div>
+            <div class="hero-value green">{{ fmt(ov.lead_funnel?.total_leads ?? ov.lead_funnel?.pm_leads) }}</div>
             <div class="hero-sub">粉丝覆盖: {{ fmt(ov.summary?.fans_sum) }}</div>
           </div>
         </div>
@@ -146,6 +146,11 @@
               <div class="kv"><span>私信留资</span><b>{{ fmt(ov.lead_funnel?.pm_leads) }}</b></div>
               <div class="kv"><span>开口率（开口/进线）</span><b class="c-violet">{{ ov.lead_funnel?.open_rate ?? 0 }}%</b></div>
               <div class="kv"><span>留资率（留资/进线）</span><b class="c-green">{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
+              <template v-if="ov.lead_funnel?.total_leads != null">
+                <div class="kv"><span>总留资（未去重）</span><b class="c-green">{{ fmt(ov.lead_funnel?.total_leads) }}</b></div>
+                <div class="kv"><span>服务卡留资</span><b>{{ fmt(ov.lead_funnel?.service_card_leads) }}</b></div>
+                <div class="kv"><span>个微复制留资</span><b>{{ fmt(ov.lead_funnel?.wecom_copy_leads) }}</b></div>
+              </template>
             </div>
           </a-tab-pane>
         </a-tabs>
@@ -290,9 +295,12 @@ const ovMetric = ref('item');
 const ov = ref({});
 const rankList = ref([]);
 const hotList = ref([]);
-// 数据来源口径说明（近7/30天快捷档走专业号真实窗口；自定义区间为笔记快照口径）
+// 数据来源口径说明（周度快照 > 专业号真实窗口 > 笔记快照）
 const dataSourceNote = computed(() => {
   const src = ov.value?.content_source ?? '';
+  if (src.startsWith('weekly_snapshot')) {
+    return '本周期为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）。';
+  }
   if (src.startsWith('pro_staff_window')) {
     return '本周期内容/线索数据来自专业号平台真实统计窗口（T+1）；笔记级明细快照截至 2026-09-24（乐允周期导出）。';
   }
