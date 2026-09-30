@@ -1027,6 +1027,42 @@ model ProKosStaff {
   @@index([brandId, statDate])
 }
 
+// ─── 来鼓评论（专业号 KOS 评论流）+ 来鼓网关配置 ─────────────────────
+
+model LaiguComment {
+  id              Int       @id @default(autoincrement())
+  brandId         Int       @default(6)
+  commentId       String
+  noteId          String?
+  noteTitle       String?
+  noteCover       String?
+  content         String?   @db.Text
+  commentUserName String?
+  entOpenName     String?
+  entOpenId       String?
+  replyState      Int       @default(0)
+  isLocalReply    Int?
+  createdAt       DateTime?
+  rawJson         Json?
+  fetchedAt       DateTime  @updatedAt
+
+  @@unique([brandId, commentId])
+  @@index([brandId, createdAt])
+}
+
+model LaiguOrgConfig {
+  id                Int       @id @default(autoincrement())
+  brandId           Int       @unique
+  gatewayToken      String    @default("")
+  agentId           String?
+  baseUrl           String    @default("https://api-gateway-ali.meiqia.cn")
+  active            Boolean   @default(true)
+  lastSyncAt        DateTime?
+  lastCommentSyncAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
 model LaiguLead {
   id                 Int       @id @default(autoincrement())
   brandId            Int       @default(5)

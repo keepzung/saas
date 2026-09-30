@@ -1,0 +1,37 @@
+{
+ "authHeaders": {
+  "url": "https://api-gateway-ali.meiqia.cn/spectrum/workbench/redbook/comment/list",
+  "headers": {
+   "accept": "application/json, text/plain, */*",
+   "accept-encoding": "gzip, deflate, br, zstd",
+   "accept-language": "zh-CN",
+   "authorization": "965a57ee9299dd88dd45320c31e7a05508f31a864e98d50c17e5b020f9ecec41",
+   "connection": "keep-alive",
+   "content-length": "158",
+   "content-type": "application/json",
+   "host": "api-gateway-ali.meiqia.cn",
+   "origin": "https://pro.laigu.com",
+   "referer": "https://pro.laigu.com/",
+   "sec-fetch-dest": "empty",
+   "sec-fetch-mode": "cors",
+   "sec-fetch-site": "cross-site",
+   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+   "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+   "sec-ch-ua-mobile": "?0",
+   "sec-ch-ua-platform": "\"Windows\""
+  }
+ },
+ "tokenSample": null,
+ "commentRes": {
+  "url": "https://api-gateway-ali.meiqia.cn/spectrum/workbench/redbook/comment/list",
+  "body": "{\"success\":true,\"message\":\"success\",\"data\":{\"curPage\":1,\"size\":20,\"totalPage\":50,\"totalNum\":50,\"data\":[{\"id\":\"6abcb6b16cce7aa7399daa11\",\"entOpenId\":\"6612d3240000000003032bf7\",\"commentId\":\"297375437\",\"content\":\"落地多少\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6aac2bed00000000260193e6\",\"noteTitle\":\"99年男生，7.99w提Model 3\",\"clientOpenId\":\"2bcaae658813608b6995aac906af96ee\",\"createdBy\":\"3K2OwKztBnAnTpSpWIXVI33pPcs\",\"commentUserName\":\"水沐\",\"entOpenName\":\"特斯拉 Tesla_无敌沙拉\",\"cover\":\"http://ci.xiaohongshu.com/1040g2sg3257qjcr54q705pgiqci0uavnqufs7sg?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T07:13:48Z\"},{\"id\":\"6abcb62a35a2298768fb8d7b\",\"entOpenId\":\"689045a9000000002802bcef\",\"commentId\":\"297341881\",\"content\":\"在哪里，没看到呢\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6abbc7130000000015017181\",\"noteTitle\":\"🔥江苏首站，排队也要看！实拍Cybercab\",\"clientOpenId\":\"bfca66f47c27d4d173f5826501003097\",\"createdBy\":\"3K2OfRNA0B0bagCbUrZPZtmQVSc\",\"commentUserName\":\"刺猬公主lucky\",\"entOpenName\":\"特斯拉苏州交付中心\",\"cover\":\"http://ci.xiaohongshu.com/notes_pre_post/1040g3k0325n27mdmkc005q4g8mkq5f7f0bqonh8?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T07:11:33Z\"},{\"id\":\"6abcab1e6cce7aa7399da7d9\",\"entOpenId\":\"689045a9000000002802bcef\",\"commentId\":\"297341873\",\"content\":\"会损伤什么吗\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"695b3237000000001d03a55f\",\"noteTitle\":\"重要安全功能⚠️特斯拉紧急开门全指南🔐\",\"clientOpenId\":\"6c9a9cc0540ddb251fb85b2c2102867d\",\"createdBy\":\"3K2IvyQPJzPAOiTsf7NKWGR7rCP\",\"commentUserName\":\"吧浪鱼\",\"entOpenName\":\"特斯拉苏州交付中心\",\"cover\":\"http://ci.xiaohongshu.com/1040g00831quo32ae6u005q4g8mkq5f7fvucdo5g?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T06:24:26Z\"},{\"id\":\"6abca7966cce7aa7399da70a\",\"entOpenId\":\"6870b38d000000001e0040c4\",\"commentId\":\"297310828\",\"content\":\"江西有没有\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6ab4fe36000000001203c230\",\"noteTitle\":\"直接干到19w+，Model 3提车啦\",\"clientOpenId\":\"2d5187bbfdf48f4e0c24fa320100acd4\",\"createdBy\":\"3K2H6NNFjaKUMq6ZdehJhkQ0QkQ\",\"commentUserName\":\"刘刘刘\",\"entOpenName\":\"Tesla_Selina\",\"cover\":\"http://ci.xiaohongshu.com/1040g2sg325ge81p4k4e05q3gme6ngg6498omppg?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T06:09:11Z\"},{\"id\":\"6abca49335a2298768fb8a23\",\"entOpenId\":\"5cad9d230000000011005d41\",\"commentId\":\"297325163\",\"content\":\"太帅啦！\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6abc7cf8000000001803b4b9\",\"noteTitle\":\"特斯拉赛博无人驾驶电动车全国巡展进行中\",\"clientOpenId\":\"5db88915659b369fc40f80be190183ec\",\"createdBy\":\"3K2FXZXUvoAH9ivGEHMocheJR6f\",\"commentUserName\":\"Julie Julie\",\"entOpenName\":\"特斯拉\",\"cover\":\"http://ci.xiaohongshu.com/1040g008325noep484a005n5djkhk8na1rvd57f0?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T05:56:24Z\"},{\"id\":\"6abca4615afc1443af74d3e1\",\"entOpenId\":\"66196e49000000000700594b\",\"commentId\":\"297354184\",\"content\":\"河南\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6a2cf56500000000210211ee\",\"noteTitle\":\"2026国补后，Model Y：23.57W起\",\"clientOpenId\":\"ce56d6d8a05b859b6468ab3835aa87a9\",\"createdBy\":\"3K2FRDbTYPq3hnmzBP0vzY4lndD\",\"commentUserName\":\"徐子恩Zohn\",\"entOpenName\":\"特斯拉茉茉美少女\",\"cover\":\"http://ci.xiaohongshu.com/notes_uhdr/1040g3qg321bj5kru7e1g5pgpdp4homabld5jms0?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T05:55:37Z\"},{\"id\":\"6abca3d537d95632fab6efad\",\"entOpenId\":\"68380390000000001d00a4f7\",\"commentId\":\"297347155\",\"content\":\"浙江金华\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":\"0\",\"noteId\":\"6aa120e30000000012002af4\",\"noteTitle\":\"9月新政，Model 3：19.47w起\",\"clientOpenId\":\"66df7091458709d167d052480100734a\",\"createdBy\":\"3K2F7h6jHbS8wYJ9HE3vyppLv0S\",\"commentUserName\":\"微笑\",\"entOpenName\":\"Haha同学在特斯拉\",\"cover\":\"http://ci.xiaohongshu.com/notes_pre_post/1040g3k8324t12arojuig5pgpdp4homab7nqbdhg?imageView2/2/w/1080/format/jpg\",\"createdAt\":\"2026-09-30T05:53:19Z\"},{\"id\":\"6abca1296cce7aa7399da5f7\",\"entOpenId\":\"5cad9d230000000011005d41\",\"commentId\":\"297325161\",\"content\":\"啥时候来宁波[偷笑R]\",\"replyState\":1,\"isLocalReply\":1,\"replyAgentName\":"
+ },
+ "settingsRes": [],
+ "lsKeys": {
+  "token": "965a57ee9299dd88dd45320c31e7a05508f31a864e98d50c17e5b020f9ecec41",
+  "agentId": "7510",
+  "sidebar-size": "15",
+  "background-theme": "0"
+ },
+ "settingsPageText": "首页 对话 顾客 评论 知识与素材 AI 员工 Agent 数据报表 设置 LL 李璐-数据介入 13348900747 API API 帮助文档 请妥善保管你的 API 密钥 泄露将可能导致他人访问你的工作台资源，如有风险请立即重置。 app_key app_secret openapi-5df6e6aa ******************************** "
+}

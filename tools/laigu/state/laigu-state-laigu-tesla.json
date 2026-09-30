@@ -1,0 +1,26 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "https://pro.laigu.com",
+      "localStorage": [
+        {
+          "name": "token",
+          "value": "965a57ee9299dd88dd45320c31e7a05508f31a864e98d50c17e5b020f9ecec41"
+        },
+        {
+          "name": "agentId",
+          "value": "7510"
+        },
+        {
+          "name": "sidebar-size",
+          "value": "15"
+        },
+        {
+          "name": "background-theme",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

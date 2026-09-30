@@ -56,6 +56,169 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // ─── 来鼓网关（工作台 API，token 鉴权）：评论同步 ────────────────────
+
+  async saveGatewayToken(brandId: number, token: string, agentId?: string) {
+    const existing = await this.prisma.laiguOrgConfig.findUnique({ where: { brandId } });
+    if (existing) {
+      await this.prisma.laiguOrgConfig.update({
+        where: { brandId },
+        data: { gatewayToken: token, agentId: agentId ?? existing.agentId, active: true },
+      });
+    } else {
+      await this.prisma.laiguOrgConfig.create({
+        data: { brandId, gatewayToken: token, agentId },
+      });
+    }
+    return { ok: true, brand_id: brandId };
+  }
+
+  async gatewayStatus(brandId: number) {
+    const cfg = await this.prisma.laiguOrgConfig.findUnique({ where: { brandId } });
+    const [commentRows, lastComment] = await Promise.all([
+      this.prisma.laiguComment.count({ where: { brandId } }),
+      this.prisma.laiguComment.findFirst({
+        where: { brandId },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+    ]);
+    return {
+      brand_id: brandId,
+      configured: Boolean(cfg?.gatewayToken),
+      active: cfg?.active ?? false,
+      last_sync_at: cfg?.lastSyncAt ?? null,
+      last_comment_sync_at: cfg?.lastCommentSyncAt ?? null,
+      comment_rows: commentRows,
+      latest_comment_at: lastComment?.createdAt ?? null,
+    };
+  }
+
+  private async gatewayConfig(brandId: number) {
+    const cfg = await this.prisma.laiguOrgConfig.findUnique({ where: { brandId } });
+    if (!cfg?.gatewayToken || !cfg.active) {
+      throw new Error(`品牌 ${brandId} 尚无来鼓网关登录态，请先推送 token`);
+    }
+    return cfg;
+  }
+
+  private async gatewayCall(
+    baseUrl: string,
+    token: string,
+    p: string,
+    body: Record<string, unknown>,
+  ): Promise<{ success?: boolean; message?: string; data?: any }> {
+    const res = await fetch(`${baseUrl}${p}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: token,
+        Origin: 'https://pro.laigu.com',
+        Referer: 'https://pro.laigu.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0',
+      },
+      body: JSON.stringify(body),
+    });
+    return res.json().catch(() => ({ success: false, message: `non-json ${res.status}` }));
+  }
+
+  /** 同步来鼓评论（专业号 KOS 评论流，按账号拆分） */
+  async syncComments(brandIdParam?: number) {
+    const brandId = brandIdParam ?? 6;
+    const cfg = await this.gatewayConfig(brandId);
+    const now = new Date();
+    const windowEnd = now;
+    const windowStart = cfg.lastCommentSyncAt
+      ? new Date(cfg.lastCommentSyncAt.getTime() - SYNC_OVERLAP_SECONDS * 1000)
+      : new Date(now.getTime() - 30 * 86400000);
+
+    const size = 100;
+    let curPage = 1;
+    let upserted = 0;
+    let empty = 0;
+    for (;;) {
+      const j = await this.gatewayCall(cfg.baseUrl, cfg.gatewayToken, '/spectrum/workbench/redbook/comment/list', {
+        curPage,
+        size,
+        keyword: '',
+        channelCorpIds: [],
+        beginCreatedAt: windowStart.toISOString(),
+        endCreatedAt: windowEnd.toISOString(),
+        replyState: [],
+      });
+      if ((j as { success?: boolean })?.success !== true) {
+        throw new Error(`来鼓评论拉取失败: ${JSON.stringify(j).slice(0, 200)}`);
+      }
+      const rows: any[] = j?.data?.data ?? [];
+      if (!rows.length) {
+        empty++;
+        if (empty >= 2 || curPage > 60) break;
+        curPage++;
+        continue;
+      }
+      for (const r of rows) {
+        if (!r?.commentId) continue;
+        const data = {
+          noteId: r.noteId ?? null,
+          noteTitle: r.noteTitle ?? null,
+          noteCover: r.cover ?? null,
+          content: r.content ?? null,
+          commentUserName: r.commentUserName ?? null,
+          entOpenName: r.entOpenName ?? null,
+          entOpenId: r.entOpenId ?? null,
+          replyState: Number(r.replyState ?? 0),
+          isLocalReply: r.isLocalReply ?? null,
+          createdAt: r.createdAt ? new Date(r.createdAt) : null,
+          rawJson: r as unknown as Prisma.InputJsonValue,
+        };
+        await this.prisma.laiguComment.upsert({
+          where: { brandId_commentId: { brandId, commentId: String(r.commentId) } },
+          create: { brandId, commentId: String(r.commentId), ...data },
+          update: data,
+        });
+        upserted++;
+      }
+      const totalPage = Number(j?.data?.totalPage ?? 1);
+      // 网关 totalPage 异常返回 totalNum，按 ceil(totalNum/size)+2 封顶
+      const safePages = Math.min(
+        Math.ceil(Number(j?.data?.totalNum ?? 0) / size) + 2,
+        MAX_PAGES_PER_SYNC,
+        totalPage || 1,
+      );
+      if (curPage >= safePages) break;
+      curPage++;
+    }
+
+    await this.prisma.laiguOrgConfig.update({
+      where: { brandId },
+      data: { lastCommentSyncAt: now, lastSyncAt: now },
+    });
+    this.logger.log(`brand ${brandId} 来鼓评论同步完成：upsert ${upserted}`);
+    return {
+      ok: true,
+      brand_id: brandId,
+      upserted,
+      window: { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+    };
+  }
+
+  /** 网关状态查询 */
+  async gatewayCommentSample(brandId: number, take = 5) {
+    return this.prisma.laiguComment.findMany({
+      where: { brandId },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        commentId: true,
+        content: true,
+        noteTitle: true,
+        entOpenName: true,
+        replyState: true,
+        createdAt: true,
+      },
+    });
+  }
+
   /** 从来鼓拉取会话并幂等入库；fromTm/toTm 缺省为「上次最新时间-重叠 → 现在」 */
   async syncLeads(opts?: { fromTm?: number; toTm?: number }) {
     if (this.syncing) throw new Error('同步进行中，请稍后再试');
@@ -262,6 +425,14 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const brandId = Number(query.brandId ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
     const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
     const since = new Date(Date.now() - days * 86400000);
+
+    // 来鼓评论口径（专业号 KOS 评论流）：会话为空但有评论时启用
+    const leadCount = await this.prisma.laiguLead.count({ where: { brandId } });
+    const commentCount = await this.prisma.laiguComment.count({ where: { brandId } });
+    if (leadCount === 0 && commentCount > 0) {
+      return this.commentFeedback(brandId, days, since);
+    }
+
     const rows = await this.prisma.laiguLead.findMany({
       where: {
         brandId,
@@ -363,6 +534,100 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       comments: detail,
       topics: extractKeywords(contents, 30),
       scope_note: '数据源=来鼓私信会话（用户最后一条消息），非小红书笔记评论；分类/情感为关键词规则引擎判定',
+    };
+  }
+
+  /** 评论口径的用户反馈分析（与私信口径同形返回） */
+  private async commentFeedback(brandId: number, days: number, since: Date) {
+    const rows = await this.prisma.laiguComment.findMany({
+      where: { brandId, createdAt: { gte: since } },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+
+    const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金', '万提', 'w提', '裸车'];
+    const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装', '智驾', '辅助驾驶'];
+    const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮', '损伤'];
+    const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞', '太帅', '封神', '胜利'];
+
+    const classify = (text: string): { category: string; sentiment: '正面' | '中性' | '负面' } => {
+      const s = text ?? '';
+      const has = (list: string[]) => list.some((w) => s.includes(w));
+      if (has(NEG_WORDS)) return { category: '负面评价', sentiment: '负面' };
+      if (has(POS_WORDS)) return { category: '正面评价', sentiment: '正面' };
+      if (has(PRICE_WORDS)) return { category: '价格咨询', sentiment: '中性' };
+      if (has(PRODUCT_WORDS)) return { category: '产品咨询', sentiment: '中性' };
+      return { category: '闲聊互动', sentiment: '中性' };
+    };
+
+    const catCount = new Map<string, number>();
+    const sentiCount = new Map<string, number>();
+    let replied = 0;
+    const detail: {
+      id: number;
+      author: string;
+      content: string;
+      category: string;
+      sentiment: string;
+      isLead: boolean;
+      replied: boolean;
+      time: string;
+      note_title: string | null;
+      note_cover: string | null;
+      kos_account: string | null;
+    }[] = [];
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    let today = 0;
+    const contents: string[] = [];
+    for (const r of rows) {
+      const text = r.content ?? '';
+      const { category, sentiment } = classify(text);
+      catCount.set(category, (catCount.get(category) ?? 0) + 1);
+      sentiCount.set(sentiment, (sentiCount.get(sentiment) ?? 0) + 1);
+      const repliedRow = (r.replyState ?? 0) === 1;
+      if (repliedRow) replied += 1;
+      if (r.createdAt && r.createdAt >= dayStart) today += 1;
+      if (text) contents.push(text);
+      if (detail.length < 500) {
+        detail.push({
+          id: r.id,
+          author: r.commentUserName ?? '匿名用户',
+          content: text || '（无文字内容）',
+          category,
+          sentiment,
+          isLead: false,
+          replied: repliedRow,
+          time: (r.createdAt ?? new Date()).toISOString(),
+          note_title: r.noteTitle,
+          note_cover: r.noteCover,
+          kos_account: r.entOpenName,
+        });
+      }
+    }
+    const total = rows.length;
+    const pct = (n: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
+    return {
+      days,
+      total,
+      today,
+      leads: 0,
+      with_phone: 0,
+      replied,
+      pending: total - replied,
+      reply_rate: pct(replied),
+      sentiment: (['正面', '中性', '负面'] as const).map((name) => ({
+        name,
+        count: sentiCount.get(name) ?? 0,
+        pct: pct(sentiCount.get(name) ?? 0),
+      })),
+      categories: [...catCount.entries()]
+        .map(([name, count]) => ({ name, count, pct: pct(count) }))
+        .sort((a, b) => b.count - a.count),
+      comments: detail,
+      topics: extractKeywords(contents, 30),
+      source: 'laigu_comments',
+      scope_note: '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论）；分类/情感为关键词规则引擎判定',
     };
   }
 

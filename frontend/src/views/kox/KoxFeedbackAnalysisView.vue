@@ -130,6 +130,11 @@
         >
           <div class="comment-left-bar" :style="{ background: sentimentColor[c.sentiment] }"></div>
           <div class="comment-main">
+            <div v-if="c.noteTitle" class="comment-note-row">
+              <img v-if="c.noteCover" :src="c.noteCover" class="note-thumb" loading="lazy" />
+              <span class="note-name" :title="c.noteTitle">笔记：{{ c.noteTitle }}</span>
+              <span v-if="c.kosAccount" class="note-kos">{{ c.kosAccount }}</span>
+            </div>
             <div class="comment-body">
               <div class="comment-content">{{ c.content }}</div>
               <div class="comment-meta-row">
@@ -357,9 +362,12 @@ async function loadData() {
         bg: (CAT_META[c.category] ?? CAT_META['闲聊互动']).bg,
         author: c.author,
         time: dayjs(c.time).format('MM-DD HH:mm'),
-        source: '来鼓私信',
+        source: res.source === 'laigu_comments' ? '来鼓评论' : '来鼓私信',
         isLead: c.isLead,
         replied: c.replied,
+        noteTitle: c.note_title ?? null,
+        noteCover: c.note_cover ?? null,
+        kosAccount: c.kos_account ?? null,
         replies: [],
       }));
       page.value = 1;
@@ -377,7 +385,7 @@ async function loadData() {
 
 const pipelineStatusText = computed(() => {
   if (!isTesla) return '评论采集正常运行';
-  if (laiguReal.value) return '来鼓私信接入正常';
+  if (laiguReal.value) return '来鼓评论接入正常';
   return '来鼓通道未接入 · 演示数据';
 });
 
@@ -778,6 +786,44 @@ onMounted(() => {
   gap: 8px;
   margin-top: 6px;
   flex-wrap: wrap;
+}
+
+.comment-note-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.note-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.note-name {
+  font-size: 12px;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.note-kos {
+  font-size: 11.5px;
+  color: #3456e6;
+  background: #eef4ff;
+  border-radius: 6px;
+  padding: 1px 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .comment-author {
