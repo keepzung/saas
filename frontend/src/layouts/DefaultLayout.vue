@@ -5,7 +5,7 @@
       v-model:collapsed="collapsed"
       collapsible
       :trigger="null"
-      theme="dark"
+      theme="light"
       :width="siderWidth"
       :collapsed-width="60"
       class="sider"
@@ -472,6 +472,7 @@ onMounted(async () => {
 
 .sider {
   background: var(--sidebar-bg);
+  border-right: 1px solid var(--color-border);
 }
 
 .sider-resize-handle {

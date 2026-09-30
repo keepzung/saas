@@ -13,7 +13,7 @@
     <a-menu
       v-model:selectedKeys="selectedKeys"
       v-model:openKeys="openKeys"
-      theme="dark"
+      theme="light"
       mode="inline"
       @click="onMenuClick"
     >
@@ -101,7 +101,7 @@ function onMenuClick(info) {
 }
 
 .side-nav :deep(.ant-menu::-webkit-scrollbar-thumb) {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 2px;
 }
 
@@ -111,14 +111,14 @@ function onMenuClick(info) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #1e293b;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 1px;
   white-space: nowrap;
   overflow: hidden;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .logo-logo {
@@ -135,6 +135,7 @@ function onMenuClick(info) {
   align-items: center;
   justify-content: center;
   background: #fff;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 3px 8px;
   max-width: 152px;
