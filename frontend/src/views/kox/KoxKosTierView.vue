@@ -192,7 +192,6 @@ const columns = [
   { title: '留资数', dataIndex: 'pm_leads', width: 84, sorter: (a, b) => a.pm_leads - b.pm_leads },
   { key: 'enter', title: '进线数（周度≥5）', dataIndex: 'pm_inquiries', width: 170, sorter: (a, b) => a.pm_inquiries - b.pm_inquiries },
   { title: '开口数', dataIndex: 'pm_openings', width: 84, sorter: (a, b) => a.pm_openings - b.pm_openings },
-  { title: '综合得分', dataIndex: 'score', width: 90, sorter: (a, b) => a.score - b.score },
 ];
 
 async function reload() {
@@ -291,7 +290,6 @@ function exportDetail() {
     进线数: r.pm_inquiries,
     '进线完成度(%)': r.enter_pct,
     开口数: r.pm_openings,
-    综合得分: r.score,
   }));
   exportExcel([{ name: 'KOS运营进度', rows: list }], 'KOS运营进度总览');
 }

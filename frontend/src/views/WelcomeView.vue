@@ -1,9 +1,9 @@
 <template>
   <div class="welcome-layout">
     <div class="welcome-header">
-      <div class="header-logo">
-        <div class="company-logo">
-          <img :src="headerLogo" alt="logo" />
+<div class="header-logo">
+<div class="company-logo" :style="themeLogoStyle">
+<img :src="headerLogo" alt="logo" />
         </div>
         <span class="header-system-name">{{ systemName }}</span>
       </div>
@@ -126,6 +126,14 @@ const systemName = computed(() => auth.systemName);
 const headerLogo = computed(() =>
   brandTheme(auth.currentBrandId)?.logo || '/images/login/logo.png',
 );
+const themeLogoStyle = computed(() => {
+  const t = brandTheme(auth.currentBrandId);
+  if (!t?.logoH) return {};
+  return {
+    height: `${t.logoH}px`,
+    maxWidth: `${t.logoW ?? t.logoH * 4.8}px`,
+  };
+});
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId] ?? [];
   if (!hidden.length) return auth.moduleTree;
