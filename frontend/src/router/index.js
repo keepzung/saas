@@ -16,6 +16,12 @@ const routes = [
     meta: { public: false, title: '欢迎' },
   },
   {
+    path: '/m/login',
+    name: 'm-login',
+    component: () => import('../views/mobile/MLoginView.vue'),
+    meta: { public: true, title: '登录' },
+  },
+  {
     path: '/m',
     component: () => import('../layouts/MobileLayout.vue'),
     children: [
@@ -305,10 +311,17 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
   if (!to.meta.public && !auth.isLoggedIn) {
+    // 手机端 H5 未登录 → H5 登录页（支持 ?co= 带参直达）
+    if (to.path.startsWith('/m/')) {
+      return {
+        path: '/m/login',
+        query: { redirect: to.fullPath, ...(to.query.co ? { co: to.query.co } : {}) },
+      };
+    }
     return { path: '/login', query: { redirect: to.fullPath } };
   }
-  if (to.path === '/login' && auth.isLoggedIn) {
-    return { path: '/welcome' };
+  if ((to.path === '/login' || to.path === '/m/login') && auth.isLoggedIn) {
+    return to.path.startsWith('/m/') ? { path: '/m/kox-task/task-list' } : { path: '/welcome' };
   }
   if (
     to.path !== '/welcome' &&

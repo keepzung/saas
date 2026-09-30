@@ -149,6 +149,8 @@ export class SparkOrgRegistry implements OnModuleInit {
     orgCode: string;
     email?: string;
     cookie?: string;
+    channel?: string;
+    excludeKeywords?: string;
     active?: boolean;
     remark?: string;
   }) {
@@ -156,6 +158,10 @@ export class SparkOrgRegistry implements OnModuleInit {
       orgCode: input.orgCode,
       ...(input.email !== undefined ? { email: input.email } : {}),
       ...(input.cookie !== undefined ? { cookie: input.cookie } : {}),
+      ...(input.channel !== undefined ? { channel: input.channel } : {}),
+      ...(input.excludeKeywords !== undefined
+        ? { excludeKeywords: input.excludeKeywords }
+        : {}),
       ...(input.active !== undefined ? { active: input.active } : {}),
       ...(input.remark !== undefined ? { remark: input.remark } : {}),
     };
@@ -163,6 +169,29 @@ export class SparkOrgRegistry implements OnModuleInit {
       where: { brandId: input.brandId },
       update: data,
       create: { brandId: input.brandId, ...data },
+    });
+    this.invalidate();
+    return row;
+  }
+
+  /** 仅更新既有配置的字段（不改 orgCode/cookie 时用） */
+  async patchConfig(brandId: number, patch: {
+    channel?: string;
+    orgCode?: string;
+    excludeKeywords?: string;
+    active?: boolean;
+  }) {
+    const data = {
+      ...(patch.channel !== undefined ? { channel: patch.channel } : {}),
+      ...(patch.orgCode !== undefined ? { orgCode: patch.orgCode } : {}),
+      ...(patch.excludeKeywords !== undefined
+        ? { excludeKeywords: patch.excludeKeywords }
+        : {}),
+      ...(patch.active !== undefined ? { active: patch.active } : {}),
+    };
+    const row = await this.prisma.sparkOrgConfig.update({
+      where: { brandId },
+      data,
     });
     this.invalidate();
     return row;

@@ -196,9 +196,21 @@ export class ContentproController {
   @Get('content-pro/history/xhs')
   history(
     @Query()
-    query: { brandId?: string; keyword?: string; page?: string; pageSize?: string },
+    query: {
+      brandId?: string;
+      keyword?: string;
+      status?: string;
+      taskId?: string;
+      page?: string;
+      pageSize?: string;
+    },
   ) {
     return this.service.history({ ...query, brandId: Number(query.brandId ?? 1) });
+  }
+
+  @Get('content-pro/history/xhs/:id')
+  historyDetail(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.service.historyDetail(Number(brandId ?? 1), id);
   }
 
   @Post('content-pro/history/xhs')

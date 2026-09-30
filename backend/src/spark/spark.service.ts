@@ -1156,13 +1156,42 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 更新星火 cookie：带 brandId 时落库到对应组织（重启不丢），否则沿用旧的运行时热更（仅 .env 品牌） */
-  async updateCookie(cookie: string, brandIdParam?: string) {
+  async updateCookie(
+    cookie: string,
+    brandIdParam?: string,
+    extra?: { channel?: string; orgCode?: string; excludeKeywords?: string },
+  ) {
     if (brandIdParam) {
       const brandId = Number(brandIdParam);
-      const ctx = await this.orgs.setCookie(brandId, cookie);
-      if (brandId === SPARK_DEFAULT_BRAND_ID) this.api.updateCookie(cookie);
-      this.logger.log(`brand ${brandId} 星火 cookie 已更新（DB + 运行时）`);
-      return { ok: true, brand_id: ctx.brandId, persisted: true };
+      // 组织切换/字段修正（如 brand 6 partner→mcc）：先落 channel/orgCode 再写 cookie
+      if (extra && (extra.channel || extra.orgCode || extra.excludeKeywords)) {
+        if (extra.orgCode) {
+          await this.orgs.upsertConfig({
+            brandId,
+            orgCode: extra.orgCode,
+            cookie,
+            channel: extra.channel,
+            excludeKeywords: extra.excludeKeywords,
+          });
+        } else {
+          await this.orgs.patchConfig(brandId, extra);
+          await this.orgs.setCookie(brandId, cookie);
+        }
+      } else {
+        await this.orgs.setCookie(brandId, cookie);
+      }
+      const ctx = await this.orgs.forBrand(brandId);
+      if (brandId === SPARK_DEFAULT_BRAND_ID) {
+        this.api.updateCookie(cookie);
+      }
+      this.logger.log(`brand ${brandId} 星火配置已更新（channel=${ctx?.channel ?? 'mcc'}，DB + 运行时）`);
+      return {
+        ok: true,
+        brand_id: ctx?.brandId ?? brandId,
+        channel: ctx?.channel,
+        org_code: ctx?.orgCode,
+        persisted: true,
+      };
     }
     this.api.updateCookie(cookie);
     const legacy = await this.orgs

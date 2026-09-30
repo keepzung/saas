@@ -904,21 +904,24 @@ model WritingStrategy {
 }
 
 model XhsHistory {
-  id             Int      @id @default(autoincrement())
-  brandId        Int      @default(7)
+  id             Int          @id @default(autoincrement())
+  brandId        Int          @default(7)
   title          String
-  content        String   @db.Text
-  tags           String[] @default([])
-  imgList        String[] @default([])
+  content        String       @db.Text
+  tags           String[]     @default([])
+  imgList        String[]     @default([])
   coverUrl       String?
   batchTaskId    Int?
-  status         Int      @default(0)
+  status         Int          @default(0)
   conversationId String?
-  source         String   @default("ai")
-  uploadTime     DateTime @default(now())
+  source         String       @default("ai")
+  uploadTime     DateTime     @default(now())
   createdById    Int?
+  contentTaskId  Int?
+  contentTask    ContentTask? @relation(fields: [contentTaskId], references: [id], onDelete: SetNull)
 
   @@index([brandId, uploadTime])
+  @@index([contentTaskId])
 }
 
 // ─── 内容创作任务（任务分发）───────────────────────────────────────────
@@ -943,6 +946,7 @@ model ContentTask {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   targets       ContentTaskTarget[]
+  h5Notes       XhsHistory[]
 
   @@index([brandId, status])
 }

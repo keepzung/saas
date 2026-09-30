@@ -54,12 +54,15 @@ export class GenerateArticleDto {
 }
 
 export class SaveArticleDto {
+  @IsOptional() @IsInt() id?: number | null;
   @IsString() title: string;
   @IsString() content: string;
   @IsOptional() tags?: string[];
   @IsOptional() imgList?: string[];
   @IsOptional() coverUrl?: string | null;
   @IsOptional() @IsString() source?: string;
+  @IsOptional() @IsInt() status?: number;
+  @IsOptional() @IsInt() contentTaskId?: number | null;
   @IsOptional() batchTaskId?: number | null;
 }
 

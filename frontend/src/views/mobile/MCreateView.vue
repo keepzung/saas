@@ -1,5 +1,23 @@
 <template>
   <div class="mc-page">
+    <!-- 任务上下文卡 -->
+    <div v-if="task" class="task-card">
+      <div class="tcard-head">
+        <span class="tcard-flag">任务</span>
+        <span class="tcard-name">{{ task.name }}</span>
+        <span class="tcard-time">{{ fmt(task.start_time) }} ~ {{ fmt(task.end_time) }}</span>
+      </div>
+      <div v-if="task.instructions" class="tcard-line"><span>要求</span>{{ task.instructions }}</div>
+      <div v-if="task.reward" class="tcard-line reward"><span>奖励</span>{{ task.reward }}</div>
+      <a v-if="task.example_link" :href="task.example_link" target="_blank" class="tcard-link">
+        示例内容：{{ task.example_link }}
+      </a>
+      <div v-if="task.example_images?.length" class="tcard-imgs">
+        <img v-for="u in task.example_images" :key="u" :src="u" />
+      </div>
+    </div>
+    <div v-if="draftLoaded" class="draft-tip">已带入 PC 端生成的草稿，确认配图后即可发布</div>
+
     <!-- 步骤指示 -->
     <div class="mc-steps">
       <span v-for="(s, i) in steps" :key="s" class="mc-step" :class="{ active: step === i + 1 }">{{ s }}</span>
@@ -99,6 +117,8 @@ import {
   generateArticle,
   getRandomImages,
   saveXhsHistory,
+  getXhsHistoryDetail,
+  getContentTaskDetail,
   aiHealth,
 } from '../../api/contentpro';
 
@@ -108,6 +128,11 @@ const brandId = computed(() => auth.currentBrandId ?? 1);
 
 const steps = ['选策略', '开始生成', '选择配图', '发布小红书'];
 const step = ref(1);
+
+// 任务上下文（?taskId=）与 PC 草稿接力（?historyId=）
+const task = ref(null);
+const draftLoaded = ref(false);
+const draftId = ref(null);
 
 const productOptions = ref([]);
 const productId = ref(null);
@@ -128,6 +153,7 @@ const pool = ref([]);
 const selCount = computed(() => pool.value.filter((x) => x._sel).length);
 const selectedImages = computed(() => pool.value.filter((x) => x._sel).map((x) => x.url));
 const selOrder = (img) => selectedImages.value.indexOf(img.url) + 1;
+const fmt = (s) => (s ? new Date(s).toLocaleDateString('zh-CN').replaceAll('/', '-') : '-');
 
 const flattenProducts = (nodes, out = []) => {
   for (const n of nodes ?? []) {
@@ -198,17 +224,21 @@ const toggleImg = (i) => {
 const publish = async () => {
   publishing.value = true;
   try {
-    await saveXhsHistory(
+    const res = await saveXhsHistory(
       {
+        id: draftId.value ?? undefined,
         title: titles.value[selectedTitle.value],
         content: content.value,
         tags: tags.value,
         imgList: selectedImages.value,
         coverUrl: selectedImages.value[0] ?? null,
+        status: 1,
         source: health.value.llm ? 'ai' : 'template',
+        ...(task.value ? { contentTaskId: task.value.id } : {}),
       },
       { brandId: brandId.value },
     );
+    draftId.value = res?.id ?? draftId.value;
     published.value = true;
     message.success('已保存，可复制内容到小红书发布');
   } catch (e) {
@@ -235,7 +265,17 @@ const downloadImages = () => {
   });
 };
 
+
 onMounted(async () => {
+  // 1) 任务上下文
+  const taskId = Number(route.query.taskId);
+  if (taskId) {
+    try {
+      task.value = await getContentTaskDetail(taskId, { brandId: brandId.value });
+    } catch {
+      /* 任务加载失败按自由创作处理 */
+    }
+  }
   const [products, st, h] = await Promise.all([
     getProducts({ brandId: brandId.value }),
     getStrategies({ brandId: brandId.value }),
@@ -247,11 +287,134 @@ onMounted(async () => {
   const firstEnabled = strategies.value.find((s) => s.enabled);
   if (firstEnabled) strategyId.value = firstEnabled.id;
   health.value = h ?? health.value;
+
+  // 2) PC 草稿接力（?historyId=）：带出图文直进配图/发布
+  const historyId = Number(route.query.historyId);
+  if (historyId) {
+    try {
+      const draft = await getXhsHistoryDetail(historyId, { brandId: brandId.value });
+      titles.value = [draft.title];
+      selectedTitle.value = 0;
+      content.value = draft.content ?? '';
+      tags.value = draft.tags ?? [];
+      draftId.value = draft.id;
+      if (draft.content_task_id && !task.value) {
+        task.value = await getContentTaskDetail(draft.content_task_id, { brandId: brandId.value }).catch(() => null);
+      }
+      const imgs = (draft.img_list ?? []).map((url) => ({ url, _sel: true }));
+      if (imgs.length) {
+        pool.value = imgs;
+        const extra = await getRandomImages({ brandId: brandId.value, productId: productId.value, num: 9 });
+        for (const x of extra ?? []) {
+          if (!imgs.some((i) => i.url === x.url)) pool.value.push({ url: x.url, _sel: false });
+        }
+      } else {
+        await loadPool();
+      }
+      draftLoaded.value = true;
+      step.value = 3;
+      return;
+    } catch {
+      message.warning('草稿加载失败，已进入正常创作流程');
+    }
+  }
   await loadPool();
 });
 </script>
 
 <style scoped>
+.task-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  border-left: 3px solid #3456e6;
+}
+
+.tcard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tcard-flag {
+  background: #3456e6;
+  color: #fff;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex: 0 0 auto;
+}
+
+.tcard-name {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 13.5px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tcard-time {
+  color: #94a3b8;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.tcard-line {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 3px;
+}
+
+.tcard-line span {
+  color: #94a3b8;
+  margin-right: 6px;
+}
+
+.tcard-line.reward span {
+  color: #d97706;
+}
+
+.tcard-line.reward {
+  color: #b45309;
+}
+
+.tcard-link {
+  display: block;
+  margin-top: 5px;
+  color: #3456e6;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.tcard-imgs {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.tcard-imgs img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+.draft-tip {
+  background: #e7f8ef;
+  color: #15803d;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
 .mc-steps {
   display: flex;
   gap: 6px;

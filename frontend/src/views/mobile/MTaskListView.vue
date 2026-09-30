@@ -8,6 +8,8 @@
       <div class="tc-row"><span>任务平台</span>{{ platformLabel(t.platform) }}</div>
       <div class="tc-row"><span>参与团队</span>{{ t.scope_type === 'regions' ? (t.regions ?? []).join('、') : '全部大区' }}</div>
       <div class="tc-row"><span>任务时间</span>{{ fmt(t.start_time) }} 至 {{ fmt(t.end_time) }}</div>
+      <div v-if="t.reward" class="tc-row reward"><span>奖励</span>{{ t.reward }}</div>
+      <div v-if="t.instructions" class="tc-desc">{{ t.instructions }}</div>
       <div class="tc-progress">
         <div class="prog"><div class="prog-in" :style="{ width: `${t.completion_rate}%` }" /></div>
         <div class="prog-sub">已完成 {{ t.completion_rate }}% · {{ t.account_finished }}/{{ t.account_total }} 人有产出</div>
@@ -93,6 +95,21 @@ onMounted(async () => {
 .tc-row span {
   color: #94a3b8;
   margin-right: 8px;
+}
+
+.tc-row.reward {
+  color: #b45309;
+}
+
+.tc-desc {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .tc-progress {

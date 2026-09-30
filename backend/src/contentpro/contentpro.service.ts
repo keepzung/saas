@@ -238,6 +238,8 @@ export class ContentproService {
   async history(query: {
     brandId: number;
     keyword?: string;
+    status?: string;
+    taskId?: string;
     page?: string;
     pageSize?: string;
   }) {
@@ -245,6 +247,9 @@ export class ContentproService {
     const pageSize = Math.min(50, Number(query.pageSize ?? 20) || 20);
     const where: Prisma.XhsHistoryWhereInput = { brandId: query.brandId };
     if (query.keyword) where.title = { contains: query.keyword };
+    if (query.status === 'draft' || query.status === '0') where.status = 0;
+    if (query.status === 'published' || query.status === '1') where.status = 1;
+    if (query.taskId) where.contentTaskId = Number(query.taskId);
     const [total, rows] = await Promise.all([
       this.prisma.xhsHistory.count({ where }),
       this.prisma.xhsHistory.findMany({
@@ -263,6 +268,8 @@ export class ContentproService {
         img_list: h.imgList,
         cover_url: h.coverUrl,
         source: h.source,
+        status: h.status,
+        content_task_id: h.contentTaskId,
         upload_time: h.uploadTime,
       })),
       total,
@@ -271,28 +278,72 @@ export class ContentproService {
     };
   }
 
+  async historyDetail(brandId: number, id: number) {
+    const h = await this.prisma.xhsHistory.findUnique({ where: { id } });
+    if (!h || h.brandId !== brandId) throw new NotFoundException('记录不存在');
+    return {
+      id: h.id,
+      title: h.title,
+      content: h.content,
+      tags: h.tags,
+      img_list: h.imgList,
+      cover_url: h.coverUrl,
+      source: h.source,
+      status: h.status,
+      content_task_id: h.contentTaskId,
+      upload_time: h.uploadTime,
+    };
+  }
+
   async saveHistory(brandId: number, dto: {
+    id?: number | null;
     title: string;
     content: string;
     tags?: string[];
     imgList?: string[];
     coverUrl?: string | null;
     source?: string;
+    status?: number;
+    contentTaskId?: number | null;
     batchTaskId?: number | null;
   }, userId: number) {
+    // 任务归属校验（同品牌）
+    let contentTaskId: number | null = null;
+    if (dto.contentTaskId) {
+      const task = await this.prisma.contentTask.findUnique({
+        where: { id: dto.contentTaskId },
+      });
+      if (task && task.brandId === brandId) contentTaskId = task.id;
+    }
+    const data = {
+      title: dto.title,
+      content: dto.content,
+      tags: dto.tags ?? [],
+      imgList: dto.imgList ?? [],
+      coverUrl: dto.coverUrl ?? null,
+      source: dto.source ?? 'ai',
+      status: dto.status ?? 0,
+      contentTaskId,
+    };
+    // 带 id = 更新（H5 接力发布回写草稿）
+    if (dto.id) {
+      const existing = await this.prisma.xhsHistory.findUnique({ where: { id: dto.id } });
+      if (!existing || existing.brandId !== brandId) throw new NotFoundException('草稿不存在');
+      await this.prisma.xhsHistory.update({ where: { id: dto.id }, data });
+      return { id: dto.id, status: data.status, content_task_id: contentTaskId };
+    }
     return this.prisma.xhsHistory.create({
       data: {
         brandId,
-        title: dto.title,
-        content: dto.content,
-        tags: dto.tags ?? [],
-        imgList: dto.imgList ?? [],
-        coverUrl: dto.coverUrl ?? null,
-        source: dto.source ?? 'ai',
+        ...data,
         batchTaskId: dto.batchTaskId ?? null,
         createdById: userId,
       },
-    });
+    }).then((row) => ({
+      id: row.id,
+      status: row.status,
+      content_task_id: row.contentTaskId,
+    }));
   }
 
   async deleteHistory(id: number) {
@@ -599,6 +650,13 @@ export class ContentproService {
         })
       : [];
     const noteMap = new Map(notes.map((n) => [n.accountId, n._count._all]));
+    // H5 扫码接力的产出笔记（挂任务的生成历史）
+    const h5Notes = await this.prisma.xhsHistory.findMany({
+      where: { contentTaskId: t.id },
+      orderBy: { uploadTime: 'desc' },
+      take: 50,
+      select: { id: true, title: true, coverUrl: true, status: true, uploadTime: true },
+    });
     return {
       id: t.id,
       name: t.name,
@@ -617,6 +675,8 @@ export class ContentproService {
       created_at: t.createdAt,
       creator: t.createdById,
       ...progress,
+      h5_note_total: h5Notes.length,
+      h5_notes: h5Notes,
       accounts: targets.map((x) => ({
         account_id: x.account.id,
         nickname: x.account.nickname,

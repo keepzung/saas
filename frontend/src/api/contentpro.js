@@ -78,6 +78,9 @@ export const getRandomImages = (params) =>
 export const getXhsHistory = (params) =>
   request.get('/content-pro/history/xhs', { params });
 
+export const getXhsHistoryDetail = (id, params) =>
+  request.get(`/content-pro/history/xhs/${id}`, { params });
+
 export const saveXhsHistory = (data, params) =>
   request.post('/content-pro/history/xhs', data, { params });
 

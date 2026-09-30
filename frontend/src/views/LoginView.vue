@@ -196,6 +196,17 @@ async function handleSubmit() {
         companies.value = await getCompaniesByUserId(e.data?.user_id);
         selectedCompanyId.value =
           companies.value.length === 1 ? companies.value[0].main_company_id : null;
+        // ?co=东风奕境：按名称匹配自动选择并进入（旧系统任务领用链接同款）
+        const co = String(route.query.co ?? '').trim();
+        if (co) {
+          const hit = companies.value.find((c) => (c.company_name ?? '').includes(co));
+          if (hit) {
+            selectedCompanyId.value = hit.main_company_id;
+            await confirmCompany();
+            return;
+          }
+          message.warning(`未找到工作系统「${co}」，请手动选择`);
+        }
         selectorVisible.value = true;
       } catch (err) {
         message.error(err.message || '获取公司列表失败，请重试');

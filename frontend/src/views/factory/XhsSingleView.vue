@@ -262,16 +262,23 @@
             <div class="ps-row"><span>标签</span>{{ tags.length }} 个</div>
             <a-space direction="vertical" style="width: 100%; margin-top: 18px">
               <a-button type="primary" block :loading="publishing" @click="publish">
-                <SendOutlined /> 保存并进入发布
+                <QrcodeOutlined /> 保存草稿，生成发布二维码
               </a-button>
               <a-button block @click="copyText"><CopyOutlined /> 复制文案</a-button>
               <a-button block @click="downloadImages"><DownloadOutlined /> 下载图片</a-button>
             </a-space>
-            <div class="ps-tip">发布到小红书：复制文案 + 保存图片，打开小红书 App 粘贴发布；保存后在手机端继续操作</div>
-            <div v-if="publishUrl" class="ps-link">
-              <a :href="publishUrl" target="_blank">{{ publishUrl }}</a>
-              <a-button size="small" @click="copy(publishUrl)">复制链接</a-button>
+
+            <div v-if="relayQr" class="qr-card">
+              <div class="qr-title">扫描二维码 一键发布到小红书</div>
+              <img :src="relayQr" class="qr-img" />
+              <div class="qr-hint need">需手机已安装小红书，且已登录</div>
+              <div class="qr-hint"> 苹果手机 - 使用微信扫码 · 安卓手机 - 使用相机扫码</div>
+              <div class="qr-link">
+                <a :href="relayUrl" target="_blank">{{ relayUrl }}</a>
+                <a-button size="small" @click="copy(relayUrl)">复制链接</a-button>
+              </div>
             </div>
+            <div v-else class="ps-tip">保存草稿后生成二维码，KOS 用手机扫码即可带出这篇草稿，在手机上完成复制发布</div>
           </div>
         </div>
       </template>
@@ -283,6 +290,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Empty } from 'ant-design-vue';
+import QRCode from 'qrcode';
 import {
   BulbOutlined,
   AimOutlined,
@@ -301,7 +309,7 @@ import {
   DeleteOutlined,
   HighlightOutlined,
   UploadOutlined,
-  SendOutlined,
+  QrcodeOutlined,
   DownloadOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../../stores/auth';
@@ -366,7 +374,9 @@ const coverOpen = ref(false);
 
 // step5
 const publishing = ref(false);
-const publishUrl = ref('');
+const relayUrl = ref('');
+const relayQr = ref('');
+const draftId = ref(null);
 
 const currentDirections = computed(() => {
   const s = strategies.value.find((x) => x.id === strategyId.value);
@@ -565,20 +575,23 @@ const addTag = () => {
 const publish = async () => {
   publishing.value = true;
   try {
-    await saveXhsHistory(
+    const res = await saveXhsHistory(
       {
+        id: draftId.value ?? undefined,
         title: titles.value[selectedTitle.value],
         content: content.value,
         tags: tags.value,
         imgList: images.value.map((x) => x.url),
         coverUrl: images.value[0]?.url ?? null,
+        status: 0,
         source: health.value.llm ? 'ai' : 'template',
       },
       { brandId: brandId.value },
     );
-    message.success('已存入历史记录');
-    const q = `title=${encodeURIComponent(titles.value[selectedTitle.value])}&brand=${brandId.value}`;
-    publishUrl.value = `${window.location.origin}/m/aigc/create?${q}`;
+    draftId.value = res?.id ?? draftId.value;
+    message.success('草稿已保存');
+    relayUrl.value = `${window.location.origin}/m/aigc/create?historyId=${draftId.value}`;
+    relayQr.value = await QRCode.toDataURL(relayUrl.value, { width: 220, margin: 1 });
   } catch (e) {
     message.error(e?.response?.data?.msg ?? '保存失败');
   } finally {
@@ -619,7 +632,9 @@ const resetAll = () => {
   images.value = [];
   extra.value = '';
   regenPrompt.value = '';
-  publishUrl.value = '';
+  relayUrl.value = '';
+  relayQr.value = '';
+  draftId.value = null;
 };
 
 const goHistory = () => router.push('/content-pro/history');
@@ -1206,6 +1221,64 @@ onMounted(async () => {
   gap: 8px;
   font-size: 12px;
   word-break: break-all;
+}
+
+.qr-card {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.qr-title {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 14.5px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.qr-img {
+  width: 190px;
+  height: 190px;
+  border: 1px solid #f1f5f9;
+  border-radius: 10px;
+}
+
+.qr-hint {
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.qr-hint.need {
+  background: #fff1f0;
+  color: #cf1322;
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+
+.qr-link {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.qr-link a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 991px) {

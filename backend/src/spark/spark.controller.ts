@@ -134,13 +134,27 @@ export class SparkController {
   }
 
   @Post('spark/cookie')
-  updateCookie(@Body() dto: { cookie?: string; brandId?: string | number }) {
+  updateCookie(
+    @Body()
+    dto: {
+      cookie?: string;
+      brandId?: string | number;
+      channel?: string;
+      orgCode?: string;
+      excludeKeywords?: string;
+    },
+  ) {
     if (!dto?.cookie || !dto.cookie.trim()) {
       throw new Error('cookie 不能为空');
     }
     return this.sparkService.updateCookie(
       dto.cookie.trim(),
       dto.brandId != null ? String(dto.brandId) : undefined,
+      {
+        channel: dto.channel,
+        orgCode: dto.orgCode,
+        excludeKeywords: dto.excludeKeywords,
+      },
     );
   }
 
