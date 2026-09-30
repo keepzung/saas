@@ -98,6 +98,21 @@ export class KoxController {
     return this.koxService.regionAnalysis(query);
   }
 
+  @Get('kox/pro-staff-progress')
+  proStaffProgress(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      tag?: string;
+      regionName?: string;
+      keyword?: string;
+    },
+  ) {
+    return this.koxService.proStaffProgress(query);
+  }
+
   @Get('kox/account-ranking')
   accountRanking(
     @Query()

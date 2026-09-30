@@ -962,6 +962,71 @@ model ContentTaskTarget {
   @@index([accountId])
 }
 
+// ─── 专业号平台通道（pro.xiaohongshu.com，特斯拉 KOS 矩阵数据）─────────
+
+model ProOrgConfig {
+  id           Int       @id @default(autoincrement())
+  brandId      Int       @unique
+  storageState String    @default("")
+  active       Boolean   @default(true)
+  lastSyncAt   DateTime?
+  remark       String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model ProKosOverview {
+  id                    Int      @id @default(autoincrement())
+  brandId               Int      @default(6)
+  statDate              DateTime
+  dateType              Int      @default(2)
+  startDate             DateTime?
+  endDate               DateTime?
+  kosAccountNum         Int      @default(0)
+  rtbAccountNum         Int      @default(0)
+  createNoteNum         Int      @default(0)
+  rtbNoteNum            Int      @default(0)
+  socReadCnt            Int      @default(0)
+  adsReadCnt            Int      @default(0)
+  messageOpenCnt        Int      @default(0)
+  messageDrivingOpenCnt Int      @default(0)
+  msgLeadsNum           Int      @default(0)
+  leadsSuccess          Int      @default(0)
+  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt             DateTime @default(now())
+
+  @@unique([brandId, statDate])
+  @@index([brandId])
+}
+
+model ProKosStaff {
+  id                    Int      @id @default(autoincrement())
+  brandId               Int      @default(6)
+  userId                String
+  statDate              DateTime
+  nickName              String
+  realName              String?
+  avatar                String?
+  province              String?
+  city                  String?
+  createNoteNum         Int      @default(0)
+  rtbNoteNum            Int      @default(0)
+  socImpCnt             Int      @default(0)
+  socClickCnt           Int      @default(0)
+  socEnageCnt           Int      @default(0)
+  messageOpenCnt        Int      @default(0)
+  messageDrivingOpenCnt Int      @default(0)
+  msgLeadsNum           Int      @default(0)
+  leadsSuccess          Int      @default(0)
+  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
+  interestsStatus       Int?
+  bindTime              DateTime?
+  createdAt             DateTime @default(now())
+
+  @@unique([brandId, userId, statDate])
+  @@index([brandId, statDate])
+}
+
 model LaiguLead {
   id                 Int       @id @default(autoincrement())
   brandId            Int       @default(5)

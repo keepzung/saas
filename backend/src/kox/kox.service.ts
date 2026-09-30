@@ -452,6 +452,15 @@ export class KoxService {
             : 0,
         };
 
+    // 特斯拉 G2：线索口径统一使用专业号总数据（ProKosOverview 快照）
+    const proLeads =
+      brandId === 6
+        ? await this.prisma.proKosOverview.findFirst({
+            where: { brandId: 6, statDate: { lte: end } },
+            orderBy: { statDate: 'desc' },
+          })
+        : null;
+
     return {
       global: globalBlock,
       store_num: await this.prisma.kosAccount.groupBy({
@@ -519,6 +528,24 @@ export class KoxService {
       })(),
       // 特斯拉版线索转化漏斗：投放（partner 通道，品牌级）+ 自然（未投流笔记，随筛选）
       lead_funnel: (() => {
+        // G2：专业号线索总数据口径优先（进线/开口/留资为专业号平台全量）
+        if (proLeads) {
+          const inquiries = proLeads.messageOpenCnt;
+          const openings = proLeads.messageDrivingOpenCnt;
+          const leads = proLeads.msgLeadsNum;
+          return {
+            pm_inquiries: inquiries,
+            pm_openings: openings,
+            pm_leads: leads,
+            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+            lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
+            form_leads: proLeads.leadsSuccess,
+            campaign: { enter: 0, open: 0, leads: 0 },
+            organic: { inquiries: 0, openings: 0, leads: 0 },
+            scope_note: '专业号线索总数据口径（含自然与投放）',
+            source: 'pro_overview',
+          };
+        }
         let organic = { inquiries: 0, openings: 0, leads: 0 };
         for (const n of noteRows) {
           if (n.isRtbAdver === true) continue;
@@ -1714,6 +1741,7 @@ export class KoxService {
         id: true,
         authorId: true,
         nickname: true,
+        avatar: true,
         accountType: true,
         accountTag: true,
         regionName: true,
@@ -1814,6 +1842,7 @@ export class KoxService {
         account_id: a.id,
         author_id: a.authorId,
         nickname: a.nickname,
+        avatar: a.avatar,
         account_type: a.accountType,
         account_tag: a.accountTag,
         region_name: a.regionName,
@@ -2051,5 +2080,131 @@ export class KoxService {
     }
 
     return { total: rows.length, added, updated, errors };
+  }
+
+  /**
+   * KOS 运营进度总览（特斯拉，按账号拆分）：专业号员工快照 × 账号归属
+   * 内容完成度 = 周度篇数/3；进线完成度 = 周度进线/5；综合得分 = 内容40% + 留资60%
+   */
+  async proStaffProgress(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    tag?: string;
+    regionName?: string;
+    keyword?: string;
+  }) {
+    const end = query.end ? new Date(`${query.end}T23:59:59.999`) : new Date();
+    const start = query.start
+      ? new Date(`${query.start}T00:00:00.000`)
+      : new Date(end.getTime() - 6 * 86400000);
+    const brandId = query.brandId ? Number(query.brandId) : 6;
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000),
+    );
+    const weeklyNotesTarget = (3 * days) / 7;
+    const weeklyEnterTarget = (5 * days) / 7;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const pct = (v: number, target: number) =>
+      target > 0 ? Math.min(100, Math.round((v / target) * 100)) : 0;
+
+    const latest = await this.prisma.proKosStaff.findFirst({
+      where: { brandId },
+      orderBy: { statDate: 'desc' },
+      select: { statDate: true },
+    });
+    if (!latest) {
+      return {
+        days,
+        stat_date: null,
+        rows: [],
+        tier_stat: KOS_TIERS.map((t) => ({
+          key: t.key,
+          label: t.label,
+          color: t.color,
+          count: 0,
+        })),
+      };
+    }
+    const staffRows = await this.prisma.proKosStaff.findMany({
+      where: { brandId, statDate: latest.statDate },
+      take: 1000,
+    });
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: { brandId },
+      select: {
+        id: true,
+        nickname: true,
+        storeName: true,
+        regionName: true,
+        accountTag: true,
+      },
+    });
+    const accByNickname = new Map(accounts.map((a) => [a.nickname, a]));
+
+    let rows = staffRows.map((s) => {
+      const acc = accByNickname.get(s.nickName);
+      const contentPct = pct(s.createNoteNum, weeklyNotesTarget);
+      const enterPct = pct(s.messageOpenCnt, weeklyEnterTarget);
+      const leadsPct = pct(s.msgLeadsNum, weeklyEnterTarget);
+      const tier = classifyTier(s.msgLeadsNum, days);
+      const ctr = s.socImpCnt ? r2((s.socClickCnt / s.socImpCnt) * 100) : 0;
+      return {
+        user_id: s.userId,
+        nickname: s.nickName,
+        avatar: s.avatar,
+        real_name: s.realName,
+        store_name: acc?.storeName ?? '未关联门店',
+        region: acc?.regionName ?? s.province ?? '-',
+        account_tag: acc?.accountTag ?? null,
+        tier_key: tier.key,
+        tier_label: tier.label,
+        tier_color: tier.color,
+        item_cnt: s.createNoteNum,
+        content_pct: contentPct,
+        exposure_sum: s.socImpCnt,
+        click_sum: s.socClickCnt,
+        ctr,
+        interaction_sum: s.socEnageCnt,
+        pm_leads: s.msgLeadsNum,
+        pm_inquiries: s.messageOpenCnt,
+        enter_pct: enterPct,
+        pm_openings: s.messageDrivingOpenCnt,
+        leads_pct: leadsPct,
+        rtb_income: Number(s.rtbIncomeAmt),
+        score: Math.round(contentPct * 0.4 + leadsPct * 0.6),
+      };
+    });
+
+    if (query.tag) rows = rows.filter((r) => r.account_tag === query.tag);
+    if (query.regionName) {
+      rows = rows.filter((r) => r.region === query.regionName);
+    }
+    if (query.keyword) {
+      const k = query.keyword.toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.nickname.toLowerCase().includes(k) ||
+          r.store_name.toLowerCase().includes(k),
+      );
+    }
+    rows.sort((a, b) => b.score - a.score || b.pm_leads - a.pm_leads);
+
+    const tierStat = KOS_TIERS.map((t) => ({
+      key: t.key,
+      label: t.label,
+      color: t.color,
+      count: rows.filter((r) => r.tier_key === t.key).length,
+    }));
+    return {
+      days,
+      stat_date: latest.statDate,
+      weekly_notes_target: weeklyNotesTarget,
+      weekly_enter_target: weeklyEnterTarget,
+      total: rows.length,
+      rows,
+      tier_stat: tierStat,
+    };
   }
 }

@@ -52,7 +52,11 @@ const dumpPage = async (page, label) => {
 
 (async () => {
   const headless = process.env.HEADLESS !== '0';
-  const browser = await chromium.launch({ headless });
+  // NO_PROXY=1: 本机系统代理挂掉时绕过（mcc/xhs 国内直连可达）
+  const browser = await chromium.launch({
+    headless,
+    args: process.env.NO_PROXY === '1' ? ['--no-proxy-server'] : [],
+  });
   const ctx = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     userAgent:

@@ -133,7 +133,7 @@
         <div class="chart-title-wrap">
           <div class="chart-title"><span class="bar"></span>计划详情</div>
           <a-tabs v-model:activeKey="detailTab" size="small" class="detail-tabs" @change="onDetailTabChange">
-            <a-tab-pane key="account" tab="按账号汇总" />
+            <a-tab-pane v-if="!isTesla" key="account" tab="按账号汇总" />
             <a-tab-pane key="note" tab="按笔记汇总" />
             <a-tab-pane key="region" tab="区域汇总" />
           </a-tabs>
@@ -267,6 +267,8 @@ import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
+// 特斯拉按客户要求隐藏「按账号汇总」页签
+const isTesla = computed(() => (auth.currentBrandId ?? 0) === 6);
 const PAGE_SIZE = 10;
 
 /* ---------- 演示模式（表空回退） ---------- */
@@ -286,7 +288,7 @@ const loading = ref(false);
 const cookieValid = ref(undefined);
 const page = ref(1);
 const leadTab = ref('inquiries');
-const detailTab = ref('account');
+const detailTab = ref(isTesla ? 'note' : 'account');
 const summary = ref({});
 const trend = ref([]);
 const accountRows = ref([]);

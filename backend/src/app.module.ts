@@ -15,6 +15,7 @@ import { CrmModule } from './crm/crm.module';
 import { LaiguModule } from './laigu/laigu.module';
 import { SparkModule } from './spark/spark.module';
 import { ContentproModule } from './contentpro/contentpro.module';
+import { ProModule } from './pro/pro.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ContentproModule } from './contentpro/contentpro.module';
     LaiguModule,
     SparkModule,
     ContentproModule,
+    ProModule,
   ],
 })
 export class AppModule {}

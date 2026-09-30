@@ -49,8 +49,18 @@
       <div class="wall">
         <div v-for="n in list" :key="n.id" class="card" @click="openNote(n)">
           <div class="cover">
-            <img v-if="n.cover_url" :src="n.cover_url" loading="lazy" />
-            <div v-else class="cover-ph">{{ (n.title || '#').slice(0, 1) }}</div>
+            <img
+              v-if="n.cover_url"
+              :src="n.cover_url"
+              loading="lazy"
+              @error="onCoverError(n)"
+            />
+            <img
+              v-else
+              :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`"
+              loading="lazy"
+              @error="onCoverError(n)"
+            />
             <span v-if="n.is_rtb_adver === true" class="promo-tag">投流</span>
           </div>
           <div class="title" :title="n.title">{{ n.title }}</div>
@@ -156,6 +166,10 @@ function onQuickChange() {
 function openNote(n) {
   if (n.note_url) window.open(n.note_url, '_blank');
   else message.info('该笔记无链接');
+}
+
+function onCoverError(n) {
+  n.cover_url = null;
 }
 
 onMounted(() => {

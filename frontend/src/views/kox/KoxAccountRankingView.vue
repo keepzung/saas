@@ -83,7 +83,11 @@
             </span>
           </template>
           <template v-else-if="column.key === 'nickname'">
-            <a class="acc-name" :href="record.author_url || 'javascript:;'" target="_blank" rel="noreferrer">{{ record.nickname }}</a>
+            <span class="acc-cell">
+              <a-avatar v-if="record.avatar" :src="record.avatar" :size="30" class="acc-avatar" />
+              <a-avatar v-else :size="30" class="acc-avatar acc-avatar-ph">{{ (record.nickname || '#').slice(0, 1) }}</a-avatar>
+              <a class="acc-name" :href="record.author_url || 'javascript:;'" target="_blank" rel="noreferrer">{{ record.nickname }}</a>
+            </span>
           </template>
           <template v-else-if="column.key === 'tier'">
             <span class="tier-tag" :style="{ background: record.tier_color }">{{ record.tier_label }}</span>
@@ -323,6 +327,22 @@ onMounted(() => {
 
 .rank-badge.top2,
 .rank-badge.top3 {
+  font-size: 13px;
+}
+
+.acc-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.acc-avatar {
+  flex: 0 0 auto;
+}
+
+.acc-avatar-ph {
+  background: #eef4ff;
+  color: #3456e6;
   font-size: 13px;
 }
 

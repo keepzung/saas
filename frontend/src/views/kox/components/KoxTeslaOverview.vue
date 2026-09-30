@@ -1,6 +1,31 @@
 <template>
   <PageWrapper title="运营总览" subtitle="特斯拉 KOS 运营数据">
     <div class="tesla-ov">
+      <a-card size="small" class="filter-card">
+        <div class="filter-row">
+          <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
+            <a-radio-button value="7">近7天</a-radio-button>
+            <a-radio-button value="30">近30天</a-radio-button>
+          </a-radio-group>
+          <a-range-picker v-model:value="range" size="small" @change="onRangeChange" />
+          <span class="f-label">账号标签：</span>
+          <a-select
+            v-model:value="accountTag"
+            size="small"
+            style="width: 150px"
+            allow-clear
+            placeholder="全部"
+            :options="tagOptions"
+            @change="reload"
+          />
+          <span class="f-label">大区：</span>
+          <a-radio-group v-model:value="regionName" size="small" @change="reload">
+            <a-radio-button value="">全部</a-radio-button>
+            <a-radio-button v-for="r in regionOptions" :key="r" :value="r">{{ r }}</a-radio-button>
+          </a-radio-group>
+        </div>
+      </a-card>
+
       <a-row :gutter="12">
         <a-col :span="11">
           <a-card size="small" :bordered="false">
@@ -32,31 +57,6 @@
           </a-card>
         </a-col>
       </a-row>
-
-      <a-card size="small" class="filter-card">
-        <div class="filter-row">
-          <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
-            <a-radio-button value="7">近7天</a-radio-button>
-            <a-radio-button value="30">近30天</a-radio-button>
-          </a-radio-group>
-          <a-range-picker v-model:value="range" size="small" @change="onRangeChange" />
-          <span class="f-label">账号标签：</span>
-          <a-select
-            v-model:value="accountTag"
-            size="small"
-            style="width: 150px"
-            allow-clear
-            placeholder="全部"
-            :options="tagOptions"
-            @change="reload"
-          />
-          <span class="f-label">大区：</span>
-          <a-radio-group v-model:value="regionName" size="small" @change="reload">
-            <a-radio-button value="">全部</a-radio-button>
-            <a-radio-button v-for="r in regionOptions" :key="r" :value="r">{{ r }}</a-radio-button>
-          </a-radio-group>
-        </div>
-      </a-card>
 
       <a-card size="small" :bordered="false" class="strip-card">
         <div class="strip">
@@ -109,27 +109,23 @@
         <a-tabs v-model:activeKey="blockTab" size="small">
           <a-tab-pane key="publish" tab="内容发布 & 互动">
             <div class="metric-grid">
-              <div class="kv"><span>门店中心数</span><b>{{ fmt(ov.summary?.store_num) }}</b></div>
               <div class="kv"><span>KOS 账号数</span><b class="c-primary">{{ fmt(ov.summary?.kos_num) }}</b></div>
               <div class="kv"><span>内容发布数</span><b>{{ fmt(ov.summary?.item_cnt) }}</b></div>
               <div class="kv"><span>账均发布</span><b>{{ ov.summary?.avg_publish ?? 0 }}</b></div>
               <div class="kv"><span>新增粉丝数</span><b>{{ fmt(ov.publish?.follow_count_sum) }}</b></div>
               <div class="kv"><span>总曝光量</span><b>{{ fmt(ov.summary?.exposure_sum) }}</b></div>
               <div class="kv"><span>总阅读量</span><b>{{ fmt(ov.summary?.view_sum) }}</b></div>
-              <div class="kv"><span>总互动量</span><b>{{ fmt(ov.summary?.interaction_sum) }}</b></div>
-              <div class="kv"><span>互动率</span><b>{{ ov.publish?.interaction_rate ?? 0 }}%</b></div>
-              <div class="kv"><span>私信进线</span><b>{{ fmt(ov.lead_funnel?.pm_inquiries) }}</b></div>
-              <div class="kv"><span>私信留资</span><b class="c-green">{{ fmt(ov.lead_funnel?.pm_leads) }}</b></div>
               <div class="kv">
                 <span>
-                  开口率（开口/进线）
-                  <a-tooltip :title="ov.lead_funnel?.scope_note || '开口含投放+自然口径'">
+                  点击率（阅读/曝光）
+                  <a-tooltip title="总阅读量 / 总曝光量">
                     <question-circle-outlined class="q-icon" />
                   </a-tooltip>
                 </span>
-                <b class="c-violet">{{ ov.lead_funnel?.open_rate ?? 0 }}%</b>
+                <b class="c-violet">{{ ctrPct }}%</b>
               </div>
-              <div class="kv"><span>留资率（留资/进线）</span><b class="c-violet">{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
+              <div class="kv"><span>总互动量</span><b>{{ fmt(ov.summary?.interaction_sum) }}</b></div>
+              <div class="kv"><span>互动率</span><b>{{ ov.publish?.interaction_rate ?? 0 }}%</b></div>
             </div>
           </a-tab-pane>
           <a-tab-pane key="lead" tab="线索转化">
@@ -180,7 +176,27 @@
                   <a-radio-button v-for="m in RANK_METRICS" :key="m.key" :value="m.key">{{ m.label }}</a-radio-button>
                 </a-radio-group>
               </div>
-              <a class="rank-more" @click="goAccount">查看全部</a>
+              <div class="rank-filters">
+                <a-select
+                  v-model:value="rankTag"
+                  size="small"
+                  style="width: 110px"
+                  allow-clear
+                  placeholder="账号标签"
+                  :options="tagOptions"
+                  @change="loadRank"
+                />
+                <a-select
+                  v-model:value="rankRegion"
+                  size="small"
+                  style="width: 110px"
+                  allow-clear
+                  placeholder="区域"
+                  :options="regionOptions.map((r) => ({ label: r, value: r }))"
+                  @change="loadRank"
+                />
+                <a class="rank-more" @click="goAccount">查看全部</a>
+              </div>
             </div>
             <div class="rank-list">
               <div v-for="(r, i) in rankList" :key="r.account_id" class="rank-row" @click="goAccount(r)">
@@ -208,8 +224,17 @@
             <div class="hot-list">
               <div v-for="n in hotList" :key="n.id" class="hot-row" @click="openNote(n)">
                 <div class="hot-thumb">
-                  <img v-if="n.cover_url" :src="n.cover_url" loading="lazy" />
-                  <span v-else class="hot-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</span>
+                  <img
+                    v-if="n.cover_url"
+                    :src="n.cover_url"
+                    loading="lazy"
+                    @error="n.cover_url = null"
+                  />
+                  <img
+                    v-else
+                    :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`"
+                    loading="lazy"
+                  />
                 </div>
                 <div class="hot-main">
                   <div class="hot-title" :title="n.title">{{ n.title }}</div>
@@ -269,6 +294,17 @@ const ovMetric = ref('item');
 const ov = ref({});
 const rankList = ref([]);
 const hotList = ref([]);
+// 点击率 = 总阅读量 / 总曝光量
+const ctrPct = computed(() => {
+  const s = ov.value?.summary ?? {};
+  const exp = Number(s.exposure_sum ?? 0);
+  const view = Number(s.view_sum ?? 0);
+  if (!exp) return 0;
+  return Math.round((view / exp) * 10000) / 100;
+});
+// 账号排行迷你榜筛选
+const rankTag = ref(undefined);
+const rankRegion = ref('');
 
 let opsChart = null;
 let adChart = null;
@@ -327,6 +363,8 @@ async function loadRank() {
       ...dateParams(),
       metric: rankMetric.value,
       page_size: 10,
+      ...(accountTag.value ? { tag: accountTag.value } : {}),
+      ...(regionName.value ? { regionName: regionName.value } : {}),
     });
     rankList.value = res.list ?? [];
   } catch {
@@ -736,6 +774,12 @@ onBeforeUnmount(() => {
 
 .rank-more {
   font-size: 12px;
+}
+
+.rank-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .rank-list {

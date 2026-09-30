@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="代理商总览" subtitle="KOS 账号留资分层 · 代理商综合排行">
+  <PageWrapper title="KOS 运营进度总览" subtitle="KOS 账号留资分层 · 按账号拆分">
     <template #extra>
       <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
         <a-radio-button value="7">近7天</a-radio-button>
@@ -9,7 +9,7 @@
     </template>
 
     <NoticeBar>
-      分层规则（周度留资）：S级头部 ≥50 ｜ 头部 ≥25 ｜ 高潜 12.5–25 ｜ 腰部 6.25–12.5 ｜ 尾部 <6；长周期按天数折算周度。留资=笔记私信留资（含投流笔记）。内容完成度=周度 ≥3 篇。
+      分层规则（周度留资）：S级头部 ≥50 ｜ 头部 ≥25 ｜ 高潜 12.5–25 ｜ 腰部 6.25–12.5 ｜ 尾部 &lt;6；长周期按天数折算周度。内容完成度=周度 ≥3 篇；进线完成度=周度 ≥5 条。数据来自专业号员工矩阵（按账号拆分）。
     </NoticeBar>
 
     <a-row :gutter="12">
@@ -35,17 +35,35 @@
     <a-card size="small" :bordered="false">
       <template #title>
         <div class="rank-toolbar">
-          <div class="sec-head"><span class="bar"></span>代理商综合排行</div>
+          <div class="sec-head"><span class="bar"></span>KOS 账号进度排行</div>
           <div class="toolbar-right">
             <span class="tb-label">账号标签：</span>
             <a-select
               v-model:value="tag"
               size="small"
-              style="width: 150px"
+              style="width: 130px"
               allow-clear
               placeholder="全部"
               :options="tagOptions"
               @change="reload"
+            />
+            <span class="tb-label">区域：</span>
+            <a-select
+              v-model:value="regionFilter"
+              size="small"
+              style="width: 120px"
+              allow-clear
+              placeholder="全部"
+              :options="regionOptions"
+              @change="reload"
+            />
+            <a-input-search
+              v-model:value="keyword"
+              size="small"
+              style="width: 170px"
+              placeholder="账号/门店搜索"
+              allow-clear
+              @search="reload"
             />
             <a-button size="small" type="primary" @click="exportDetail">导出数据</a-button>
           </div>
@@ -53,17 +71,24 @@
       </template>
       <a-table
         :columns="columns"
-        :data-source="storeRows"
+        :data-source="rows"
         :loading="loading"
         :pagination="{ pageSize: 20, showSizeChanger: true }"
-        :scroll="{ x: 1360 }"
+        :scroll="{ x: 1760 }"
         size="small"
-        row-key="store"
+        row-key="user_id"
       >
         <template #bodyCell="{ column, record, index }">
           <template v-if="column.key === 'rank'">
             <span :class="['rank-badge', index < 3 ? `top${index + 1}` : '']">
               {{ index < 3 ? CROWNS[index] : index + 1 }}
+            </span>
+          </template>
+          <template v-else-if="column.key === 'nickname'">
+            <span class="acc-cell">
+              <a-avatar v-if="record.avatar" :src="record.avatar" :size="28" class="acc-avatar" />
+              <a-avatar v-else :size="28" class="acc-avatar acc-avatar-ph">{{ (record.nickname || '#').slice(0, 1) }}</a-avatar>
+              <span class="acc-name" :title="record.real_name ? `${record.nickname}（${record.real_name}）` : record.nickname">{{ record.nickname }}</span>
             </span>
           </template>
           <template v-else-if="column.key === 'tier'">
@@ -73,6 +98,16 @@
             <div class="prog-cell">
               <div class="prog"><div class="prog-inner" :style="{ width: `${record.content_pct}%`, background: progColor(record.content_pct) }"></div></div>
               <span class="prog-num">{{ record.content_pct }}%</span>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'ctr'">
+            {{ record.ctr }}%
+          </template>
+          <template v-else-if="column.key === 'enter'">
+            <div class="prog-cell">
+              <span class="enter-num">{{ record.pm_inquiries }}</span>
+              <div class="prog"><div class="prog-inner" :style="{ width: `${record.enter_pct}%`, background: progColor(record.enter_pct) }"></div></div>
+              <span class="prog-num">{{ record.enter_pct }}%</span>
             </div>
           </template>
         </template>
@@ -88,7 +123,7 @@ import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
-import { getKoxAccountRanking, getKoxAccounts } from '../../api/kox';
+import { getKoxAccounts, getKoxProStaffProgress } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 import { exportExcel } from '../../utils/excel';
 
@@ -106,8 +141,11 @@ const quick = ref('7');
 const range = ref([dayjs().subtract(6, 'day'), dayjs()]);
 const tag = ref(undefined);
 const tagOptions = ref([]);
+const regionFilter = ref(undefined);
+const regionOptions = ref([]);
+const keyword = ref('');
 const loading = ref(false);
-const accounts = ref([]);
+const rows = ref([]);
 const days = ref(7);
 const tierEl = ref(null);
 let tierChart = null;
@@ -115,95 +153,44 @@ let tierChart = null;
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
 function dateParams() {
-  const p = { brandId: auth.currentBrandId ?? undefined, page_size: 200 };
+  const p = { brandId: auth.currentBrandId ?? undefined };
   if (range.value?.[0]) {
     p.start = range.value[0].format('YYYY-MM-DD');
     p.end = range.value[1].format('YYYY-MM-DD');
   }
   if (tag.value) p.tag = tag.value;
+  if (regionFilter.value) p.regionName = regionFilter.value;
+  if (keyword.value) p.keyword = keyword.value;
   return p;
 }
 
-function tierOf(weeklyLeads) {
-  for (const t of TIERS) {
-    if (weeklyLeads >= t.min) return t;
-  }
-  return TIERS[TIERS.length - 1];
-}
-
-const storeRows = computed(() => {
-  const map = new Map();
-  for (const a of accounts.value) {
-    const key = a.store_name || '未知门店';
-    let g = map.get(key);
-    if (!g) {
-      g = {
-        store: key,
-        region: a.region_name ?? '-',
-        account_num: 0,
-        item_cnt: 0,
-        exposure_sum: 0,
-        pm_inquiries: 0,
-        pm_openings: 0,
-        pm_leads: 0,
-        contentPctSum: 0,
-      };
-      map.set(key, g);
-    }
-    g.account_num += 1;
-    g.item_cnt += a.item_cnt ?? 0;
-    g.exposure_sum += a.exposure_sum ?? 0;
-    g.pm_inquiries += a.pm_inquiries ?? 0;
-    g.pm_openings += a.pm_openings ?? 0;
-    g.pm_leads += a.pm_leads ?? 0;
-    const weeklyTarget = (3 * days.value) / 7;
-    const pct = weeklyTarget > 0 ? Math.min(100, Math.round(((a.item_cnt ?? 0) / weeklyTarget) * 100)) : 0;
-    g.contentPctSum += pct;
-  }
-  const list = [...map.values()];
-  const maxLeads = Math.max(1, ...list.map((g) => g.pm_leads));
-  return list
-    .map((g) => {
-      const weeklyLeads = g.pm_leads / (days.value / 7);
-      const tier = tierOf(weeklyLeads);
-      const content_pct = g.account_num ? Math.round(g.contentPctSum / g.account_num) : 0;
-      const leads_pct = Math.round((g.pm_leads / maxLeads) * 100);
-      return {
-        ...g,
-        content_pct,
-        tier_key: tier.key,
-        tier_label: tier.label,
-        tier_color: tier.color,
-        score: Math.min(100, Math.round(content_pct * 0.4 + leads_pct * 0.6)),
-      };
-    })
-    .sort((a, b) => b.pm_leads - a.pm_leads || b.item_cnt - a.item_cnt);
-});
-
 const stat = computed(() => {
-  const list = accounts.value;
+  const list = rows.value;
   const contentOkTarget = (3 * days.value) / 7;
   return {
     accounts: list.length,
-    items: list.reduce((s, a) => s + (a.item_cnt ?? 0), 0),
-    inquiries: list.reduce((s, a) => s + (a.pm_inquiries ?? 0), 0),
-    openings: list.reduce((s, a) => s + (a.pm_openings ?? 0), 0),
-    leads: list.reduce((s, a) => s + (a.pm_leads ?? 0), 0),
-    contentOk: list.filter((a) => (a.item_cnt ?? 0) >= contentOkTarget).length,
+    items: list.reduce((s, r) => s + (r.item_cnt ?? 0), 0),
+    inquiries: list.reduce((s, r) => s + (r.pm_inquiries ?? 0), 0),
+    openings: list.reduce((s, r) => s + (r.pm_openings ?? 0), 0),
+    leads: list.reduce((s, r) => s + (r.pm_leads ?? 0), 0),
+    contentOk: list.filter((r) => (r.item_cnt ?? 0) >= contentOkTarget).length,
   };
 });
 
 const columns = [
   { key: 'rank', title: '排名', width: 64 },
-  { key: 'store', title: '代理商', dataIndex: 'store', width: 200, ellipsis: true },
-  { title: '区域', dataIndex: 'region', width: 100 },
-  { key: 'tier', title: '分层', dataIndex: 'tier_label', width: 96 },
-  { title: '账号数', dataIndex: 'account_num', width: 80, sorter: (a, b) => a.account_num - b.account_num },
-  { title: '发布数', dataIndex: 'item_cnt', width: 84, sorter: (a, b) => a.item_cnt - b.item_cnt },
-  { key: 'content', title: '内容完成度（周度≥3篇）', width: 190, sorter: (a, b) => a.content_pct - b.content_pct },
-  { title: '曝光量', dataIndex: 'exposure_sum', width: 104, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
+  { title: '代理商', dataIndex: 'store_name', width: 190, ellipsis: true },
+  { key: 'nickname', title: 'KOS 账号', dataIndex: 'nickname', width: 200, ellipsis: true },
+  { title: '区域', dataIndex: 'region', width: 92 },
+  { key: 'tier', title: '分层', dataIndex: 'tier_label', width: 92 },
+  { title: '发布数', dataIndex: 'item_cnt', width: 80, sorter: (a, b) => a.item_cnt - b.item_cnt },
+  { key: 'content', title: '内容完成度（周度≥3篇）', width: 180, sorter: (a, b) => a.content_pct - b.content_pct },
+  { title: '阅读(点击)', dataIndex: 'click_sum', width: 100, sorter: (a, b) => a.click_sum - b.click_sum },
+  { key: 'ctr', title: '点击率（阅读/曝光）', dataIndex: 'ctr', width: 130, sorter: (a, b) => a.ctr - b.ctr },
+  { title: '互动', dataIndex: 'interaction_sum', width: 84, sorter: (a, b) => a.interaction_sum - b.interaction_sum },
+  { title: '曝光量', dataIndex: 'exposure_sum', width: 100, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
   { title: '留资数', dataIndex: 'pm_leads', width: 84, sorter: (a, b) => a.pm_leads - b.pm_leads },
-  { title: '进线数', dataIndex: 'pm_inquiries', width: 84, sorter: (a, b) => a.pm_inquiries - b.pm_inquiries },
+  { key: 'enter', title: '进线数（周度≥5）', dataIndex: 'pm_inquiries', width: 170, sorter: (a, b) => a.pm_inquiries - b.pm_inquiries },
   { title: '开口数', dataIndex: 'pm_openings', width: 84, sorter: (a, b) => a.pm_openings - b.pm_openings },
   { title: '综合得分', dataIndex: 'score', width: 90, sorter: (a, b) => a.score - b.score },
 ];
@@ -217,12 +204,12 @@ async function reload() {
         Math.round((range.value[1].toDate() - range.value[0].toDate()) / 86400000) + 1,
       );
     }
-    const res = await getKoxAccountRanking(dateParams());
-    accounts.value = res.list ?? [];
+    const res = await getKoxProStaffProgress(dateParams());
+    rows.value = res.rows ?? [];
     await nextTick();
     renderTierChart();
   } catch (e) {
-    message.error(e.message || '加载留资分层失败');
+    message.error(e.message || '加载 KOS 进度失败');
   } finally {
     loading.value = false;
   }
@@ -232,6 +219,7 @@ async function loadFacets() {
   try {
     const res = await getKoxAccounts({ brandId: auth.currentBrandId, page_size: 1 });
     tagOptions.value = (res.tag_facets ?? []).map((t) => ({ label: t, value: t }));
+    regionOptions.value = (res.region_facets ?? []).map((r) => ({ label: r, value: r }));
   } catch {
     /* 忽略 */
   }
@@ -240,16 +228,16 @@ async function loadFacets() {
 function renderTierChart() {
   if (!tierEl.value) return;
   if (!tierChart) tierChart = echarts.init(tierEl.value);
-  const counts = TIERS.map((t) => storeRows.value.filter((r) => r.tier_key === t.key).length);
+  const counts = TIERS.map((t) => rows.value.filter((r) => r.tier_key === t.key).length);
   tierChart.setOption(
     {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v) => `${v} 家` },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v) => `${v} 人` },
       grid: { left: 80, right: 60, top: 10, bottom: 24 },
       xAxis: { type: 'value', max: 'dataMax' },
       yAxis: {
         type: 'category',
         inverse: true,
-        data: TIERS.map((t) => `${t.label}代理商`),
+        data: TIERS.map((t) => `${t.label}KOS`),
         axisLabel: { color: '#475569' },
       },
       series: [
@@ -263,7 +251,7 @@ function renderTierChart() {
           label: {
             show: true,
             position: 'right',
-            formatter: (p) => `${p.value} 家`,
+            formatter: (p) => `${p.value} 人`,
             color: '#475569',
           },
         },
@@ -287,21 +275,25 @@ function onQuickChange() {
 }
 
 function exportDetail() {
-  const rows = storeRows.value.map((r, i) => ({
+  const list = rows.value.map((r, i) => ({
     排名: i + 1,
-    代理商: r.store,
+    代理商: r.store_name,
+    'KOS账号': r.nickname,
     区域: r.region,
     分层: r.tier_label,
-    账号数: r.account_num,
     发布数: r.item_cnt,
     '内容完成度(%)': r.content_pct,
+    '阅读(点击)': r.click_sum,
+    '点击率(%)': r.ctr,
+    互动: r.interaction_sum,
     曝光量: r.exposure_sum,
     留资数: r.pm_leads,
     进线数: r.pm_inquiries,
+    '进线完成度(%)': r.enter_pct,
     开口数: r.pm_openings,
     综合得分: r.score,
   }));
-  exportExcel([{ name: 'KOS账号留资分层', rows }], 'KOS账号留资分层');
+  exportExcel([{ name: 'KOS运营进度', rows: list }], 'KOS运营进度总览');
 }
 
 function onResize() {
@@ -414,14 +406,41 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.acc-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.acc-avatar {
+  flex: 0 0 auto;
+}
+
+.acc-avatar-ph {
+  background: #eef4ff;
+  color: #3456e6;
+  font-size: 12px;
+}
+
+.acc-name {
+  color: #1e293b;
+}
+
 .prog-cell {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.enter-num {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .prog {
   flex: 1;
+  min-width: 48px;
   height: 8px;
   background: #f1f5f9;
   border-radius: 4px;

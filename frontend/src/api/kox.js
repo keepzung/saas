@@ -43,6 +43,9 @@ export const getKoxRegionAnalysis = (params) =>
 export const getKoxAccountRanking = (params) =>
   request.get('/kox/account-ranking', { params });
 
+export const getKoxProStaffProgress = (params) =>
+  request.get('/kox/pro-staff-progress', { params });
+
 export const getKoxDealerSnapshot = (params) =>
   request.get('/kox/dealer-snapshot', { params });
 
