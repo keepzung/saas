@@ -2194,6 +2194,39 @@ export class KoxService {
       });
     }
 
+    // 特斯拉：私信进线/开口/留资改按「乐允投放报表账号×天」（KoxCampaignDailyStat kos_author）按所选区间真实聚合
+    // （xlsx 笔记×天粒度，2026-01-07 起；周度快照整周命中时保留客户口径，此处跳过）
+    if (!useWeeklySnap) {
+      const campRows = await this.prisma.koxCampaignDailyStat.findMany({
+        where: {
+          brandId,
+          accountKind: 'kos_author',
+          statDate: { gte: start, lte: end },
+        },
+        select: { brandUserName: true, messageConsult: true, msgChatUserCnt: true, msgLeadsNum: true },
+      });
+      const campAgg = new Map<number, { inq: number; open: number; leads: number }>();
+      for (const r of campRows) {
+        const accId = r.brandUserName ? nameToId.get(r.brandUserName) : null;
+        if (accId == null || !idSet.has(accId)) continue;
+        const cur = campAgg.get(accId) ?? { inq: 0, open: 0, leads: 0 };
+        cur.inq += r.messageConsult;
+        cur.open += r.msgChatUserCnt;
+        cur.leads += r.msgLeadsNum;
+        campAgg.set(accId, cur);
+      }
+      for (const [accId, v] of campAgg) {
+        bump(accId, (a) => {
+          a.pm_inquiries = v.inq;
+          a.pm_openings = v.open;
+          a.pm_leads = v.leads;
+        });
+      }
+      if (campRows.length) {
+        metric_source += '+leyoon_daily';
+      }
+    }
+
     const rows = accounts.map((a) => {
       const g = aggById.get(a.id) ?? blank();
       const wx = weeklyExtra.get(a.id);
@@ -2283,9 +2316,11 @@ export class KoxService {
       ],
       metric_note: metric_source.startsWith('weekly_snapshot')
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
-        : metric_source.startsWith('pro_staff')
-          ? `近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] ?? ''}，每日自动同步）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算`
-          : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
+        : metric_source.includes('leyoon_daily')
+          ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
+          : metric_source.startsWith('pro_staff')
+            ? `近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] ?? ''}，每日自动同步）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算`
+            : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
   }
