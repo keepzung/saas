@@ -10,6 +10,8 @@ import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.clien
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 
 const RTB_PAGE_SIZE = 500;
+// 东八区日键：statDate 多以 +08:00 零点存储，toISOString（UTC）会提前一天
+const dayKey08 = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
 const MAX_PAGES = 10;
 const NOTE_PAGE_SIZE = 100;
 const NOTE_DAILY_MAX_PAGES = 30;
@@ -1011,7 +1013,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
-      const key = r.statDate.toISOString().slice(0, 10);
+      const key = dayKey08(r.statDate);
       const cur = dayMap.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0, consult: 0, open: 0, accounts: new Set<string>() };
       cur.fee += Number(r.fee);
       cur.impression += r.impression;
@@ -1064,14 +1066,14 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const coverage =
       rows.length > 0
         ? {
-            from: rows[0].statDate.toISOString().slice(0, 10),
-            to: rows[rows.length - 1].statDate.toISOString().slice(0, 10),
+            from: dayKey08(rows[0].statDate),
+            to: dayKey08(rows[rows.length - 1].statDate),
           }
         : null;
 
     return {
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
+      start: dayKey08(start),
+      end: dayKey08(end),
       total: rows.length,
       promo_note_cnt,
       platform,
@@ -1257,8 +1259,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     return {
       metric,
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
+      start: dayKey08(start),
+      end: dayKey08(end),
       total: list.length,
       page,
       page_size: pageSize,
@@ -1535,8 +1537,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const totalFee = list.reduce((a, x) => a + x.fee, 0);
     return {
       groupby,
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
+      start: dayKey08(start),
+      end: dayKey08(end),
       total: list.length,
       summary: {
         group_num: list.length,
@@ -1614,9 +1616,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           name: p.name,
           remark: p.remark,
           region: p.region ?? null,
-          period: `${p.startDate.toISOString().slice(0, 10)} ~ ${p.endDate.toISOString().slice(0, 10)}`,
-          start_date: p.startDate.toISOString().slice(0, 10),
-          end_date: p.endDate.toISOString().slice(0, 10),
+          period: `${dayKey08(p.startDate)} ~ ${dayKey08(p.endDate)}`,
+          start_date: dayKey08(p.startDate),
+          end_date: dayKey08(p.endDate),
           account_num: sellerIds.length,
           budget,
           fee: Math.round(fee * 100) / 100,

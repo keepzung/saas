@@ -32,6 +32,7 @@ interface OrgRow {
 export class SparkOrgRegistry implements OnModuleInit {
   private readonly logger = new Logger(SparkOrgRegistry.name);
   private cache: OrgRow[] | null = null;
+  private cacheAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -66,10 +67,12 @@ export class SparkOrgRegistry implements OnModuleInit {
   }
 
   private async load(): Promise<OrgRow[]> {
-    if (this.cache) return this.cache;
+    // TTL 缓存：外部直接改 DB（如推送 cookie）60 秒内自动生效，无需重启
+    if (this.cache && Date.now() - this.cacheAt < 60_000) return this.cache;
     this.cache = await this.prisma.sparkOrgConfig.findMany({
       orderBy: { brandId: 'asc' },
     });
+    this.cacheAt = Date.now();
     return this.cache;
   }
 
