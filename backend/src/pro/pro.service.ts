@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import fs from 'fs';
 import path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,11 +46,56 @@ const num = (v: unknown): number => {
 };
 
 @Injectable()
-export class ProService {
+export class ProService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProService.name);
   private syncing = new Set<number>();
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private autoSyncRunning = false;
 
   constructor(private prisma: PrismaService) {}
+
+  onModuleInit() {
+    const minutes = Number(process.env.PRO_SYNC_INTERVAL_MINUTES ?? 60);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      this.logger.log('专业号定时同步已禁用（PRO_SYNC_INTERVAL_MINUTES<=0）');
+      return;
+    }
+    // 启动后 2 分钟先试一次，之后按间隔检查（20 小时内已同步则跳过，快照日更即可）
+    setTimeout(() => {
+      this.safeAutoSync().catch(() => undefined);
+    }, 120_000).unref();
+    this.syncTimer = setInterval(() => {
+      this.safeAutoSync().catch(() => undefined);
+    }, minutes * 60_000);
+    this.syncTimer.unref();
+    this.logger.log(`专业号定时同步已启动：每 ${minutes} 分钟检查（20 小时内已同步则跳过）`);
+  }
+
+  onModuleDestroy() {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+  }
+
+  private async safeAutoSync() {
+    if (this.autoSyncRunning) return;
+    this.autoSyncRunning = true;
+    try {
+      const cfgs = await this.prisma.proOrgConfig.findMany({
+        where: { active: true, storageState: { not: '' } },
+        select: { brandId: true, lastSyncAt: true },
+      });
+      for (const cfg of cfgs) {
+        if (cfg.lastSyncAt && Date.now() - cfg.lastSyncAt.getTime() < 20 * 3600_000) continue;
+        try {
+          const r = await this.sync(cfg.brandId);
+          this.logger.log(`专业号自动同步完成 brand=${cfg.brandId}: ${JSON.stringify(r).slice(0, 200)}`);
+        } catch (e) {
+          this.logger.warn(`专业号自动同步失败 brand=${cfg.brandId}: ${String(e?.message ?? e).slice(0, 200)}`);
+        }
+      }
+    } finally {
+      this.autoSyncRunning = false;
+    }
+  }
 
   async status(brandId: number) {
     const cfg = await this.prisma.proOrgConfig.findUnique({ where: { brandId } });

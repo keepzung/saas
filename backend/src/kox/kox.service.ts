@@ -735,7 +735,7 @@ export class KoxService {
             form_leads: proLeads.leadsSuccess,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放）`,
+            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${proLeads.statDate.toISOString().slice(0, 10)}，每日自动同步）`,
             source: 'pro_overview',
           };
         }
@@ -2252,7 +2252,7 @@ export class KoxService {
       metric_note: metric_source.startsWith('weekly_snapshot')
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
         : metric_source.startsWith('pro_staff')
-          ? '近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算'
+          ? `近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] ?? ''}，每日自动同步）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算`
           : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
