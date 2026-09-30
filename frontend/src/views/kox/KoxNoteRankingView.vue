@@ -80,23 +80,6 @@
       <a-card :bordered="false" size="small" title="内容类型效率对比分析" class="note-analysis-card-left">
         <div ref="typeEffEl" class="type-efficiency-chart" />
       </a-card>
-      <a-card :bordered="false" size="small" title="内容关键词词云" class="note-analysis-card-right">
-        <div class="word-cloud-chart">
-          <span
-            v-for="w in wordCloud"
-            :key="w.text"
-            class="cloud-word"
-            :style="{
-              fontSize: w.size + 'px',
-              color: w.color,
-              fontWeight: w.weight,
-              opacity: w.opacity,
-            }"
-          >
-            {{ w.text }}
-          </span>
-        </div>
-      </a-card>
     </div>
 
     <a-card v-if="!isDf" :bordered="false" size="small" title="提及车型分布">
@@ -420,13 +403,6 @@ const tableTotal = computed(() =>
   mode.value === 'real' ? realTotal.value : filtered.value.length,
 );
 
-const WORD_COLORS = ['#2563eb', '#dc2626', '#ea580c', '#059669', '#7c3aed', '#db2777', '#0891b2', '#d97706'];
-function wordColor(text) {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) % 997;
-  return WORD_COLORS[h % WORD_COLORS.length];
-}
-const wordWeight = (size) => (size >= 30 ? 800 : size >= 22 ? 700 : 600);
 const calcCes = (n) =>
   Number(n.digg ?? 0) +
   Number(n.collect ?? 0) +
@@ -442,36 +418,6 @@ const cesTop = computed(() => {
     .sort((a, b) => b.ces - a.ces)
     .slice(0, 10);
 });
-const wordCloud = computed(() => {
-  let list;
-  if (mode.value === 'real' && summaryData.value) {
-    list = (summaryData.value.keywords ?? []).map((w) => ({ text: w.text, count: w.count }));
-  } else {
-    const freq = new Map();
-    for (const n of notes.value) {
-      for (const w of [n.keyword, n.type]) freq.set(w, (freq.get(w) ?? 0) + 1);
-    }
-    list = [...freq.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 42)
-      .map(([text, count]) => ({ text, count }));
-  }
-  const max = Math.max(1, ...list.map((w) => w.count));
-  const min = Math.min(...list.map((w) => w.count), max);
-  // 参考版式：中心大词向外递减，字号平方根梯度拉大对比，密排居中成云团
-  return list.map((w) => {
-    const ratio = max === min ? 1 : (w.count - min) / (max - min);
-    const size = Math.round(13 + Math.pow(ratio, 0.6) * 24);
-    return {
-      text: w.text,
-      size,
-      weight: wordWeight(size),
-      color: wordColor(w.text),
-      opacity: 0.72 + ratio * 0.28,
-    };
-  });
-});
-
 const typeEffEl = ref(null);
 const modelPieEl = ref(null);
 let typeChart = null;
@@ -976,12 +922,11 @@ onBeforeUnmount(() => {
 
 .note-analysis-row {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
-.note-analysis-card-left,
-.note-analysis-card-right {
+.note-analysis-card-left {
   width: 100%;
 }
 
@@ -989,20 +934,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 400px;
   margin-top: 16px;
-}
-
-.word-cloud-chart {
-  width: 100%;
-  height: 400px;
-  margin-top: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  align-content: center;
-  gap: 1px 11px;
-  padding: 0 6px;
-  overflow: hidden;
 }
 
 .ces-top-grid {
@@ -1112,18 +1043,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #3456e6;
   font-variant-numeric: tabular-nums;
-}
-
-.cloud-word {
-  line-height: 1.28;
-  letter-spacing: -0.3px;
-  transition: transform 0.2s ease;
-  cursor: default;
-  white-space: nowrap;
-}
-
-.cloud-word:hover {
-  transform: scale(1.08);
 }
 
 .mention-model-chart {
