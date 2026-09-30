@@ -423,7 +423,21 @@ export class KoxService {
         (s) => dayKey2(s.weekStart) === dayKey2(start) && dayKey2(s.weekEnd) === dayKey2(end),
       );
       if (hit) {
-        const rows = snaps.filter((s) => dayKey2(s.weekStart) === dayKey2(hit.weekStart));
+        let rows = snaps.filter((s) => dayKey2(s.weekStart) === dayKey2(hit.weekStart));
+        // 大区/标签筛选时按账号映射过滤（周快照带 regionName，标签经 KosAccount 映射）
+        if (accountTag || regionName) {
+          const accs = await this.prisma.kosAccount.findMany({
+            where: accountWhere,
+            select: { id: true, nickname: true },
+          });
+          const idSet = new Set(accs.map((a) => a.id));
+          const nickSet = new Set(accs.map((a) => a.nickname));
+          rows = rows.filter(
+            (r) =>
+              (r.accountId != null && idSet.has(r.accountId)) ||
+              (!!r.accountName && nickSet.has(r.accountName)),
+          );
+        }
         const nSum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
         const dSum = (f: (r: (typeof rows)[number]) => number) =>
           Math.round(rows.reduce((acc, r) => acc + f(r), 0) * 100) / 100;
@@ -702,7 +716,7 @@ export class KoxService {
           ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${proContent.stat_date.toISOString().slice(0, 10)})`
           : 'spark_notes',
       // 特斯拉版线索转化漏斗：周度快照（客户口径）> 专业号总数据 > 投放+自然
-      lead_funnel: (() => {
+      lead_funnel: await (async () => {
         if (weeklySnap) {
           const { inquiries, openings } = weeklySnap;
           return {
@@ -716,15 +730,33 @@ export class KoxService {
             lead_rate: inquiries ? r2((weeklySnap.pm_leads / inquiries) * 100) : 0,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: '周度快照（客户口径）：总留资=私信留资+服务卡留资+个微复制留资',
+            scope_note: `周度快照（客户口径）：总留资=私信留资+服务卡留资+个微复制留资${accountTag || regionName ? '；已按大区/标签筛选' : ''}`,
             source: 'weekly_snapshot',
           };
         }
         // G2：专业号线索总数据口径优先（进线/开口/留资为专业号平台全量）
         if (proLeads) {
-          const inquiries = proLeads.messageOpenCnt;
-          const openings = proLeads.messageDrivingOpenCnt;
-          const leads = proLeads.msgLeadsNum;
+          let inquiries = proLeads.messageOpenCnt;
+          let openings = proLeads.messageDrivingOpenCnt;
+          let leads = proLeads.msgLeadsNum;
+          let formLeads = proLeads.leadsSuccess;
+          let scopeExtra = '';
+          if (accountTag || regionName) {
+            // 平台总数据无区域维度：改用同档位员工矩阵按筛选账号汇总
+            const staffRowsPro = await this.prisma.proKosStaff.findMany({
+              where: { brandId: 6, statDate: proLeads.statDate, dateType: proLeads.dateType },
+              take: 1000,
+            });
+            const accNickSet = new Set(
+              (filteredAccounts ?? []).map((a) => a.nickname),
+            );
+            const staffUse = staffRowsPro.filter((s) => !!s.nickName && accNickSet.has(s.nickName));
+            inquiries = staffUse.reduce((a, s) => a + s.messageOpenCnt, 0);
+            openings = staffUse.reduce((a, s) => a + s.messageDrivingOpenCnt, 0);
+            leads = staffUse.reduce((a, s) => a + s.msgLeadsNum, 0);
+            formLeads = staffUse.reduce((a, s) => a + s.leadsSuccess, 0);
+            scopeExtra = '；已按大区/标签筛选（员工矩阵汇总）';
+          }
           const winLabel = proLeads.dateType === 1 ? '近1日' : proLeads.dateType === 2 ? '近7日' : '近30日';
           return {
             pm_inquiries: inquiries,
@@ -732,10 +764,10 @@ export class KoxService {
             pm_leads: leads,
             open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
             lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
-            form_leads: proLeads.leadsSuccess,
+            form_leads: formLeads,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${proLeads.statDate.toISOString().slice(0, 10)}，每日自动同步）`,
+            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${proLeads.statDate.toISOString().slice(0, 10)}，每日自动同步）${scopeExtra}`,
             source: 'pro_overview',
           };
         }
