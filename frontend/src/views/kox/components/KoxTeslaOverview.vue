@@ -234,7 +234,11 @@
                     referrerpolicy="no-referrer"
                     @error="onCoverErr(n)"
                   />
-                  <div v-else class="hot-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</div>
+                  <img
+                    v-else
+                    :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`"
+                    loading="lazy"
+                  />
                 </div>
                 <div class="hot-main">
                   <div class="hot-title" :title="n.title">{{ n.title }}</div>

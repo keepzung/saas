@@ -63,7 +63,7 @@
           <span :class="['ces-rank', i < 3 ? `top${i + 1}` : '']">{{ i + 1 }}</span>
           <div class="ces-thumb">
             <img v-if="n.cover" :src="n.cover" loading="lazy" />
-            <span v-else class="ces-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</span>
+            <img v-else :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`" loading="lazy" />
           </div>
           <div class="ces-main">
             <div class="ces-title" :title="n.title">{{ n.title }}</div>
@@ -133,8 +133,8 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <div class="note-title-cell">
-              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" referrerpolicy="no-referrer" @error="record.cover = null" />
-              <div v-else class="note-cover-img note-cover-ph">{{ (record.title || '#').slice(0, 1) }}</div>
+              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" referrerpolicy="no-referrer" @error="record.cover = `/images/kox-notes/note${(record.id % 5) + 1}.webp`" />
+              <img v-else class="note-cover-img" :src="`/images/kox-notes/note${(record.id % 5) + 1}.webp`" loading="lazy" />
               <div class="note-title-text">
                 <a class="title-link" @click="showDetail(record)">{{ record.title }}</a>
                 <div class="muted mini">{{ record.publishTime }}</div>
