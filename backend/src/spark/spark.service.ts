@@ -979,18 +979,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         msg_open_cost: totalOpen ? r2v(totalFee / totalOpen) : 0,
         msg_lead_cost: totalMsgLeads ? r2v(totalFee / totalMsgLeads) : 0,
       },
-      trend: [...dayMap.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, v]) => ({
-          date,
-          fee: r2v(v.fee),
-          impression: v.impression,
-          click: v.click,
-          msg_inquiries: v.consult,
-          msg_openings: v.open,
-          msg_leads: v.msg_leads,
-          active_accounts: v.accounts.size,
-        })),
+      trend: (() => {
+        // 横轴按查询区间逐日铺满（无数据天补 0），上限 366 天防超长自定义区间
+        // 用本地日期分量生成键（dayMap 键 = statDate 的 UTC 日期字符串，两者按自然日对齐）
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endDay = keyOf(end);
+        const out: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number }[] = [];
+        for (let guard = 0; guard < 366; guard++) {
+          const key = keyOf(startDay);
+          const v = dayMap.get(key);
+          out.push({
+            date: key,
+            fee: v ? r2v(v.fee) : 0,
+            impression: v?.impression ?? 0,
+            click: v?.click ?? 0,
+            msg_inquiries: v?.consult ?? 0,
+            msg_openings: v?.open ?? 0,
+            msg_leads: v?.msg_leads ?? 0,
+            active_accounts: v?.accounts.size ?? 0,
+          });
+          if (key === endDay) break;
+          startDay.setDate(startDay.getDate() + 1);
+        }
+        return out;
+      })(),
     };
   }
 

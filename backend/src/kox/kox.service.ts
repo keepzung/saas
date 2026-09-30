@@ -833,9 +833,20 @@ export class KoxService {
             }
           }
         }
-        return [...byDate.entries()]
-          .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([date, v]) => ({ date, ...v }));
+        // 横轴按查询区间逐日铺满（无数据天补 0），上限 366 天
+        const padDay = (n: number) => String(n).padStart(2, '0');
+        const dayKeyOf = (d: Date) => `${d.getFullYear()}-${padDay(d.getMonth() + 1)}-${padDay(d.getDate())}`;
+        const trendStart = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const trendEndKey = dayKeyOf(end);
+        const trendOut: Record<string, unknown>[] = [];
+        for (let guard = 0; guard < 366; guard++) {
+          const key = dayKeyOf(trendStart);
+          const v = byDate.get(key);
+          trendOut.push({ date: key, ...(v ?? { ...emptyRow(), ...campPart(campByDate.get(key)) }) });
+          if (key === trendEndKey) break;
+          trendStart.setDate(trendStart.getDate() + 1);
+        }
+        return trendOut;
       })(),
     };
   }

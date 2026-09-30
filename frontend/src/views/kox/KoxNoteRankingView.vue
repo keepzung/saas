@@ -133,7 +133,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <div class="note-title-cell">
-              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" />
+              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" referrerpolicy="no-referrer" @error="record.cover = null" />
               <div v-else class="note-cover-img note-cover-ph">{{ (record.title || '#').slice(0, 1) }}</div>
               <div class="note-title-text">
                 <a class="title-link" @click="showDetail(record)">{{ record.title }}</a>

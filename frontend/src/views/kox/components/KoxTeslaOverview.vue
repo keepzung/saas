@@ -226,7 +226,8 @@
                     v-if="n.cover_url"
                     :src="n.cover_url"
                     loading="lazy"
-                    @error="n.cover_url = null"
+                    referrerpolicy="no-referrer"
+                    @error="onCoverErr(n)"
                   />
                   <div v-else class="hot-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</div>
                 </div>
@@ -500,6 +501,16 @@ watch(ovMetric, () => {
 function openNote(n) {
   if (n.note_url) window.open(n.note_url, '_blank');
   else message.info('该笔记无链接');
+}
+
+// 封面加载失败先重试一次（xhs CDN 偶发超时），仍失败再落占位
+function onCoverErr(n) {
+  if (!n._coverRetried) {
+    n._coverRetried = true;
+    n.cover_url = `${n.cover_url}${n.cover_url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  } else {
+    n.cover_url = null;
+  }
 }
 
 function goAccount() {

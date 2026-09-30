@@ -53,6 +53,7 @@
               v-if="n.cover_url"
               :src="n.cover_url"
               loading="lazy"
+              referrerpolicy="no-referrer"
               @error="onCoverError(n)"
             />
             <div v-else class="cover-ph">{{ (n.title || '#').slice(0, 1) }}</div>
@@ -164,7 +165,13 @@ function openNote(n) {
 }
 
 function onCoverError(n) {
-  n.cover_url = null;
+  // 先重试一次（xhs CDN 偶发超时），仍失败再落占位
+  if (!n._coverRetried) {
+    n._coverRetried = true;
+    n.cover_url = `${n.cover_url}${n.cover_url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  } else {
+    n.cover_url = null;
+  }
 }
 
 onMounted(() => {

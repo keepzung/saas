@@ -158,10 +158,13 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       }
       for (const r of rows) {
         if (!r?.commentId) continue;
+        // 封面归一 https（http 会被浏览器混合内容策略拦截）
+        let cover = typeof r.cover === 'string' ? r.cover.trim() : null;
+        if (cover?.startsWith('http://')) cover = cover.replace(/^http:\/\//, 'https://');
         const data = {
           noteId: r.noteId ?? null,
           noteTitle: r.noteTitle ?? null,
-          noteCover: r.cover ?? null,
+          noteCover: cover || null,
           content: r.content ?? null,
           commentUserName: r.commentUserName ?? null,
           entOpenName: r.entOpenName ?? null,

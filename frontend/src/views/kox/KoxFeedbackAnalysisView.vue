@@ -133,7 +133,7 @@
           <div class="comment-left-bar" :style="{ background: sentimentColor[c.sentiment] }"></div>
           <div class="comment-main">
             <div v-if="c.noteTitle || c.noteCover" class="comment-note-row">
-              <img v-if="c.noteCover" :src="c.noteCover" class="note-thumb" loading="lazy" />
+              <img v-if="c.noteCover" :src="c.noteCover" class="note-thumb" loading="lazy" referrerpolicy="no-referrer" />
               <span class="note-name" :title="c.noteTitle">笔记：{{ c.noteTitle || '(未匹配到笔记)' }}</span>
               <a v-if="c.noteUrl" class="note-link" @click.stop="openNoteUrl(c.noteUrl)">查看笔记 <span class="note-link-arrow">↗</span></a>
               <span v-if="c.kosAccount" class="note-kos">{{ c.kosAccount }}</span>
