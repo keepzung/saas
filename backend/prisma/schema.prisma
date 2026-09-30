@@ -652,20 +652,24 @@ model KoxCampaignDailyStat {
 }
 
 model SparkAccount {
-  id              Int      @id @default(autoincrement())
-  virtualSellerId String   @unique
-  accountCode     String?
-  accountKind     String   @default("brand")
-  name            String
-  brandUserId     String?
-  agentName       String?
-  advertiserId    String?
-  lastConsumeDate String?
-  active          Boolean  @default(true)
-  scope           String   @default("dealer")
-  firstSeenAt     DateTime @default(now())
-  lastSeenAt      DateTime @default(now())
-  brandId         Int      @default(2)
+  id               Int       @id @default(autoincrement())
+  virtualSellerId  String    @unique
+  accountCode      String?
+  accountKind      String    @default("brand")
+  name             String
+  brandUserId      String?
+  agentName        String?
+  advertiserId     String?
+  lastConsumeDate  String?
+  active           Boolean   @default(true)
+  scope            String    @default("dealer")
+  // partner 通道：盯盘助手周/月消耗口径快照（week_cost/month_cost，平台自然周/自然月至今）
+  weekCost         Decimal?  @db.Decimal(14, 2)
+  monthCost        Decimal?  @db.Decimal(14, 2)
+  partnerSnapshotAt DateTime?
+  firstSeenAt      DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  brandId          Int       @default(2)
 
   @@index([brandId, active])
   @@index([scope])
@@ -995,7 +999,7 @@ model ProKosOverview {
   rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
   createdAt             DateTime @default(now())
 
-  @@unique([brandId, statDate])
+  @@unique([brandId, statDate, dateType])
   @@index([brandId])
 }
 
@@ -1004,6 +1008,7 @@ model ProKosStaff {
   brandId               Int      @default(6)
   userId                String
   statDate              DateTime
+  dateType              Int      @default(2)
   nickName              String
   realName              String?
   avatar                String?
@@ -1023,7 +1028,7 @@ model ProKosStaff {
   bindTime              DateTime?
   createdAt             DateTime @default(now())
 
-  @@unique([brandId, userId, statDate])
+  @@unique([brandId, userId, statDate, dateType])
   @@index([brandId, statDate])
 }
 

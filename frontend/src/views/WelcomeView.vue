@@ -1,5 +1,5 @@
 <template>
-  <div class="welcome-layout">
+  <div class="welcome-layout" :style="layoutVars">
     <div class="welcome-header">
 <div class="header-logo">
 <div class="company-logo" :style="themeLogoStyle">
@@ -134,6 +134,14 @@ const themeLogoStyle = computed(() => {
     maxWidth: `${t.logoW ?? t.logoH * 4.8}px`,
   };
 });
+// 大 logo 品牌（乐允 68px）头部条自适应加高，避免裁切
+const headerH = computed(() => {
+  const t = brandTheme(auth.currentBrandId);
+  return t?.logoH && t.logoH > 44 ? t.logoH + 16 : 54;
+});
+const layoutVars = computed(() => ({
+  '--welcome-header-h': `${headerH.value}px`,
+}));
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId] ?? [];
   if (!hidden.length) return auth.moduleTree;
@@ -244,8 +252,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   padding: 0 24px;
-  height: 54px !important;
-  line-height: 54px !important;
+  height: var(--welcome-header-h, 54px);
+  line-height: var(--welcome-header-h, 54px);
   background: #ffffffb8 !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -345,8 +353,8 @@ onMounted(async () => {
 }
 
 .page-content {
-  margin-top: 54px;
-  height: calc(100vh - 54px);
+  margin-top: var(--welcome-header-h, 54px);
+  height: calc(100vh - var(--welcome-header-h, 54px));
   overflow-y: auto;
   display: flex;
   flex-direction: column;

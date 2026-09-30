@@ -574,6 +574,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       time: string;
       note_title: string | null;
       note_cover: string | null;
+      note_url: string | null;
       kos_account: string | null;
     }[] = [];
     const dayStart = new Date();
@@ -601,8 +602,35 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
           time: (r.createdAt ?? new Date()).toISOString(),
           note_title: r.noteTitle,
           note_cover: r.noteCover,
+          note_url: null,
           kos_account: r.entOpenName,
         });
+      }
+    }
+    // 评论 → 具体笔记：按 noteId 匹配 KoxNote（noteUrl 带 xsec_token 可直接打开）
+    const detailNoteIds = [
+      ...new Set(
+        rows
+          .slice(0, detail.length)
+          .map((r) => r.noteId)
+          .filter((n): n is string => !!n),
+      ),
+    ];
+    if (detailNoteIds.length) {
+      const noteRows = await this.prisma.koxNote.findMany({
+        where: { brandId, noteId: { in: detailNoteIds } },
+        select: { noteId: true, noteUrl: true, coverUrl: true, title: true },
+      });
+      const noteByUrl = new Map(noteRows.map((n) => [n.noteId, n]));
+      for (let i = 0; i < detail.length; i++) {
+        const r = rows[i];
+        if (!r?.noteId) continue;
+        const n = noteByUrl.get(r.noteId);
+        if (n) {
+          detail[i].note_url = n.noteUrl;
+          if (!detail[i].note_cover) detail[i].note_cover = n.coverUrl;
+          if (!detail[i].note_title) detail[i].note_title = n.title;
+        }
       }
     }
     const total = rows.length;
@@ -625,9 +653,11 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         .map(([name, count]) => ({ name, count, pct: pct(count) }))
         .sort((a, b) => b.count - a.count),
       comments: detail,
+      detail_total: detail.length,
       topics: extractKeywords(contents, 30),
       source: 'laigu_comments',
-      scope_note: '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论）；分类/情感为关键词规则引擎判定',
+      scope_note:
+        '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论）；统计为所选周期全量，明细展示最近 500 条；分类/情感为关键词规则引擎判定',
     };
   }
 

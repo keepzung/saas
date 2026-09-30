@@ -55,12 +55,7 @@
               loading="lazy"
               @error="onCoverError(n)"
             />
-            <img
-              v-else
-              :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`"
-              loading="lazy"
-              @error="onCoverError(n)"
-            />
+            <div v-else class="cover-ph">{{ (n.title || '#').slice(0, 1) }}</div>
             <span v-if="n.is_rtb_adver === true" class="promo-tag">投流</span>
           </div>
           <div class="title" :title="n.title">{{ n.title }}</div>

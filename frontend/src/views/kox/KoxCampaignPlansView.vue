@@ -14,6 +14,9 @@
     </template>
 
     <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实投放数据。</NoticeBar>
+    <NoticeBar v-else-if="mode === 'real' && isTesla && platform">
+      数据来源：小红书合作伙伴平台（乐允子账户投放）。总消耗为平台<strong>本月口径</strong>（¥{{ fmtNum(platform.month_fee) }}，快照 {{ snapshotAtText }}）；曝光/点击/私信明细为日存档口径<template v-if="coverage">（{{ coverage.from }} ~ {{ coverage.to }}，平台仅保留昨日/今日快照，日历史自 09-25 起逐日积累）</template>。
+    </NoticeBar>
     <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新。</NoticeBar>
     <a-alert
       v-if="cookieValid === false"
@@ -29,8 +32,13 @@
 
       <div class="hero-row">
         <div class="hero-item">
-          <div class="hero-label">总消耗（元）</div>
-          <div class="hero-value hl-blue">{{ fmtNum(summary.fee) }}</div>
+          <div class="hero-label">
+            总消耗（元）
+            <a-tooltip v-if="heroFeeScopeNote" :title="heroFeeScopeNote">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="hero-value hl-blue">{{ fmtNum(heroFee) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
@@ -40,7 +48,7 @@
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">私信留资成本（元）</div>
-          <div class="hero-value hl-violet">{{ summary.msg_leads ? fmtNum(summary.msg_lead_cost) : '—' }}</div>
+          <div class="hero-value hl-violet">{{ heroLeadCost }}</div>
         </div>
       </div>
 
@@ -291,9 +299,40 @@ const leadTab = ref('inquiries');
 const detailTab = ref(isTesla ? 'note' : 'account');
 const summary = ref({});
 const trend = ref([]);
+const platform = ref(null);
+const coverage = ref(null);
 const accountRows = ref([]);
 const accountTotal = ref(0);
 const exporting = ref(false);
+
+// 特斯拉：近30天（本月）总消耗用平台月口径快照（真实完整），其余场景用日存档合计
+const isCurrentMonthWindow = computed(() => {
+  if (range.value?.[0] && range.value?.[1]) {
+    return range.value[0].isSame(dayjs().startOf('month'), 'day') && range.value[1].isSame(dayjs(), 'day');
+  }
+  return days.value === 30 && dayjs().date() <= 31;
+});
+const heroFee = computed(() => {
+  if (isTesla.value && platform.value?.month_fee > 0 && isCurrentMonthWindow.value) {
+    return platform.value.month_fee;
+  }
+  return summary.value.fee ?? 0;
+});
+const heroFeeScopeNote = computed(() => {
+  if (isTesla.value && platform.value?.month_fee > 0 && isCurrentMonthWindow.value) {
+    return '平台本月消耗口径快照（本周/本月至今，合作伙伴平台盯盘助手），完整覆盖本月；日明细仅自 09-25 起存档';
+  }
+  return '';
+});
+const heroLeadCost = computed(() => {
+  if (!summary.value.msg_leads) return '—';
+  // 平台月口径消耗与日存档留资口径不一致时不混算成本
+  if (heroFee.value !== (summary.value.fee ?? 0)) return '—';
+  return fmtNum(summary.value.msg_lead_cost);
+});
+const snapshotAtText = computed(() =>
+  platform.value?.snapshot_at ? dayjs(platform.value.snapshot_at).format('MM-DD HH:mm') : '-',
+);
 
 const consumeEl = ref(null);
 const leadsEl = ref(null);
@@ -343,6 +382,8 @@ async function reload() {
 function applyData(sumRes, listRes) {
   summary.value = sumRes.summary ?? {};
   trend.value = sumRes.trend ?? [];
+  platform.value = sumRes.platform ?? null;
+  coverage.value = sumRes.coverage ?? null;
   accountTotal.value = listRes.total ?? 0;
   accountRows.value = listRes.list ?? [];
   nextTick(renderCharts);

@@ -9,7 +9,7 @@
     </template>
 
     <NoticeBar>
-      分层规则（周度留资）：S级头部 ≥50 ｜ 头部 ≥25 ｜ 高潜 12.5–25 ｜ 腰部 6.25–12.5 ｜ 尾部 &lt;6；长周期按天数折算周度。内容完成度=周度 ≥3 篇；进线完成度=周度 ≥5 条。数据来自专业号员工矩阵（按账号拆分）。
+      分层规则（周度留资）：S级头部 ≥50 ｜ 头部 ≥25 ｜ 高潜 12.5–25 ｜ 腰部 6.25–12.5 ｜ 尾部 &lt;6；长周期按天数折算周度。内容完成度=周度 ≥3 篇；进线完成度=周度 ≥5 条。数据来自专业号员工矩阵（按账号拆分）：近7天=平台近7日档，近30天=平台近30日档（发布数/进线数为所选窗口真实值）。
     </NoticeBar>
 
     <a-row :gutter="12">
@@ -179,14 +179,14 @@ const stat = computed(() => {
 
 const columns = [
   { key: 'rank', title: '排名', width: 64 },
-  { title: '代理商', dataIndex: 'store_name', width: 190, ellipsis: true },
+  { title: '门店', dataIndex: 'store_name', width: 190, ellipsis: true },
   { key: 'nickname', title: 'KOS 账号', dataIndex: 'nickname', width: 200, ellipsis: true },
   { title: '区域', dataIndex: 'region', width: 92 },
   { key: 'tier', title: '分层', dataIndex: 'tier_label', width: 92 },
   { title: '发布数', dataIndex: 'item_cnt', width: 80, sorter: (a, b) => a.item_cnt - b.item_cnt },
   { key: 'content', title: '内容完成度（周度≥3篇）', width: 180, sorter: (a, b) => a.content_pct - b.content_pct },
   { title: '阅读(点击)', dataIndex: 'click_sum', width: 100, sorter: (a, b) => a.click_sum - b.click_sum },
-  { key: 'ctr', title: '点击率（阅读/曝光）', dataIndex: 'ctr', width: 130, sorter: (a, b) => a.ctr - b.ctr },
+  { key: 'ctr', title: '点击率', dataIndex: 'ctr', width: 100, sorter: (a, b) => a.ctr - b.ctr },
   { title: '互动', dataIndex: 'interaction_sum', width: 84, sorter: (a, b) => a.interaction_sum - b.interaction_sum },
   { title: '曝光量', dataIndex: 'exposure_sum', width: 100, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
   { title: '留资数', dataIndex: 'pm_leads', width: 84, sorter: (a, b) => a.pm_leads - b.pm_leads },
@@ -276,7 +276,7 @@ function onQuickChange() {
 function exportDetail() {
   const list = rows.value.map((r, i) => ({
     排名: i + 1,
-    代理商: r.store_name,
+    门店: r.store_name,
     'KOS账号': r.nickname,
     区域: r.region,
     分层: r.tier_label,

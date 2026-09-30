@@ -1,8 +1,8 @@
 <template>
   <div class="side-nav">
     <div class="logo" @click="$emit('logo-click')">
-      <span v-if="theme?.logo && !collapsed" class="logo-brand-chip">
-        <img class="logo-brand-img" :src="theme.logo" :alt="theme.short" />
+      <span v-if="theme?.logo && !collapsed" class="logo-brand-chip" :style="chipStyle">
+        <img class="logo-brand-img" :src="theme.logo" :alt="theme.short" :style="imgStyle" />
       </span>
       <template v-else>
         <span class="logo-logo"></span>
@@ -42,6 +42,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue';
 import {
   ProjectOutlined,
   TeamOutlined,
@@ -55,7 +56,7 @@ import {
 const selectedKeys = defineModel('selectedKeys', { type: Array, default: () => [] });
 const openKeys = defineModel('openKeys', { type: Array, default: () => [] });
 
-defineProps({
+const props = defineProps({
   collapsed: { type: Boolean, default: false },
   categories: { type: Array, default: () => [] },
   theme: { type: Object, default: null },
@@ -63,6 +64,16 @@ defineProps({
 });
 
 const emit = defineEmits(['menu-click', 'logo-click']);
+
+// 品牌可配侧栏 logo 尺寸（sidebarLogoH，默认 24；特斯拉乐允横版放大展示）
+const imgStyle = computed(() =>
+  props.theme?.sidebarLogoH ? { height: `${props.theme.sidebarLogoH}px` } : {},
+);
+const chipStyle = computed(() =>
+  props.theme?.sidebarLogoH
+    ? { maxWidth: `${Math.max(152, props.theme.sidebarLogoH * 5)}px` }
+    : {},
+);
 
 const iconMap = {
   ProjectOutlined,

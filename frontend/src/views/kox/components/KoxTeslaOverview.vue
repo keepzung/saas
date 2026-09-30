@@ -1,6 +1,9 @@
 <template>
   <PageWrapper title="运营总览" subtitle="特斯拉 KOS 运营数据">
     <div class="tesla-ov">
+      <NoticeBar>
+        {{ dataSourceNote }}
+      </NoticeBar>
       <a-card size="small" class="filter-card">
         <div class="filter-row">
           <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
@@ -144,11 +147,6 @@
               <div class="kv"><span>开口率（开口/进线）</span><b class="c-violet">{{ ov.lead_funnel?.open_rate ?? 0 }}%</b></div>
               <div class="kv"><span>留资率（留资/进线）</span><b class="c-green">{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
             </div>
-            <div class="funnel-break">
-              投放：进线 {{ fmt(ov.lead_funnel?.campaign?.enter) }} / 开口 {{ fmt(ov.lead_funnel?.campaign?.open) }} / 留资 {{ fmt(ov.lead_funnel?.campaign?.leads) }}
-              <a-divider type="vertical" />
-              自然：进线 {{ fmt(ov.lead_funnel?.organic?.inquiries) }} / 开口 {{ fmt(ov.lead_funnel?.organic?.openings) }} / 留资 {{ fmt(ov.lead_funnel?.organic?.leads) }}
-            </div>
           </a-tab-pane>
         </a-tabs>
       </a-card>
@@ -230,11 +228,7 @@
                     loading="lazy"
                     @error="n.cover_url = null"
                   />
-                  <img
-                    v-else
-                    :src="`/images/kox-notes/note${(n.id % 5) + 1}.webp`"
-                    loading="lazy"
-                  />
+                  <div v-else class="hot-thumb-ph">{{ (n.title || '#').slice(0, 1) }}</div>
                 </div>
                 <div class="hot-main">
                   <div class="hot-title" :title="n.title">{{ n.title }}</div>
@@ -260,6 +254,7 @@ import * as echarts from 'echarts';
 import { useRouter } from 'vue-router';
 import { QuestionCircleOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../../components/PageWrapper.vue';
+import NoticeBar from '../../../components/NoticeBar.vue';
 import {
   getKoxAccountRanking,
   getKoxAccounts,
@@ -294,6 +289,14 @@ const ovMetric = ref('item');
 const ov = ref({});
 const rankList = ref([]);
 const hotList = ref([]);
+// 数据来源口径说明（近7/30天快捷档走专业号真实窗口；自定义区间为笔记快照口径）
+const dataSourceNote = computed(() => {
+  const src = ov.value?.content_source ?? '';
+  if (src.startsWith('pro_staff_window')) {
+    return '本周期内容/线索数据来自专业号平台真实统计窗口（T+1）；笔记级明细快照截至 2026-09-24（乐允周期导出）。';
+  }
+  return '内容指标为乐允导出的笔记周期累计口径（快照截至 2026-09-24，自定义区间按发布时间聚合）；线索为专业号平台口径。';
+});
 // 点击率 = 总阅读量 / 总曝光量
 const ctrPct = computed(() => {
   const s = ov.value?.summary ?? {};
@@ -362,7 +365,7 @@ async function loadRank() {
     const res = await getKoxAccountRanking({
       ...dateParams(),
       metric: rankMetric.value,
-      page_size: 10,
+      page_size: 20,
       ...(accountTag.value ? { tag: accountTag.value } : {}),
       ...(regionName.value ? { regionName: regionName.value } : {}),
     });

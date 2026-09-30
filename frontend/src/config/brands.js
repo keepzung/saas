@@ -7,9 +7,9 @@ export const BRAND_THEMES = {
     name: '特斯拉项目工作区',
     logo: '/images/login/leyun-logo.jpg',
     short: '特斯拉',
-    logoH: 50, // 欢迎页头部 logo 高度（乐允横版含副标，默认 36 太小；头部高 54）
-    logoW: 230,
-    sidebarLogoH: 30,
+    logoH: 68, // 欢迎页头部 logo 高度（乐允横版 726×364，两轮放大 36→50→68）
+    logoW: 300,
+    sidebarLogoH: 38, // 侧栏品牌 logo 高度（默认 24 太小）
   },
   7: { name: '东风奕境项目工作区', logo: '/images/login/dongfeng-logo.png', short: '东风奕境' },
   8: { name: '格力项目工作区', logo: '/images/login/gree-logo.png', short: '格力' },
@@ -49,7 +49,11 @@ export const BRAND_HIDDEN_MENUS = {
 
 // 各工作区菜单项改名（仅改显示名，不改路由/权限）
 // 东风奕境(7)/格力(8) 按旧系统菜单命名（saas.marketine.cn 截图复刻）
+// 特斯拉(6)：代理商总览页已按账号拆分为 KOS 运营进度，菜单名对齐
 export const BRAND_MENU_NAME_OVERRIDES = {
+  6: {
+    代理商总览: 'KOS数据进度',
+  },
   7: {
     代理商总览: '经销商排行',
     账号表现分析: '账号排行',

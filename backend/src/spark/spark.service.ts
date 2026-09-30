@@ -296,11 +296,17 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           lastSeenAt: new Date(),
           brandId: ctx.brandId,
           scope: 'dealer',
+          weekCost: new Prisma.Decimal(this.partnerNum(r.week_cost)),
+          monthCost: new Prisma.Decimal(this.partnerNum(r.month_cost)),
+          partnerSnapshotAt: new Date(),
         },
         update: {
           name,
           active: isActive,
           lastSeenAt: new Date(),
+          weekCost: new Prisma.Decimal(this.partnerNum(r.week_cost)),
+          monthCost: new Prisma.Decimal(this.partnerNum(r.month_cost)),
+          partnerSnapshotAt: new Date(),
         },
       });
     }
@@ -916,11 +922,45 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     }
     const promo_note_cnt = await this.prisma.koxNote.count({ where: promoWhere });
 
+    // partner 通道（如特斯拉）：平台盯盘 周/月消耗口径快照（week_cost=本周至今，month_cost=本月至今）
+    // 仅 partner 账户有该快照（MCC 通道账户 partnerSnapshotAt 为空，自动为 null）
+    const partnerAccs = await this.prisma.sparkAccount.findMany({
+      where: {
+        brandId,
+        accountKind: 'partner_vseller',
+        partnerSnapshotAt: { not: null },
+      },
+      select: { weekCost: true, monthCost: true, partnerSnapshotAt: true },
+    });
+    const platform = partnerAccs.length
+      ? {
+          week_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.weekCost ?? 0), 0)),
+          month_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.monthCost ?? 0), 0)),
+          account_cnt: partnerAccs.length,
+          snapshot_at:
+            partnerAccs
+              .map((a) => a.partnerSnapshotAt)
+              .filter((d): d is Date => !!d)
+              .sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
+        }
+      : null;
+
+    // 日存档覆盖区间（partner 平台仅保留昨日/今日快照，日历史自同步开启日起逐日积累）
+    const coverage =
+      rows.length > 0
+        ? {
+            from: rows[0].statDate.toISOString().slice(0, 10),
+            to: rows[rows.length - 1].statDate.toISOString().slice(0, 10),
+          }
+        : null;
+
     return {
       start: start.toISOString().slice(0, 10),
       end: end.toISOString().slice(0, 10),
       total: rows.length,
       promo_note_cnt,
+      platform,
+      coverage,
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,
@@ -1055,6 +1095,19 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       : 'fee';
 
     let list = [...agg.values()];
+    // partner 通道：附平台周/月消耗口径快照（与日存档口径并列展示）
+    const partnerAccs =
+      list.length > 0
+        ? await this.prisma.sparkAccount.findMany({
+            where: {
+              brandId,
+              accountKind: 'partner_vseller',
+              virtualSellerId: { in: list.map((a) => a.virtual_seller_id) },
+            },
+            select: { virtualSellerId: true, weekCost: true, monthCost: true },
+          })
+        : [];
+    const pmBySeller = new Map(partnerAccs.map((a) => [a.virtualSellerId, a]));
     if (query.keyword) {
       const kw = query.keyword.trim();
       list = list.filter(
@@ -1075,15 +1128,20 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       page_size: pageSize,
       list: list
         .slice((page - 1) * pageSize, page * pageSize)
-        .map((a, i) => ({
-          rank: (page - 1) * pageSize + i + 1,
-          ...a,
-          fee: Math.round(a.fee * 100) / 100,
-          ctr: a.impression ? Math.round((a.click / a.impression) * 10000) / 100 : 0,
-          msg_inquiry_cost: a.msg_inquiries ? Math.round((a.fee / a.msg_inquiries) * 10) / 10 : 0,
-          msg_open_cost: a.msg_openings ? Math.round((a.fee / a.msg_openings) * 10) / 10 : 0,
-          msg_lead_cost: a.msg_leads ? Math.round((a.fee / a.msg_leads) * 10) / 10 : 0,
-        })),
+        .map((a, i) => {
+          const pm = pmBySeller.get(a.virtual_seller_id);
+          return {
+            rank: (page - 1) * pageSize + i + 1,
+            ...a,
+            fee: Math.round(a.fee * 100) / 100,
+            week_fee: pm?.weekCost != null ? Math.round(Number(pm.weekCost) * 100) / 100 : null,
+            month_fee: pm?.monthCost != null ? Math.round(Number(pm.monthCost) * 100) / 100 : null,
+            ctr: a.impression ? Math.round((a.click / a.impression) * 10000) / 100 : 0,
+            msg_inquiry_cost: a.msg_inquiries ? Math.round((a.fee / a.msg_inquiries) * 10) / 10 : 0,
+            msg_open_cost: a.msg_openings ? Math.round((a.fee / a.msg_openings) * 10) / 10 : 0,
+            msg_lead_cost: a.msg_leads ? Math.round((a.fee / a.msg_leads) * 10) / 10 : 0,
+          };
+        }),
     };
   }
 

@@ -133,7 +133,8 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <div class="note-title-cell">
-              <img class="note-cover-img" :src="record.cover" alt="" />
+              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" />
+              <div v-else class="note-cover-img note-cover-ph">{{ (record.title || '#').slice(0, 1) }}</div>
               <div class="note-title-text">
                 <a class="title-link" @click="showDetail(record)">{{ record.title }}</a>
                 <div class="muted mini">{{ record.publishTime }}</div>
@@ -141,7 +142,7 @@
             </div>
           </template>
           <template v-else-if="column.key === 'tags'">
-            <a-tag class="mini">{{ record.type }}</a-tag>
+            <a-tag v-if="!isTesla" class="mini">{{ record.type }}</a-tag>
             <a-tag class="mini" color="blue">{{ record.model }}</a-tag>
             <a-tag class="mini" :color="record.accountType === 'KOS' ? 'green' : 'purple'">
               {{ record.accountType }}
@@ -264,6 +265,8 @@ import { useAuthStore } from '../../stores/auth';
 const auth = useAuthStore();
 const route = useRoute();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
+// 特斯拉：内容分类 tag 意义有限 + 表单线索无笔记级数据源，按客户要求隐藏
+const isTesla = computed(() => Number(auth.currentBrandId ?? 0) === 6);
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 
@@ -339,18 +342,20 @@ const modelOptions = computed(() =>
       ],
 );
 
-const columns = [
+const columns = computed(() => [
   { key: 'title', title: '标题', width: 300 },
   { title: '发布者', dataIndex: 'author', width: 130, ellipsis: true },
-  { key: 'tags', title: '内容 / 车型 / 账号类型', width: 220 },
+  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : '内容 / 车型 / 账号类型', width: 220 },
   { title: '点赞', dataIndex: 'digg', width: 80, sorter: (a, b) => a.digg - b.digg },
   { title: '评论', dataIndex: 'comment', width: 80, sorter: (a, b) => a.comment - b.comment },
   { title: '分享', dataIndex: 'share', width: 80 },
   { title: '收藏', dataIndex: 'collect', width: 80 },
   { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
   { title: '曝光', dataIndex: 'exposure', width: 110 },
-  { title: '表单线索', dataIndex: 'formLeads', width: 90, sorter: (a, b) => a.formLeads - b.formLeads },
-];
+  ...(isTesla.value
+    ? []
+    : [{ title: '表单线索', dataIndex: 'formLeads', width: 90, sorter: (a, b) => a.formLeads - b.formLeads }]),
+]);
 
 const violationColumns = [
   { title: '标题', dataIndex: 'title', ellipsis: true },
@@ -619,6 +624,7 @@ function realParams(extra = {}) {
 }
 
 function mapRealRow(n) {
+  const rawModel = n.model_tag && n.model_tag !== '未提及' ? n.model_tag : '';
   return {
     id: n.id,
     title: n.title,
@@ -626,9 +632,9 @@ function mapRealRow(n) {
     author: n.author_name || '-',
     accountType: n.account_type || 'KOS',
     type: n.category || '未分类',
-    model: n.model_tag || '未提及',
+    model: rawModel || (isTesla.value ? '特斯拉' : '未提及'),
     keyword: n.category || '',
-    cover: n.cover_url || `/images/kox-notes/note${(n.id % 5) + 1}.webp`,
+    cover: n.cover_url || '',
     noteUrl: n.note_url,
     publishTime: n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '-',
     digg: n.likes,
@@ -730,30 +736,49 @@ const exporting = ref(false);
 async function exportCsv() {
   exporting.value = true;
   try {
-    const head = ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
+    const head = isTesla.value
+      ? ['标题', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
+      : ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
       const raw = await fetchAllRealRows();
-      rows = raw.map((n) => [
-        n.title,
-        n.author_name,
-        n.category ?? '',
-        n.model_tag ?? '',
-        n.account_type ?? '',
-        n.likes,
-        n.comments,
-        n.shares,
-        n.collects,
-        n.views,
-        n.exposure,
-        n.form_leads,
-        n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
-      ]);
+      rows = raw.map((n) =>
+        isTesla.value
+          ? [
+              n.title,
+              n.author_name,
+              n.model_tag && n.model_tag !== '未提及' ? n.model_tag : '特斯拉',
+              n.account_type ?? '',
+              n.likes,
+              n.comments,
+              n.shares,
+              n.collects,
+              n.views,
+              n.exposure,
+              n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
+            ]
+          : [
+              n.title,
+              n.author_name,
+              n.category ?? '',
+              n.model_tag ?? '',
+              n.account_type ?? '',
+              n.likes,
+              n.comments,
+              n.shares,
+              n.collects,
+              n.views,
+              n.exposure,
+              n.form_leads,
+              n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
+            ],
+      );
     } else {
-      rows = filtered.value.map((n) => [
-        n.title, n.author, n.type, n.model, n.accountType,
-        n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.formLeads, n.publishTime,
-      ]);
+      rows = filtered.value.map((n) =>
+        isTesla.value
+          ? [n.title, n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
+          : [n.title, n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.formLeads, n.publishTime],
+      );
     }
     const csv = [head, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
@@ -1152,6 +1177,16 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   flex-shrink: 0;
   background: #f1f5f9;
+}
+
+.note-cover-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: linear-gradient(160deg, #eef2ff, #f8fafc);
 }
 
 .note-title-text {

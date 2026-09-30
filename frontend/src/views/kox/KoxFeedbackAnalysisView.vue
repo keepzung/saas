@@ -104,7 +104,9 @@
           <span class="bar"></span>
           <span class="title">评论明细</span>
           <div class="comment-toolbar">
-            <span class="comment-count">共 {{ filteredComments.length }} 条</span>
+            <span class="comment-count">
+              共 {{ serverStats?.total ?? filteredComments.length }} 条<template v-if="serverStats && serverStats.total > (serverStats.detail_total ?? 0)">（展示最近 {{ serverStats.detail_total }} 条）</template>
+            </span>
             <a-select
               v-model:value="sentimentFilter"
               size="small"
@@ -130,9 +132,10 @@
         >
           <div class="comment-left-bar" :style="{ background: sentimentColor[c.sentiment] }"></div>
           <div class="comment-main">
-            <div v-if="c.noteTitle" class="comment-note-row">
+            <div v-if="c.noteTitle || c.noteCover" class="comment-note-row">
               <img v-if="c.noteCover" :src="c.noteCover" class="note-thumb" loading="lazy" />
-              <span class="note-name" :title="c.noteTitle">笔记：{{ c.noteTitle }}</span>
+              <span class="note-name" :title="c.noteTitle">笔记：{{ c.noteTitle || '(未匹配到笔记)' }}</span>
+              <a v-if="c.noteUrl" class="note-link" @click.stop="openNoteUrl(c.noteUrl)">查看笔记 <span class="note-link-arrow">↗</span></a>
               <span v-if="c.kosAccount" class="note-kos">{{ c.kosAccount }}</span>
             </div>
             <div class="comment-body">
@@ -230,6 +233,12 @@ const laiguNote = ref('');
 const sentimentFilter = ref('全部');
 const replyFilter = ref('全部');
 const syncTime = ref(dayjs().format('MM-DD HH:mm'));
+// 服务端全量聚合（明细仅返回最近 500 条样本，统计卡必须用全量口径，否则 7/30 天数据一样）
+const serverStats = ref(null);
+
+function openNoteUrl(url) {
+  if (url) window.open(url, '_blank');
+}
 
 const sentimentOptions = [
   { value: '全部', label: '全部情感' },
@@ -287,12 +296,28 @@ function regenerate() {
   page.value = 1;
 }
 
+const mk = (icon, value, label, color, bg, bar) => ({ icon, value, label, color, bg, bar });
+
 const statCards = computed(() => {
+  // 来鼓真实通道：使用服务端全量聚合（total/replied/pending/reply_rate）
+  if (laiguReal.value && serverStats.value) {
+    const s = serverStats.value;
+    const total = s.total ?? 0;
+    const replied = s.replied ?? 0;
+    const replyRate = s.reply_rate ?? 0;
+    const negatives = (s.sentiment ?? []).find((x) => x.name === '负面')?.count ?? 0;
+    return [
+      mk(MessageOutlined, total, '评论总数', '#2563eb', '#eff6ff', 100),
+      mk(ClockCircleOutlined, s.pending ?? total - replied, '待回复', '#ea580c', '#fff7ed', ((s.pending ?? 0) / Math.max(total, 1)) * 100),
+      mk(CheckCircleOutlined, replied, '已回复', '#059669', '#ecfdf5', (replied / Math.max(total, 1)) * 100),
+      mk(SendOutlined, `${replyRate}%`, '回复率', '#5087ec', '#eef4ff', replyRate),
+      mk(FrownOutlined, negatives, '负面评论', '#dc2626', '#fef2f2', (negatives / Math.max(total, 1)) * 100),
+    ];
+  }
   const list = comments.value;
   const replied = list.filter((c) => c.replied).length;
   const leads = list.filter((c) => c.isLead).length;
   const negative = list.filter((c) => c.sentiment === '负面').length;
-  const mk = (icon, value, label, color, bg, bar) => ({ icon, value, label, color, bg, bar });
   return [
     mk(MessageOutlined, list.length, '评论总数', '#2563eb', '#eff6ff', 100),
     mk(ClockCircleOutlined, list.length - replied, '待回复', '#ea580c', '#fff7ed', ((list.length - replied) / Math.max(list.length, 1)) * 100),
@@ -304,6 +329,13 @@ const statCards = computed(() => {
 });
 
 const sentiment = computed(() => {
+  if (laiguReal.value && serverStats.value) {
+    const colorMap = { 正面: '#16a34a', 中性: '#94a3b8', 负面: '#dc2626' };
+    return ['正面', '中性', '负面'].map((name) => {
+      const hit = (serverStats.value.sentiment ?? []).find((x) => x.name === name);
+      return { name, count: hit?.count ?? 0, pct: hit?.pct ?? 0, color: colorMap[name] };
+    });
+  }
   const total = Math.max(comments.value.length, 1);
   return ['正面', '中性', '负面'].map((name) => {
     const count = comments.value.filter((c) => c.sentiment === name).length;
@@ -312,6 +344,13 @@ const sentiment = computed(() => {
 });
 
 const categories = computed(() => {
+  if (laiguReal.value && serverStats.value) {
+    const names = Object.keys(CAT_META);
+    return names.map((name) => {
+      const hit = (serverStats.value.categories ?? []).find((x) => x.name === name);
+      return { name, count: hit?.count ?? 0, pct: hit?.pct ?? 0, color: CAT_META[name].color };
+    });
+  }
   const total = Math.max(comments.value.length, 1);
   return Object.keys(CAT_META).map((name) => {
     const count = comments.value.filter((c) => c.category === name).length;
@@ -353,6 +392,16 @@ async function loadData() {
       laiguReal.value = true;
       laiguNote.value = res.scope_note ?? '';
       topics.value = res.topics ?? [];
+      serverStats.value = {
+        total: res.total ?? 0,
+        today: res.today ?? 0,
+        replied: res.replied ?? 0,
+        pending: res.pending ?? 0,
+        reply_rate: res.reply_rate ?? 0,
+        sentiment: res.sentiment ?? [],
+        categories: res.categories ?? [],
+        detail_total: res.detail_total ?? (res.comments ?? []).length,
+      };
       comments.value = (res.comments ?? []).map((c) => ({
         id: c.id,
         content: c.content,
@@ -367,6 +416,7 @@ async function loadData() {
         replied: c.replied,
         noteTitle: c.note_title ?? null,
         noteCover: c.note_cover ?? null,
+        noteUrl: c.note_url ?? null,
         kosAccount: c.kos_account ?? null,
         replies: [],
       }));
@@ -378,6 +428,7 @@ async function loadData() {
     /* 来鼓通道不可用，回退演示 */
   }
   laiguReal.value = false;
+  serverStats.value = null;
   laiguNote.value = '来鼓通道未接入（等待渠道凭证配置），当前为演示数据';
   topics.value = [];
   regenerate();
@@ -824,6 +875,22 @@ onMounted(() => {
   padding: 1px 8px;
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.note-link {
+  font-size: 12px;
+  color: #2563eb;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.note-link:hover {
+  text-decoration: underline;
+}
+
+.note-link-arrow {
+  font-size: 11px;
 }
 
 .comment-author {

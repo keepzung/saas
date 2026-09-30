@@ -217,6 +217,12 @@ export class KoxService {
     const brandId = query.brandId ? Number(query.brandId) : undefined;
     const accountTag = query.accountTag || '';
     const regionName = query.regionName || '';
+    const windowDays = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
+    );
+    // 特斯拉专业号快照档位：近1日/近7日/近30日
+    const proDateType = windowDays <= 1 ? 1 : windowDays <= 7 ? 2 : 3;
 
     const where: Prisma.KoxDailyStatWhereInput = {
       platform,
@@ -358,7 +364,7 @@ export class KoxService {
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
         where: brandId ? { brandId } : {},
-        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true },
+        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true, accountTag: true },
       }),
       this.prisma.koxNote.findMany({
         where: {
@@ -378,6 +384,80 @@ export class KoxService {
         },
       }),
     ]);
+
+    // 特斯拉：快捷 7/30 天窗口内容指标改用专业号真实窗口数据（员工矩阵汇总，支持大区/标签过滤）
+    // 守卫：快照窗口必须与查询窗口大致重合（快捷档），历史自定义区间不套用
+    let proContent: {
+      item_cnt: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_sum: number;
+      date_type: number;
+      stat_date: Date;
+      region_content: { region: string; item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }[];
+    } | null = null;
+    if (brandId === 6 && windowDays <= 31) {
+      const proOv = await this.prisma.proKosOverview.findFirst({
+        where: { brandId: 6, dateType: proDateType, statDate: { lte: end } },
+        orderBy: { statDate: 'desc' },
+      });
+      const dayMs = 86400000;
+      if (
+        proOv &&
+        proOv.startDate &&
+        proOv.endDate &&
+        proOv.startDate.getTime() <= start.getTime() + dayMs &&
+        proOv.endDate.getTime() >= end.getTime() - 2 * dayMs &&
+        proOv.endDate.getTime() <= end.getTime() + dayMs
+      ) {
+        const staffRowsPro = await this.prisma.proKosStaff.findMany({
+          where: { brandId: 6, statDate: proOv.statDate, dateType: proOv.dateType },
+          take: 1000,
+        });
+        const accByNick = new Map(gAccs.map((a) => [a.nickname, a]));
+        let staffUse = staffRowsPro;
+        if (accountTag || regionName) {
+          staffUse = staffRowsPro.filter((s) => {
+            const a = accByNick.get(s.nickName);
+            return (
+              !!a &&
+              (!accountTag || a.accountTag === accountTag) &&
+              (!regionName || a.regionName === regionName)
+            );
+          });
+        }
+        const sSum = (f: (s: (typeof staffUse)[number]) => number) =>
+          staffUse.reduce((acc, s) => acc + f(s), 0);
+        const regionAgg = new Map<
+          string,
+          { item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }
+        >();
+        for (const s of staffUse) {
+          const a = accByNick.get(s.nickName);
+          const r = a?.regionName ?? s.province ?? '未匹配';
+          const cur =
+            regionAgg.get(r) ??
+            { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
+          cur.item_cnt += s.createNoteNum + s.rtbNoteNum;
+          cur.exposure_sum += s.socImpCnt;
+          cur.view_sum += s.socClickCnt;
+          cur.interaction_sum += s.socEnageCnt;
+          cur.pm_leads += s.msgLeadsNum;
+          regionAgg.set(r, cur);
+        }
+        proContent = {
+          item_cnt: sSum((s) => s.createNoteNum + s.rtbNoteNum),
+          exposure_sum: sSum((s) => s.socImpCnt),
+          view_sum: sSum((s) => s.socClickCnt),
+          interaction_sum: sSum((s) => s.socEnageCnt),
+          date_type: proOv.dateType,
+          stat_date: proOv.statDate,
+          region_content: [...regionAgg.entries()]
+            .map(([region, v]) => ({ region, ...v }))
+            .sort((a, b) => b.item_cnt - a.item_cnt),
+        };
+      }
+    }
     const regionOfId = new Map<number, string>();
     const regionOfName = new Map<string, string>();
     for (const a of gAccs) {
@@ -421,9 +501,11 @@ export class KoxService {
       region_kos: [...kosByRegion.entries()]
         .map(([region, cnt]) => ({ region, kos_cnt: cnt }))
         .sort((a, b) => b.kos_cnt - a.kos_cnt),
-      region_content: [...contentByRegion.entries()]
-        .map(([region, v]) => ({ region, ...v }))
-        .sort((a, b) => b.item_cnt - a.item_cnt),
+      region_content: proContent
+        ? proContent.region_content
+        : [...contentByRegion.entries()]
+            .map(([region, v]) => ({ region, ...v }))
+            .sort((a, b) => b.item_cnt - a.item_cnt),
     };
 
     const ad = hasCampaign
@@ -452,14 +534,27 @@ export class KoxService {
             : 0,
         };
 
-    // 特斯拉 G2：线索口径统一使用专业号总数据（ProKosOverview 快照）
+    // 特斯拉 G2：线索口径统一使用专业号总数据（ProKosOverview 快照，按窗口档位取）
     const proLeads =
       brandId === 6
-        ? await this.prisma.proKosOverview.findFirst({
+        ? (await this.prisma.proKosOverview.findFirst({
+            where: { brandId: 6, dateType: proDateType, statDate: { lte: end } },
+            orderBy: { statDate: 'desc' },
+          })) ??
+          (await this.prisma.proKosOverview.findFirst({
             where: { brandId: 6, statDate: { lte: end } },
             orderBy: { statDate: 'desc' },
-          })
+          }))
         : null;
+
+    // 特斯拉趋势图补充数据源：专业号「近1日」快照（dateType 1，每日同步积累）
+    const proDailies =
+      brandId === 6
+        ? await this.prisma.proKosOverview.findMany({
+            where: { brandId: 6, dateType: 1, statDate: { gte: start, lte: end } },
+            orderBy: { statDate: 'asc' },
+          })
+        : [];
 
     return {
       global: globalBlock,
@@ -505,6 +600,7 @@ export class KoxService {
       },
       ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
       // 特斯拉版汇总条（账号标签/大区筛选联动）：KOS数/门店数/粉丝覆盖/内容四指标/账均发布
+      // 特斯拉快捷 7/30 天窗口：内容四指标来自专业号真实窗口数据（员工矩阵汇总）
       summary: await (async () => {
         const [fansAgg, storeGroups, accountTotal] = await Promise.all([
           this.prisma.kosAccount.aggregate({ where: accountWhere, _sum: { fans: true } }),
@@ -514,18 +610,21 @@ export class KoxService {
           }),
           this.prisma.kosAccount.count({ where: accountWhere }),
         ]);
-        const itemCntN = noteRows.length;
+        const itemCntN = proContent ? proContent.item_cnt : noteRows.length;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: noteExposureSum,
-          view_sum: noteViewSum,
-          interaction_sum: noteInteractionSum,
+          exposure_sum: proContent ? proContent.exposure_sum : noteExposureSum,
+          view_sum: proContent ? proContent.view_sum : noteViewSum,
+          interaction_sum: proContent ? proContent.interaction_sum : noteInteractionSum,
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
+      content_source: proContent
+        ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${proContent.stat_date.toISOString().slice(0, 10)})`
+        : 'spark_notes',
       // 特斯拉版线索转化漏斗：投放（partner 通道，品牌级）+ 自然（未投流笔记，随筛选）
       lead_funnel: (() => {
         // G2：专业号线索总数据口径优先（进线/开口/留资为专业号平台全量）
@@ -533,6 +632,7 @@ export class KoxService {
           const inquiries = proLeads.messageOpenCnt;
           const openings = proLeads.messageDrivingOpenCnt;
           const leads = proLeads.msgLeadsNum;
+          const winLabel = proLeads.dateType === 1 ? '近1日' : proLeads.dateType === 2 ? '近7日' : '近30日';
           return {
             pm_inquiries: inquiries,
             pm_openings: openings,
@@ -542,7 +642,7 @@ export class KoxService {
             form_leads: proLeads.leadsSuccess,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: '专业号线索总数据口径（含自然与投放）',
+            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放）`,
             source: 'pro_overview',
           };
         }
@@ -711,6 +811,26 @@ export class KoxService {
         for (const [key, camp] of campByDate) {
           if (!byDate.has(key)) {
             byDate.set(key, { ...emptyRow(), ...campPart(camp) });
+          }
+        }
+        // 特斯拉：专业号「近1日」快照逐日积累，填充无笔记日期的内容数/阅读量（真实日数据）
+        if (proDailies.length) {
+          for (const d of proDailies) {
+            const key = d.statDate.toISOString().slice(0, 10);
+            const proItems = d.createNoteNum + d.rtbNoteNum;
+            const proViews = d.socReadCnt + d.adsReadCnt;
+            const existing = byDate.get(key);
+            if (!existing) {
+              byDate.set(key, {
+                ...emptyRow(),
+                ...campPart(campByDate.get(key)),
+                item_cnt: proItems,
+                view_sum: proViews,
+              });
+            } else if (!existing.item_cnt) {
+              existing.item_cnt = proItems;
+              if (!existing.view_sum) existing.view_sum = proViews;
+            }
           }
         }
         return [...byDate.entries()]
@@ -1754,26 +1874,31 @@ export class KoxService {
       },
     });
 
-    const notes = await this.prisma.koxNote.findMany({
-      where: {
-        publishTime: { gte: start, lte: end },
-        ...(brandId ? { brandId } : {}),
-      },
-      select: {
-        accountId: true,
-        authorName: true,
-        exposure: true,
-        views: true,
-        likes: true,
-        collects: true,
-        comments: true,
-        shares: true,
-        followCount: true,
-        pmInquiries: true,
-        pmOpenings: true,
-        pmLeads: true,
-      },
-    });
+    // 特斯拉近7天：笔记快照无新数据（乐允导出截至 09-24），改用专业号员工矩阵真实窗口数据
+    let metric_source = 'spark_notes';
+    const useProStaff = brandId === 6 && days <= 7;
+    const notes = useProStaff
+      ? []
+      : await this.prisma.koxNote.findMany({
+          where: {
+            publishTime: { gte: start, lte: end },
+            ...(brandId ? { brandId } : {}),
+          },
+          select: {
+            accountId: true,
+            authorName: true,
+            exposure: true,
+            views: true,
+            likes: true,
+            collects: true,
+            comments: true,
+            shares: true,
+            followCount: true,
+            pmInquiries: true,
+            pmOpenings: true,
+            pmLeads: true,
+          },
+        });
 
     interface AccAgg {
       item_cnt: number;
@@ -1814,6 +1939,34 @@ export class KoxService {
       }
       fn(cur);
     };
+    if (useProStaff) {
+      const proDateType = days <= 1 ? 1 : 2;
+      const latestPro = await this.prisma.proKosStaff.findFirst({
+        where: { brandId: 6, dateType: proDateType },
+        orderBy: { statDate: 'desc' },
+        select: { statDate: true },
+      });
+      if (latestPro) {
+        const staffRowsPro = await this.prisma.proKosStaff.findMany({
+          where: { brandId: 6, statDate: latestPro.statDate, dateType: proDateType },
+          take: 1000,
+        });
+        for (const s of staffRowsPro) {
+          const accId = s.nickName ? nameToId.get(s.nickName) : null;
+          if (accId == null) continue;
+          bump(accId, (a) => {
+            a.item_cnt += s.createNoteNum + s.rtbNoteNum;
+            a.exposure += s.socImpCnt;
+            a.view += s.socClickCnt;
+            a.interaction += s.socEnageCnt;
+            a.pm_inquiries += s.messageOpenCnt;
+            a.pm_openings += s.messageDrivingOpenCnt;
+            a.pm_leads += s.msgLeadsNum;
+          });
+        }
+        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${latestPro.statDate.toISOString().slice(0, 10)})`;
+      }
+    }
     for (const n of notes) {
       let accId: number | null = null;
       if (n.accountId != null && idSet.has(n.accountId)) accId = n.accountId;
@@ -1902,6 +2055,7 @@ export class KoxService {
       end,
       days,
       metric,
+      metric_source,
       total: rows.length,
       page,
       page_size: pageSize,
@@ -1916,7 +2070,9 @@ export class KoxService {
           accounts.map((a) => a.accountTag).filter((t): t is string => !!t),
         ),
       ],
-      metric_note: '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
+      metric_note: metric_source.startsWith('pro_staff')
+        ? '近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算'
+        : '留资=笔记私信留资（含投流）；分层=周度留资 S级≥50/头部≥25/高潜≥12.5/腰部≥6.25/尾部<6，长周期按天数折算周度',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
   }
@@ -2109,14 +2265,17 @@ export class KoxService {
     const pct = (v: number, target: number) =>
       target > 0 ? Math.min(100, Math.round((v / target) * 100)) : 0;
 
+    // 档位选择：≤7 天用近7日(dateType 2)，>7 天用近30日(dateType 3) —— 发布数/进线数即所选窗口真实值
+    const proDateType = days <= 7 ? 2 : 3;
     const latest = await this.prisma.proKosStaff.findFirst({
-      where: { brandId },
+      where: { brandId, dateType: proDateType },
       orderBy: { statDate: 'desc' },
       select: { statDate: true },
     });
     if (!latest) {
       return {
         days,
+        date_type: proDateType,
         stat_date: null,
         rows: [],
         tier_stat: KOS_TIERS.map((t) => ({
@@ -2128,7 +2287,7 @@ export class KoxService {
       };
     }
     const staffRows = await this.prisma.proKosStaff.findMany({
-      where: { brandId, statDate: latest.statDate },
+      where: { brandId, statDate: latest.statDate, dateType: proDateType },
       take: 1000,
     });
     const accounts = await this.prisma.kosAccount.findMany({
@@ -2199,6 +2358,7 @@ export class KoxService {
     }));
     return {
       days,
+      date_type: proDateType,
       stat_date: latest.statDate,
       weekly_notes_target: weeklyNotesTarget,
       weekly_enter_target: weeklyEnterTarget,

@@ -89,7 +89,7 @@ export class ProService {
     return { ok: true, brand_id: brandId };
   }
 
-  /** 专业号 KOS 数据同步（Playwright 浏览器上下文 fetch，绕 shield） */
+  /** 专业号 KOS 数据同步（Playwright 浏览器上下文 fetch，绕 shield）：近1日/近7日/近30日 三档窗口 */
   async sync(brandId: number): Promise<Record<string, unknown>> {
     if (this.syncing.has(brandId)) {
       throw new Error('该品牌的专业号同步正在进行中');
@@ -100,86 +100,98 @@ export class ProService {
     }
     this.syncing.add(brandId);
     try {
-      const { overview, staff } = await this.fetchProData(brandId, cfg.storageState);
+      const { windows } = await this.fetchProData(brandId, cfg.storageState);
       const statDate = this.yesterday();
-
-      await this.prisma.proKosOverview.upsert({
-        where: { brandId_statDate: { brandId, statDate } },
-        create: {
-          brandId,
-          statDate,
-          dateType: 2,
-          startDate: this.daysAgo(7),
-          endDate: statDate,
-          kosAccountNum: num(overview?.kosAccountNum),
-          rtbAccountNum: num(overview?.rtbAccountNum),
-          createNoteNum: num(overview?.createNoteNum),
-          rtbNoteNum: num(overview?.rtbNoteNum),
-          socReadCnt: num(overview?.socReadCnt),
-          adsReadCnt: num(overview?.adsReadCnt),
-          messageOpenCnt: num(overview?.messageOpenCnt),
-          messageDrivingOpenCnt: num(overview?.messageDrivingOpenCnt),
-          msgLeadsNum: num(overview?.msgLeadsNum),
-          leadsSuccess: num(overview?.leadsSuccess),
-          rtbIncomeAmt: num(overview?.rtbIncomeAmt),
-        },
-        update: {
-          dateType: 2,
-          startDate: this.daysAgo(7),
-          endDate: statDate,
-          kosAccountNum: num(overview?.kosAccountNum),
-          rtbAccountNum: num(overview?.rtbAccountNum),
-          createNoteNum: num(overview?.createNoteNum),
-          rtbNoteNum: num(overview?.rtbNoteNum),
-          socReadCnt: num(overview?.socReadCnt),
-          adsReadCnt: num(overview?.adsReadCnt),
-          messageOpenCnt: num(overview?.messageOpenCnt),
-          messageDrivingOpenCnt: num(overview?.messageDrivingOpenCnt),
-          msgLeadsNum: num(overview?.msgLeadsNum),
-          leadsSuccess: num(overview?.leadsSuccess),
-          rtbIncomeAmt: num(overview?.rtbIncomeAmt),
-        },
-      });
 
       let staffUpserted = 0;
       let avatarsUpdated = 0;
-      for (const s of staff) {
-        if (!s?.userId) continue;
-        const area = s.area ?? {};
-        const data = {
-          nickName: s.nickName ?? '',
-          realName: s.realName ?? null,
-          avatar: s.headUrl ?? null,
-          province: area.province ?? null,
-          city: area.city ?? null,
-          createNoteNum: num(s.createNoteNum),
-          rtbNoteNum: num(s.rtbNoteNum),
-          socImpCnt: num(s.socImpCnt),
-          socClickCnt: num(s.socClickCnt),
-          socEnageCnt: num(s.socEnageCnt),
-          messageOpenCnt: num(s.messageOpenCnt),
-          messageDrivingOpenCnt: num(s.messageDrivingOpenCnt),
-          msgLeadsNum: num(s.msgLeadsNum),
-          leadsSuccess: num(s.leadsSuccess),
-          rtbIncomeAmt: num(s.rtbIncomeAmt),
-          interestsStatus: s.interestsStatus ?? null,
-          bindTime: s.bindTime ? new Date(s.bindTime) : null,
-        };
-        await this.prisma.proKosStaff.upsert({
-          where: { brandId_userId_statDate: { brandId, userId: s.userId, statDate } },
-          create: { brandId, userId: s.userId, statDate, ...data },
-          update: data,
+      const syncedTypes: number[] = [];
+      for (const dateType of [1, 2, 3]) {
+        const fetched = windows[dateType];
+        if (!fetched) continue;
+        const { overview, staff } = fetched;
+        const win = this.windowFor(dateType);
+        syncedTypes.push(dateType);
+
+        await this.prisma.proKosOverview.upsert({
+          where: {
+            brandId_statDate_dateType: { brandId, statDate, dateType },
+          },
+          create: {
+            brandId,
+            statDate,
+            dateType,
+            startDate: win.start,
+            endDate: win.end,
+            kosAccountNum: num(overview?.kosAccountNum),
+            rtbAccountNum: num(overview?.rtbAccountNum),
+            createNoteNum: num(overview?.createNoteNum),
+            rtbNoteNum: num(overview?.rtbNoteNum),
+            socReadCnt: num(overview?.socReadCnt),
+            adsReadCnt: num(overview?.adsReadCnt),
+            messageOpenCnt: num(overview?.messageOpenCnt),
+            messageDrivingOpenCnt: num(overview?.messageDrivingOpenCnt),
+            msgLeadsNum: num(overview?.msgLeadsNum),
+            leadsSuccess: num(overview?.leadsSuccess),
+            rtbIncomeAmt: num(overview?.rtbIncomeAmt),
+          },
+          update: {
+            startDate: win.start,
+            endDate: win.end,
+            kosAccountNum: num(overview?.kosAccountNum),
+            rtbAccountNum: num(overview?.rtbAccountNum),
+            createNoteNum: num(overview?.createNoteNum),
+            rtbNoteNum: num(overview?.rtbNoteNum),
+            socReadCnt: num(overview?.socReadCnt),
+            adsReadCnt: num(overview?.adsReadCnt),
+            messageOpenCnt: num(overview?.messageOpenCnt),
+            messageDrivingOpenCnt: num(overview?.messageDrivingOpenCnt),
+            msgLeadsNum: num(overview?.msgLeadsNum),
+            leadsSuccess: num(overview?.leadsSuccess),
+            rtbIncomeAmt: num(overview?.rtbIncomeAmt),
+          },
         });
-        staffUpserted++;
-        // 同步头像到 KosAccount（按昵称匹配）
-        if (data.avatar && data.nickName) {
-          const acc = await this.prisma.kosAccount.findFirst({
-            where: { brandId, nickname: data.nickName },
-            select: { id: true, avatar: true },
+
+        for (const s of staff) {
+          if (!s?.userId) continue;
+          const area = s.area ?? {};
+          const data = {
+            nickName: s.nickName ?? '',
+            realName: s.realName ?? null,
+            avatar: s.headUrl ?? null,
+            province: area.province ?? null,
+            city: area.city ?? null,
+            createNoteNum: num(s.createNoteNum),
+            rtbNoteNum: num(s.rtbNoteNum),
+            socImpCnt: num(s.socImpCnt),
+            socClickCnt: num(s.socClickCnt),
+            socEnageCnt: num(s.socEnageCnt),
+            messageOpenCnt: num(s.messageOpenCnt),
+            messageDrivingOpenCnt: num(s.messageDrivingOpenCnt),
+            msgLeadsNum: num(s.msgLeadsNum),
+            leadsSuccess: num(s.leadsSuccess),
+            rtbIncomeAmt: num(s.rtbIncomeAmt),
+            interestsStatus: s.interestsStatus ?? null,
+            bindTime: s.bindTime ? new Date(s.bindTime) : null,
+          };
+          await this.prisma.proKosStaff.upsert({
+            where: {
+              brandId_userId_statDate_dateType: { brandId, userId: s.userId, statDate, dateType },
+            },
+            create: { brandId, userId: s.userId, statDate, dateType, ...data },
+            update: data,
           });
-          if (acc && acc.avatar !== data.avatar) {
-            await this.prisma.kosAccount.update({ where: { id: acc.id }, data: { avatar: data.avatar } });
-            avatarsUpdated++;
+          staffUpserted++;
+          // 同步头像到 KosAccount（按昵称匹配，仅 7 日档执行一次即可）
+          if (dateType === 2 && data.avatar && data.nickName) {
+            const acc = await this.prisma.kosAccount.findFirst({
+              where: { brandId, nickname: data.nickName },
+              select: { id: true, avatar: true },
+            });
+            if (acc && acc.avatar !== data.avatar) {
+              await this.prisma.kosAccount.update({ where: { id: acc.id }, data: { avatar: data.avatar } });
+              avatarsUpdated++;
+            }
           }
         }
       }
@@ -189,12 +201,13 @@ export class ProService {
         data: { lastSyncAt: new Date() },
       });
       this.logger.log(
-        `brand ${brandId} 专业号同步完成：overview + staff ${staffUpserted}（头像更新 ${avatarsUpdated}）`,
+        `brand ${brandId} 专业号同步完成：dateType [${syncedTypes.join('/')}]，staff ${staffUpserted}（头像更新 ${avatarsUpdated}）`,
       );
       return {
         ok: true,
         brand_id: brandId,
         stat_date: statDate,
+        synced_date_types: syncedTypes,
         staff_upserted: staffUpserted,
         avatars_updated: avatarsUpdated,
       };
@@ -203,11 +216,21 @@ export class ProService {
     }
   }
 
-  /** 浏览器上下文 fetch（shield 反爬使纯 fetch 不可用） */
+  /** dateType 1/2/3 → 统计窗口（T+1：终点=昨天；近1日/近7日/近30日） */
+  private windowFor(dateType: number): { start: Date; end: Date } {
+    const end = this.yesterday();
+    if (dateType === 1) return { start: end, end };
+    const days = dateType === 2 ? 7 : 30;
+    return { start: this.daysAgo(days), end };
+  }
+
+  /** 浏览器上下文 fetch（shield 反爬使纯 fetch 不可用）：逐窗口拉 overview + staff 全量 */
   private async fetchProData(
     brandId: number,
     storageStateJson: string,
-  ): Promise<{ overview: ProOverview | null; staff: ProStaff[] }> {
+  ): Promise<{
+    windows: Record<number, { overview: ProOverview | null; staff: ProStaff[] }>;
+  }> {
     const { chromium } = require('playwright-core') as typeof import('playwright-core');
     const exe = this.resolveChromium();
     const browser = await chromium.launch({
@@ -239,35 +262,10 @@ export class ProService {
       if (!loaded) throw new Error('专业号数据页加载失败（网络）');
       await page.waitForTimeout(5000);
 
-      const end = this.yesterday();
-      const start = this.daysAgo(7);
-      const f = `${fmt(start)} 00:00:00`;
-      const t = `${fmt(end)} 23:59:59`;
-
-      const overview = await page
-        .evaluate(
-          async ({ p, body }) => {
-            const res = await fetch(p, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify(body),
-            });
-            return res.json();
-          },
-          {
-            p: '/api/edith/ads/pro/kos/data/overview',
-            body: { dateType: 2, startDate: fmt(start), endDate: fmt(end) },
-          },
-        )
-        .catch(() => null);
-      if ((overview as { code?: number })?.code !== 0) {
-        throw new Error(`overview 拉取失败: ${JSON.stringify(overview).slice(0, 200)}`);
-      }
-
-      const staff: ProStaff[] = [];
-      for (let pageNum = 1; pageNum <= 10; pageNum++) {
-        const j = (await page
+      const windows: Record<number, { overview: ProOverview | null; staff: ProStaff[] }> = {};
+      for (const dateType of [1, 2, 3]) {
+        const win = this.windowFor(dateType);
+        const overview = (await page
           .evaluate(
             async ({ p, body }) => {
               const res = await fetch(p, {
@@ -279,30 +277,57 @@ export class ProService {
               return res.json();
             },
             {
-              p: '/api/edith/ads/pro/kos/data/staff/list',
-              body: {
-                kosUserId: '',
-                area: { country: '', province: '', city: '' },
-                staffLabel: '',
-                pageNum,
-                pageSize: 100,
-                dateType: 2,
-                interestsStatus: 2,
-                startDate: fmt(start),
-                endDate: fmt(end),
-                orderClauses: [],
-              },
+              p: '/api/edith/ads/pro/kos/data/overview',
+              body: { dateType, startDate: fmt(win.start), endDate: fmt(win.end) },
             },
           )
-          .catch(() => null)) as { code?: number; data?: { dtos?: ProStaff[]; total?: number } } | null;
-        const rows = j?.data?.dtos ?? [];
-        staff.push(...rows);
-        const total = j?.data?.total ?? 0;
-        if (staff.length >= total || rows.length === 0) break;
-      }
+          .catch(() => null)) as { code?: number; data?: ProOverview } | null;
+        if ((overview as { code?: number })?.code !== 0) {
+          this.logger.warn(
+            `brand ${brandId} pro overview dateType=${dateType} 拉取失败: ${JSON.stringify(overview).slice(0, 160)}`,
+          );
+          continue;
+        }
 
-      this.logger.log(`brand ${brandId} 专业号拉取：overview ok，staff ${staff.length}`);
-      return { overview: (overview as { data?: ProOverview })?.data ?? null, staff };
+        const staff: ProStaff[] = [];
+        for (let pageNum = 1; pageNum <= 10; pageNum++) {
+          const j = (await page
+            .evaluate(
+              async ({ p, body }) => {
+                const res = await fetch(p, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify(body),
+                });
+                return res.json();
+              },
+              {
+                p: '/api/edith/ads/pro/kos/data/staff/list',
+                body: {
+                  kosUserId: '',
+                  area: { country: '', province: '', city: '' },
+                  staffLabel: '',
+                  pageNum,
+                  pageSize: 100,
+                  dateType,
+                  interestsStatus: 2,
+                  startDate: fmt(win.start),
+                  endDate: fmt(win.end),
+                  orderClauses: [],
+                },
+              },
+            )
+            .catch(() => null)) as { code?: number; data?: { dtos?: ProStaff[]; total?: number } } | null;
+          const rows = j?.data?.dtos ?? [];
+          staff.push(...rows);
+          const total = j?.data?.total ?? 0;
+          if (staff.length >= total || rows.length === 0) break;
+        }
+        windows[dateType] = { overview: overview?.data ?? null, staff };
+        this.logger.log(`brand ${brandId} 专业号拉取 dateType=${dateType}：staff ${staff.length}`);
+      }
+      return { windows };
     } finally {
       await browser.close();
     }
