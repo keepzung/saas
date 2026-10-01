@@ -11,7 +11,6 @@
 //   node sync-ranf.cjs --full         （全量回补 2025-01-02 起）
 //   node sync-ranf.cjs --start 2026-09-25 --end 2026-10-01 [--dry-run]
 //   HEADLESS=0 ... （登录人工辅助）
-const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
@@ -19,10 +18,39 @@ const { createRequire } = require('module');
 const ROOT = path.resolve(__dirname, '../..');
 const backendRequire = createRequire(path.join(ROOT, 'backend', 'noop.js'));
 const { PrismaClient } = backendRequire('@prisma/client');
+// 浏览器：本地用 playwright（完整包）；生产用 playwright-core + 已装 chromium 探测
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  const pc = backendRequire('playwright-core');
+  const findChromium = () => {
+    const bases = [
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
+      '/root/.cache/ms-playwright',
+      '/home/deploy/.cache/ms-playwright',
+      path.join(process.env.HOME ?? '', '.cache/ms-playwright'),
+    ].filter(Boolean);
+    for (const base of bases) {
+      if (!fs.existsSync(base)) continue;
+      const dirs = fs.readdirSync(base).filter((d) => d.startsWith('chromium-')).sort().reverse();
+      for (const d of dirs) {
+        for (const sub of ['chrome-linux', 'chrome-win64', 'chrome-win']) {
+          const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
+          if (fs.existsSync(exe)) return exe;
+        }
+      }
+    }
+    return null;
+  };
+  const exe = findChromium();
+  chromium = { launch: (opts) => pc.chromium.launch({ ...opts, executablePath: exe ?? undefined }) };
+}
 const BRAND_ID = 6;
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const OUT = path.join(__dirname, 'state', 'ranf');
+fs.mkdirSync(OUT, { recursive: true });
 const STATE = path.join(OUT, 'state.json');
 const USER = process.env.RANF_USER || 'member';
 const PASS = process.env.RANF_PASS || 'bp1234n7dj86tp76';
