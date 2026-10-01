@@ -744,7 +744,38 @@ export class KoxService {
             source: 'weekly_snapshot',
           };
         }
-        // G2：专业号线索总数据口径优先（进线/开口/留资为专业号平台全量）
+        // G2：线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信，按所选区间真实聚合（随区间变化）
+        let funnelCampaign = { enter: 0, open: 0, leads: 0 };
+        const campNickSet = filteredAccounts ? new Set(filteredAccounts.map((a) => a.nickname)) : null;
+        for (const r of campaignRows) {
+          if (campNickSet && !(r.brandUserName && campNickSet.has(r.brandUserName))) continue;
+          funnelCampaign.enter += r.messageConsult;
+          funnelCampaign.open += r.msgChatUserCnt;
+          funnelCampaign.leads += r.msgLeadsNum;
+        }
+        let organic = { inquiries: 0, openings: 0, leads: 0 };
+        for (const n of noteRows) {
+          if (n.isRtbAdver === true) continue;
+          organic.inquiries += n.pmInquiries;
+          organic.openings += n.pmOpenings;
+          organic.leads += n.pmLeads;
+        }
+        if (campaignRows.length > 0 || organic.inquiries > 0 || organic.leads > 0) {
+          const inquiries = funnelCampaign.enter + organic.inquiries;
+          const openings = funnelCampaign.open + organic.openings;
+          const leads = funnelCampaign.leads + organic.leads;
+          return {
+            pm_inquiries: inquiries,
+            pm_openings: openings,
+            pm_leads: leads,
+            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+            lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
+            campaign: funnelCampaign,
+            organic,
+            scope_note: `线索=投放逐日聚合（乐允报表 2026-01-07 起 + partner T+1）+ 自然笔记私信，随区间与大区/标签筛选变化`,
+          };
+        }
+        // 兜底：无逐日投放数据时用专业号三档快照（不随自定义区间变化）
         if (proLeads) {
           let inquiries = proLeads.messageOpenCnt;
           let openings = proLeads.messageDrivingOpenCnt;
@@ -781,36 +812,15 @@ export class KoxService {
             source: 'pro_overview',
           };
         }
-        let organic = { inquiries: 0, openings: 0, leads: 0 };
-        for (const n of noteRows) {
-          if (n.isRtbAdver === true) continue;
-          organic.inquiries += n.pmInquiries;
-          organic.openings += n.pmOpenings;
-          organic.leads += n.pmLeads;
-        }
-        const camp = campaignRows.reduce(
-          (acc, r) => ({
-            enter: acc.enter + r.messageConsult,
-            open: acc.open + r.msgChatUserCnt,
-            leads: acc.leads + r.msgLeadsNum,
-          }),
-          { enter: 0, open: 0, leads: 0 },
-        );
-        const inquiries = camp.enter + organic.inquiries;
-        const openings = camp.open + organic.openings;
-        const leads = camp.leads + organic.leads;
         return {
-          pm_inquiries: inquiries,
-          pm_openings: openings,
-          pm_leads: leads,
-          open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
-          lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
-          campaign: camp,
-          organic,
-          scope_note:
-            accountTag || regionName
-              ? '筛选条件下投放部分为品牌级全量，未按筛选拆分'
-              : '投放+自然口径；投放=partner通道子账户合计，自然=未投流笔记私信',
+          pm_inquiries: 0,
+          pm_openings: 0,
+          pm_leads: 0,
+          open_rate: 0,
+          lead_rate: 0,
+          campaign: { enter: 0, open: 0, leads: 0 },
+          organic: { inquiries: 0, openings: 0, leads: 0 },
+          scope_note: '所选区间无线索数据',
         };
       })(),
       trend: (() => {
@@ -2523,89 +2533,146 @@ export class KoxService {
     const pct = (v: number, target: number) =>
       target > 0 ? Math.min(100, Math.round((v / target) * 100)) : 0;
 
-    // 档位选择：≤7 天用近7日(dateType 2)，>7 天用近30日(dateType 3) —— 发布数/进线数即所选窗口真实值
-    const proDateType = days <= 7 ? 2 : 3;
-    const latest = await this.prisma.proKosStaff.findFirst({
-      where: { brandId, dateType: proDateType },
-      orderBy: { statDate: 'desc' },
-      select: { statDate: true },
-    });
-    if (!latest) {
-      return {
-        days,
-        date_type: proDateType,
-        stat_date: null,
-        rows: [],
-        tier_stat: KOS_TIERS.map((t) => ({
-          key: t.key,
-          label: t.label,
-          color: t.color,
-          count: 0,
-        })),
-      };
-    }
-    const staffRows = await this.prisma.proKosStaff.findMany({
-      where: { brandId, statDate: latest.statDate, dateType: proDateType },
-      take: 1000,
-    });
+    // 口径（2026-10 起）：整行指标 = 所选窗口内发布笔记的真实聚合（KoxNote）+ 乐允投放报表逐日三数覆盖
+    // （不再使用专业号三档快照——快照不随自定义区间变化；分层仍按周度留资折算）
+    const accountWhere: Prisma.KosAccountWhereInput = {
+      ...(brandId ? { brandId } : {}),
+      ...(query.tag ? { accountTag: query.tag } : {}),
+      ...(query.regionName ? { regionName: query.regionName } : {}),
+      ...(query.keyword
+        ? { nickname: { contains: query.keyword, mode: 'insensitive' } }
+        : {}),
+    };
     const accounts = await this.prisma.kosAccount.findMany({
-      where: { brandId },
+      where: accountWhere,
       select: {
         id: true,
         nickname: true,
+        avatar: true,
         storeName: true,
         regionName: true,
         accountTag: true,
       },
     });
-    const accByNickname = new Map(accounts.map((a) => [a.nickname, a]));
+    const nameToAcc = new Map(accounts.map((a) => [a.nickname, a]));
+    const idSet = new Set(accounts.map((a) => a.id));
 
-    let rows = staffRows.map((s) => {
-      const acc = accByNickname.get(s.nickName);
-      const contentPct = pct(s.createNoteNum, weeklyNotesTarget);
-      const enterPct = pct(s.messageOpenCnt, weeklyEnterTarget);
-      const leadsPct = pct(s.msgLeadsNum, weeklyEnterTarget);
-      const tier = classifyTier(s.msgLeadsNum, days);
-      const ctr = s.socImpCnt ? r2((s.socClickCnt / s.socImpCnt) * 100) : 0;
+    interface ProAgg {
+      item_cnt: number;
+      exposure_sum: number;
+      click_sum: number;
+      interaction_sum: number;
+      follow_sum: number;
+      pm_inquiries: number;
+      pm_openings: number;
+      pm_leads: number;
+      fee: number;
+    }
+    const blank = (): ProAgg => ({
+      item_cnt: 0, exposure_sum: 0, click_sum: 0, interaction_sum: 0,
+      follow_sum: 0, pm_inquiries: 0, pm_openings: 0, pm_leads: 0, fee: 0,
+    });
+    const agg = new Map<number, ProAgg>();
+    const bump = (accId: number, fn: (a: ProAgg) => void) => {
+      let cur = agg.get(accId);
+      if (!cur) { cur = blank(); agg.set(accId, cur); }
+      fn(cur);
+    };
+
+    // 窗口内发布笔记的真实聚合（发布数/曝光/阅读/互动/涨粉 + 笔记私信三数）
+    const noteRowsPro = await this.prisma.koxNote.findMany({
+      where: {
+        publishTime: { gte: start, lte: end },
+        ...(brandId ? { brandId } : {}),
+      },
+      select: {
+        accountId: true, authorName: true, views: true, exposure: true,
+        likes: true, comments: true, shares: true, collects: true, followCount: true,
+        pmInquiries: true, pmOpenings: true, pmLeads: true,
+      },
+    });
+    for (const n of noteRowsPro) {
+      const accId =
+        n.accountId != null && idSet.has(n.accountId)
+          ? n.accountId
+          : n.authorName
+            ? nameToAcc.get(n.authorName)?.id ?? null
+            : null;
+      if (accId == null) continue;
+      bump(accId, (a) => {
+        a.item_cnt += 1;
+        a.exposure_sum += n.exposure;
+        a.click_sum += n.views;
+        a.interaction_sum += n.likes + n.comments + n.shares + n.collects;
+        a.follow_sum += n.followCount;
+        a.pm_inquiries += n.pmInquiries;
+        a.pm_openings += n.pmOpenings;
+        a.pm_leads += n.pmLeads;
+      });
+    }
+    // 乐允投放报表逐日三数覆盖（真实区间值；同账号同天体系更准）
+    const campRowsPro = await this.prisma.koxCampaignDailyStat.findMany({
+      where: {
+        brandId,
+        accountKind: 'kos_author',
+        statDate: { gte: start, lte: end },
+      },
+      select: { brandUserName: true, messageConsult: true, msgChatUserCnt: true, msgLeadsNum: true, fee: true },
+    });
+    const campAggPro = new Map<number, { inq: number; open: number; leads: number; fee: number }>();
+    for (const r of campRowsPro) {
+      const acc = r.brandUserName ? nameToAcc.get(r.brandUserName) : null;
+      if (!acc) continue;
+      const cur = campAggPro.get(acc.id) ?? { inq: 0, open: 0, leads: 0, fee: 0 };
+      cur.inq += r.messageConsult;
+      cur.open += r.msgChatUserCnt;
+      cur.leads += r.msgLeadsNum;
+      cur.fee += Number(r.fee);
+      campAggPro.set(acc.id, cur);
+    }
+    for (const [accId, v] of campAggPro) {
+      bump(accId, (a) => {
+        a.pm_inquiries = v.inq;
+        a.pm_openings = v.open;
+        a.pm_leads = v.leads;
+        a.fee = Math.round(v.fee * 100) / 100;
+      });
+    }
+
+    let rows = accounts.map((a) => {
+      const g = agg.get(a.id) ?? blank();
+      const contentPct = pct(g.item_cnt, weeklyNotesTarget);
+      const enterPct = pct(g.pm_inquiries, weeklyEnterTarget);
+      const leadsPct = pct(g.pm_leads, weeklyEnterTarget);
+      const tier = classifyTier(g.pm_leads, days);
+      const ctr = g.exposure_sum ? r2((g.click_sum / g.exposure_sum) * 100) : 0;
       return {
-        user_id: s.userId,
-        nickname: s.nickName,
-        avatar: s.avatar,
-        real_name: s.realName,
-        store_name: acc?.storeName ?? '未关联门店',
-        region: acc?.regionName ?? s.province ?? '-',
-        account_tag: acc?.accountTag ?? null,
+        user_id: String(a.id),
+        nickname: a.nickname,
+        avatar: a.avatar,
+        real_name: null,
+        store_name: a.storeName ?? '未关联门店',
+        region: a.regionName ?? '-',
+        account_tag: a.accountTag ?? null,
         tier_key: tier.key,
         tier_label: tier.label,
         tier_color: tier.color,
-        item_cnt: s.createNoteNum,
+        item_cnt: g.item_cnt,
         content_pct: contentPct,
-        exposure_sum: s.socImpCnt,
-        click_sum: s.socClickCnt,
+        exposure_sum: g.exposure_sum,
+        click_sum: g.click_sum,
         ctr,
-        interaction_sum: s.socEnageCnt,
-        pm_leads: s.msgLeadsNum,
-        pm_inquiries: s.messageOpenCnt,
+        interaction_sum: g.interaction_sum,
+        pm_leads: g.pm_leads,
+        pm_inquiries: g.pm_inquiries,
         enter_pct: enterPct,
-        pm_openings: s.messageDrivingOpenCnt,
+        pm_openings: g.pm_openings,
         leads_pct: leadsPct,
-        rtb_income: Number(s.rtbIncomeAmt),
+        rtb_income: g.fee,
         score: Math.round(contentPct * 0.4 + leadsPct * 0.6),
       };
     });
 
-    if (query.tag) rows = rows.filter((r) => r.account_tag === query.tag);
-    if (query.regionName) {
-      rows = rows.filter((r) => r.region === query.regionName);
-    }
-    if (query.keyword) {
-      const k = query.keyword.toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          r.nickname.toLowerCase().includes(k) ||
-          r.store_name.toLowerCase().includes(k),
-      );
-    }
     rows.sort((a, b) => b.score - a.score || b.pm_leads - a.pm_leads);
 
     const tierStat = KOS_TIERS.map((t) => ({
@@ -2616,8 +2683,9 @@ export class KoxService {
     }));
     return {
       days,
-      date_type: proDateType,
-      stat_date: latest.statDate,
+      date_type: null,
+      stat_date: null,
+      caliber: 'leyoon_daily+notes',
       weekly_notes_target: weeklyNotesTarget,
       weekly_enter_target: weeklyEnterTarget,
       total: rows.length,
