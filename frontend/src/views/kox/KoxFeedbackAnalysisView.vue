@@ -261,6 +261,7 @@ function classify(text) {
 const CAT_META = {
   价格咨询: { color: '#ea580c', bg: '#fff7ed' },
   产品咨询: { color: '#2563eb', bg: '#eff6ff' },
+  意向回复: { color: '#7c3aed', bg: '#f5f3ff' },
   正面评价: { color: '#059669', bg: '#ecfdf5' },
   负面评价: { color: '#dc2626', bg: '#fef2f2' },
   闲聊互动: { color: '#64748b', bg: '#f8fafc' },
