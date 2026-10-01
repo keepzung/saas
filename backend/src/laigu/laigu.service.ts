@@ -48,6 +48,17 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async safeSync() {
+    // 评论同步（网关 token 通道）——反馈分析页数据源
+    try {
+      const cfg = await this.prisma.laiguOrgConfig.findUnique({ where: { brandId: 6 } });
+      if (cfg?.gatewayToken && cfg.active) {
+        const r = await this.syncComments(6);
+        if (r.upserted > 0) this.logger.log(`来鼓评论同步完成：upsert ${r.upserted}`);
+      }
+    } catch (error) {
+      this.logger.warn(`来鼓评论同步失败: ${(error as Error).message}`);
+    }
+    // 会话同步（OpenAPI）
     try {
       const result = await this.syncLeads();
       this.logger.log(`来鼓增量同步完成：拉取 ${result.fetched} 条`);
