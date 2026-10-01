@@ -52,7 +52,8 @@ const OUT = path.join(__dirname, 'state', 'partner-full');
 const STATE_FILE = path.join(OUT, 'partner-state-latest.json');
 const PAGE_SIZE = 1000;
 const FULL_START = '2025-01-01';
-const DEFAULT_BACKFILL_FROM = '2026-09-25';
+// 09-25~09-30 由 ranf 覆盖（避免双算）；聚光笔记报表从 2026-10-01 起接管
+const DEFAULT_BACKFILL_FROM = '2026-10-01';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const num0 = (v) => { const n = Number(v ?? 0); return Number.isFinite(n) ? n : 0; };
 
@@ -169,14 +170,26 @@ function monthSegments(start, end) {
   }
   await sleep(500);
   const rowsLoc = listPage.locator('tbody tr');
-  const rowCount = await rowsLoc.count();
-  const accounts = [];
-  for (let i = 0; i < rowCount; i++) {
-    const txt = (await rowsLoc.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ');
-    const idm = txt.match(/([0-9a-f]{24})/);
-    if (idm) accounts.push({ name: txt.split(' ')[0].slice(0, 30), id: idm[1], idx: i, status: /冻结/.test(txt) ? 'frozen' : 'active' });
-  }
-  console.log(`[1] 子账户 ${accounts.length} 个（有效 ${accounts.filter((a) => a.status === 'active').length}）`);
+  // 按页枚举（10 条/页，第二页含「特斯拉KOS项目-基础」）；非特斯拉账号（如阿维塔）跳过
+  const enumeratePage = async () => {
+    const out = [];
+    const rowCount = await rowsLoc.count();
+    for (let i = 0; i < rowCount; i++) {
+      const txt = (await rowsLoc.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ');
+      const idm = txt.match(/([0-9a-f]{24})/);
+      if (idm && /特斯拉/.test(txt)) out.push({ name: txt.split(' ')[0].slice(0, 30), id: idm[1], idx: i, status: /冻结/.test(txt) ? 'frozen' : 'active' });
+    }
+    return out;
+  };
+  const gotoNextPage = async () => {
+    const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
+    if (!(await nextBtn.count())) return false;
+    const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
+    if (disabled) return false;
+    await nextBtn.click({ timeout: 5000 }).catch(() => {});
+    await sleep(5000);
+    return true;
+  };
 
   const end = endIdx > -1 ? argv[endIdx + 1] : yesterday();
   // 全局起点：--full → FULL_START；否则最早游标+1 与默认回补点取早
@@ -199,7 +212,12 @@ function monthSegments(start, end) {
 
   const agg = new Map(); // noteId -> {noteId, vSeller, name, rows: Map(day->sum)}
   let accountOk = 0;
-  for (const acc of accounts) {
+  let accountTotal = 0;
+  let hasNextPage = true;
+  for (let pg = 0; pg < 6 && hasNextPage; pg++) {
+  const pageAccounts = await enumeratePage();
+  accountTotal += pageAccounts.length;
+  for (const acc of pageAccounts) {
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
     const row = rowsLoc.nth(acc.idx);
     const rowJump = row.locator('text=跳转').first();
@@ -310,8 +328,10 @@ function monthSegments(start, end) {
     await popup.close().catch(() => {});
     await sleep(2000);
   }
+  hasNextPage = pg === 0 && !pageAccounts.length ? false : await gotoNextPage();
+  }
 
-  console.log(`\n[3] 聚合笔记 ${agg.size} 篇（${accountOk}/${accounts.length} 子账户）`);
+  console.log(`\n[3] 聚合笔记 ${agg.size} 篇（${accountOk}/${accountTotal} 子账户）`);
   if (DRY) {
     console.log('--dry-run 样例:', JSON.stringify([...agg.values()].slice(0, 2).map((v) => ({ noteId: v.noteId, days: [...v.days.entries()].slice(0, 3) })), null, 1).slice(0, 1000));
     await browser.close();
