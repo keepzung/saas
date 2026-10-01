@@ -119,6 +119,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
+const isTesla = Number(auth.currentBrandId) === 6;
 const CROWNS = ['👑', '🥈', '🥉'];
 
 const quick = ref('7');
@@ -186,9 +187,18 @@ const columns = computed(() => {
     ncol('内容发布数', 'item_cnt'),
     ncol('内容曝光数', 'exposure_sum', 110),
     ncol('内容阅读数', 'view_sum', 110),
-    ncol('内容点赞数', 'likes_sum', 110),
-    ncol('内容收藏数', 'collects_sum', 110),
-    ncol('内容评论数', 'comments_sum', 110),
+    // 特斯拉：赞/藏/评为账号累计口径（乐允存量，聚光/专业号无日拆分），不随日期窗口变化
+    ...(isTesla.value
+      ? [
+          ncol('内容点赞数（累计）', 'likes_sum', 130),
+          ncol('内容收藏数（累计）', 'collects_sum', 130),
+          ncol('内容评论数（累计）', 'comments_sum', 130),
+        ]
+      : [
+          ncol('内容点赞数', 'likes_sum', 110),
+          ncol('内容收藏数', 'collects_sum', 110),
+          ncol('内容评论数', 'comments_sum', 110),
+        ]),
     { title: '所属门店/团队', key: 'store', width: 220 },
     { title: '操作', key: 'action', width: 90, fixed: 'right' },
   ];

@@ -2426,6 +2426,52 @@ export class KoxService {
         });
       }
       if (clueHit) metric_source += '+pro_clue_account';
+
+      // 点赞/收藏/评论/分享/CES：账号累计口径（选项1）——汇总账号全部笔记的赞藏评，与热门内容卡片同源
+      // （乐允 09-24 导出存量；聚光/专业号均无赞藏评日拆分，故不随日期窗口变化）
+      const cumNotes = await this.prisma.koxNote.findMany({
+        where: { brandId: 6 },
+        select: {
+          accountId: true,
+          authorName: true,
+          likes: true,
+          collects: true,
+          comments: true,
+          shares: true,
+          followCount: true,
+        },
+      });
+      const cumAgg = new Map<
+        number,
+        { likes: number; collects: number; comments: number; shares: number; ces: number }
+      >();
+      for (const n of cumNotes) {
+        const accId =
+          n.accountId != null && idSet.has(n.accountId)
+            ? n.accountId
+            : n.authorName
+              ? nameToId.get(n.authorName) ?? null
+              : null;
+        if (accId == null) continue;
+        const cur = cumAgg.get(accId) ?? { likes: 0, collects: 0, comments: 0, shares: 0, ces: 0 };
+        cur.likes += n.likes;
+        cur.collects += n.collects;
+        cur.comments += n.comments;
+        cur.shares += n.shares;
+        cur.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
+        cumAgg.set(accId, cur);
+      }
+      for (const [accId, v] of cumAgg) {
+        if (!idSet.has(accId)) continue;
+        bump(accId, (a) => {
+          a.likes = v.likes;
+          a.collects = v.collects;
+          a.comments = v.comments;
+          a.shares = v.shares;
+          a.ces = v.ces;
+        });
+      }
+      if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {
