@@ -251,6 +251,14 @@ function monthSegments(start, end) {
     await popup.waitForLoadState('domcontentloaded', { timeout: 45000 }).catch(() => {});
     await sleep(6000);
     const vseller = (popup.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] ?? acc.id;
+    // 关键：先导航到「数据→标准投→笔记报表」页（会话模块就绪后报表 API 才返回数据）
+    await popup
+      .goto(`https://ad.xiaohongshu.com/aurora/ad/datareports-basic/note?vSellerId=${vseller}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 45000,
+      })
+      .catch(() => {});
+    await sleep(10000);
 
     let noteRows = 0;
     for (const [segStart, segEnd] of segments) {
@@ -272,13 +280,14 @@ function monthSegments(start, end) {
               try { j = JSON.parse(raw); } catch {}
               return { raw, j };
             };
-            // 名称列尝试（失败自动回退基础列）
-            const withNames = [...body.columns, 'noteName', 'userName'];
-            let r1 = await doFetch(withNames);
+            // 列尝试：名称列 + 新增种草人群候选列（失败逐级回退）
+            const colsNames = [...body.columns, 'noteName', 'userName'];
+            const colsFull = [...colsNames, 'grassUserNum', 'newGrassUserNum', 'tiUserNum'];
+            let r1 = await doFetch(colsFull);
             let j = r1.j;
             if (!j || (j.code !== 0 && j.success !== true)) {
-              if (process.env.JG_DEBUG) console.log('[debug] withNames failed:', String(r1.raw).slice(0, 200));
-              const r2 = await doFetch(body.columns);
+              if (process.env.JG_DEBUG) console.log('[debug] full cols failed:', String(r1.raw).slice(0, 200));
+              const r2 = await doFetch(colsNames);
               j = r2.j;
               if (!j || (j.code !== 0 && j.success !== true)) {
                 if (process.env.JG_DEBUG) console.log('[debug] base failed:', String(r2.raw).slice(0, 300));
@@ -291,12 +300,13 @@ function monthSegments(start, end) {
             for (const item of dl) {
               let v = {};
               try { v = JSON.parse(item.dataValueJson ?? '{}'); } catch {}
-              if (!itemKeysSample) itemKeysSample = Object.keys(item).join(',');
+              if (!itemKeysSample) itemKeysSample = Object.keys(v).join(',');
               out.push({
                 noteId: String(v.noteId ?? ''),
                 day: String(v.time ?? ''),
                 name: String(v.noteName ?? item.noteName ?? item.name ?? ''),
                 creator: String(v.userName ?? item.userName ?? ''),
+                grass: num0(v.grassUserNum ?? v.newGrassUserNum ?? 0),
                 fee: num0(v.fee), imp: num0(v.impression), click: num0(v.click),
                 inter: num0(v.interaction), inq: num0(v.messageConsult),
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
@@ -313,15 +323,15 @@ function monthSegments(start, end) {
             },
           },
         ).catch(() => ({ out: [], totalPage: 1 }));
-        if (list.itemKeysSample && !agg.size) console.log(`[cols] item keys: ${list.itemKeysSample}`);
+        if (list.itemKeysSample && !agg.size) console.log(`[cols] value keys: ${list.itemKeysSample}`);
         totalPage = list.totalPage || 1;
         for (const r of list.out) {
           if (!r.noteId || !r.day) continue;
           const cur2 = agg.get(r.noteId) ?? { noteId: r.noteId, vSeller: vseller, name: acc.name, title: r.name, creator: r.creator, days: new Map() };
           if (r.name && !cur2.title) cur2.title = r.name;
           if (r.creator && !cur2.creator) cur2.creator = r.creator;
-          const d = cur2.days.get(r.day) ?? { fee: 0, imp: 0, click: 0, inter: 0, inq: 0, leads: 0, initMsg: 0 };
-          d.fee += r.fee; d.imp += r.imp; d.click += r.click; d.inter += r.inter; d.inq += r.inq; d.leads += r.leads; d.initMsg += r.initMsg;
+          const d = cur2.days.get(r.day) ?? { fee: 0, imp: 0, click: 0, inter: 0, inq: 0, leads: 0, initMsg: 0, grass: 0 };
+          d.fee += r.fee; d.imp += r.imp; d.click += r.click; d.inter += r.inter; d.inq += r.inq; d.leads += r.leads; d.initMsg += r.initMsg; d.grass += r.grass;
           cur2.days.set(r.day, d);
           agg.set(r.noteId, cur2);
           noteRows += 1;
@@ -347,6 +357,38 @@ function monthSegments(start, end) {
     return;
   }
 
+  // ── 写库 0：KoxJuguangNoteDaily（note×日，运营趋势数据源；受影响天整体重建，幂等）──
+  const touchedDays = new Set();
+  for (const cur of agg.values()) for (const day of cur.days.keys()) touchedDays.add(day);
+  for (const day of [...touchedDays].sort()) {
+    await prisma.koxJuguangNoteDaily.deleteMany({ where: { brandId: BRAND_ID, day: new Date(`${day}T00:00:00+08:00`) } });
+  }
+  const dailyRows = [];
+  for (const cur of agg.values()) {
+    for (const [day, d] of cur.days) {
+      dailyRows.push({
+        brandId: BRAND_ID,
+        noteId: cur.noteId,
+        day: new Date(`${day}T00:00:00+08:00`),
+        vSeller: cur.vSeller,
+        title: cur.title || null,
+        creator: cur.creator || null,
+        fee: Math.round(d.fee * 100) / 100,
+        impression: BigInt(d.imp),
+        click: BigInt(d.click),
+        interaction: BigInt(d.inter),
+        msgInquiries: BigInt(d.inq),
+        msgOpenings: BigInt(d.initMsg),
+        msgLeads: BigInt(d.leads),
+        grassUser: BigInt(d.grass),
+      });
+    }
+  }
+  for (let i = 0; i < dailyRows.length; i += 1000) {
+    await prisma.koxJuguangNoteDaily.createMany({ data: dailyRows.slice(i, i + 1000), skipDuplicates: true });
+  }
+  console.log(`[3.5] KoxJuguangNoteDaily 写入 ${dailyRows.length} 行（${touchedDays.size} 天）`);
+
   // ── 写库 ──
   const noteIds = [...agg.keys()];
   const PLACEHOLDER_TITLES = new Set(['(乐允投放笔记)', '(聚光投放笔记)', '(无标题)']);
@@ -360,6 +402,9 @@ function monthSegments(start, end) {
   void accountsAll;
 
   let created = 0, updated = 0, skipped = 0;
+  // JG_NOTE_OVERLAY=1 才做主字段叠加（默认停用：运营趋势改用 KoxJuguangNoteDaily，避免基线双算）
+  // 停用时仅回填标题/作者/账号归属（titleFix/authorFix），不建新笔记、不动指标
+  const NOTE_OVERLAY = process.env.JG_NOTE_OVERLAY === '1';
   for (const cur of agg.values()) {
     const allRows = [...cur.days.entries()].map(([day, d]) => ({ day, ...d })).sort((a, b) => (a.day < b.day ? -1 : 1));
     const prev = existMap.get(cur.noteId);
@@ -380,7 +425,7 @@ function monthSegments(start, end) {
     const titleFix = cur.title && (!prev?.title || PLACEHOLDER_TITLES.has(prev.title));
     const authorFix = !prev?.authorName && cur.creator ? cur.creator : null;
 
-    if (prev) {
+    if (prev && NOTE_OVERLAY) {
       const d = incRows.reduce(
         (a, r) => ({ imp: a.imp + r.imp, click: a.click + r.click, inq: a.inq + r.inq, open: a.open + r.initMsg, leads: a.leads + r.leads }),
         { imp: 0, click: 0, inq: 0, open: 0, leads: 0 },
@@ -409,7 +454,23 @@ function monthSegments(start, end) {
         },
       });
       updated += 1;
-    } else {
+    } else if (prev) {
+      // 元数据模式：仅标题/作者/账号归属回填
+      if (titleFix || authorFix || (accountId != null && prev.accountId == null)) {
+        const raw = { ...(prev.rawJson ?? {}) };
+        if (!raw.juguang_synced_to) raw.juguang_synced_to = newSynced;
+        await prisma.koxNote.update({
+          where: { id: prev.id },
+          data: {
+            ...(titleFix ? { title: cur.title } : {}),
+            ...(authorFix ? { authorName: authorFix } : {}),
+            ...(accountId != null && prev.accountId == null ? { accountId } : {}),
+            rawJson: raw,
+          },
+        });
+        updated += 1;
+      } else skipped += 1;
+    } else if (NOTE_OVERLAY) {
       const d = aggSum;
       const firstDay = allRows[0].day;
       await prisma.koxNote.create({
@@ -433,9 +494,11 @@ function monthSegments(start, end) {
         },
       });
       created += 1;
+    } else {
+      skipped += 1;
     }
   }
-  console.log(`[4] 写库完成: 更新 ${updated} / 新建 ${created} / 无增量跳过 ${skipped}`);
+  console.log(`[4] KoxNote 写库完成（${NOTE_OVERLAY ? '叠加' : '元数据'}模式）: 更新 ${updated} / 新建 ${created} / 跳过 ${skipped}`);
 
   await prisma.sparkSyncLog.create({
     data: {
@@ -444,7 +507,7 @@ function monthSegments(start, end) {
       statDate: new Date(`${end}T00:00:00+08:00`),
       fetched: noteIds.length,
       upserted: updated + created,
-      message: `juguang note ${FULL ? 'FULL' : 'inc'} ${globalStart}~${end}, accounts ${accountOk}/${accounts.length}, updated ${updated}, created ${created}`,
+      message: `juguang note ${FULL ? 'FULL' : 'inc'} ${globalStart}~${end}, accounts ${accountOk}/${accountTotal}, updated ${updated}, created ${created}`,
     },
   }).catch(() => {});
 

@@ -1189,3 +1189,26 @@ model ProClueUserDay {
   @@index([brandId, day])
   @@index([brandId, customerUserId])
 }
+
+// 聚光「标准投笔记报表」note×日（12 子账户跳转加总口径；运营趋势内容数/曝光/互动数据源）
+model KoxJuguangNoteDaily {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(6)
+  noteId       String
+  day          DateTime
+  vSeller      String?
+  title        String?
+  creator      String?
+  fee          Decimal  @default(0) @db.Decimal(14, 2)
+  impression   BigInt   @default(0)
+  click        BigInt   @default(0)
+  interaction  BigInt   @default(0)
+  msgInquiries BigInt   @default(0)
+  msgOpenings  BigInt   @default(0)
+  msgLeads     BigInt   @default(0)
+  grassUser    BigInt   @default(0)
+  fetchedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, noteId, day])
+  @@index([brandId, day])
+}
