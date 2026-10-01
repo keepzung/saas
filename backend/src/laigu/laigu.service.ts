@@ -469,6 +469,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
 
     const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金'];
     const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '油耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装'];
+    const INTENT_WORDS = ['展车', '到店', '预约', '下定', '订车', '想买', '想要', '打算', '考虑', '购买', '发我', '私我', '私信', '发一下', '求链接', '滴滴', '联系方式', '什么时候有', '哪里有', '哪里买', '多久有', '蹲一个', '怎么买', '还有货'];
     const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮'];
     const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞'];
 
@@ -479,6 +480,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       if (has(POS_WORDS)) return { category: '正面评价', sentiment: '正面' };
       if (has(PRICE_WORDS)) return { category: '价格咨询', sentiment: '中性' };
       if (has(PRODUCT_WORDS)) return { category: '产品咨询', sentiment: '中性' };
+      if (has(INTENT_WORDS)) return { category: '意向回复', sentiment: '中性' };
       return { category: '闲聊互动', sentiment: '中性' };
     };
 
@@ -561,6 +563,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
 
     const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金', '万提', 'w提', '裸车'];
     const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装', '智驾', '辅助驾驶'];
+    const INTENT_WORDS = ['展车', '到店', '预约', '下定', '订车', '想买', '想要', '打算', '考虑', '购买', '发我', '私我', '私信', '发一下', '求链接', '滴滴', '联系方式', '什么时候有', '哪里有', '哪里买', '多久有', '蹲一个', '怎么买', '还有货'];
     const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮', '损伤'];
     const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞', '太帅', '封神', '胜利'];
 
@@ -571,6 +574,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       if (has(POS_WORDS)) return { category: '正面评价', sentiment: '正面' };
       if (has(PRICE_WORDS)) return { category: '价格咨询', sentiment: '中性' };
       if (has(PRODUCT_WORDS)) return { category: '产品咨询', sentiment: '中性' };
+      if (has(INTENT_WORDS)) return { category: '意向回复', sentiment: '中性' };
       return { category: '闲聊互动', sentiment: '中性' };
     };
 

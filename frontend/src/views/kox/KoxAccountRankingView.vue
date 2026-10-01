@@ -108,7 +108,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { getKoxAccountRanking, getKoxAccounts } from '../../api/kox';
@@ -117,6 +117,7 @@ import { exportExcel } from '../../utils/excel';
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const CROWNS = ['👑', '🥈', '🥉'];
 
@@ -287,6 +288,13 @@ function exportDetail() {
 }
 
 onMounted(() => {
+  // 总览「账号排行」卡跳转携带的筛选
+  if (route.query.start && route.query.end) {
+    range.value = [dayjs(route.query.start), dayjs(route.query.end)];
+    quick.value = '';
+  }
+  if (route.query.tag) tag.value = route.query.tag;
+  if (route.query.regionName) regionName.value = route.query.regionName;
   loadFacets();
   reload();
 });

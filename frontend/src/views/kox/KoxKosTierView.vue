@@ -8,10 +8,6 @@
       <a-range-picker v-model:value="range" size="small" @change="reload" />
     </template>
 
-    <NoticeBar>
-      分层规则：S级头部=月度留资 &gt;200（任意周期归一月度）；其余 头部/高潜/腰部/尾部 按周度留资折算（头部 ≥25 ｜ 高潜 12.5–25 ｜ 腰部 6.25–12.5 ｜ 尾部 &lt;6）。内容完成度=周度 ≥3 篇；进线完成度=周度 ≥5 条。发布/进线/开口/留资=所选区间真实聚合（乐允投放报表逐日，自 2026-01-07 起）；阅读/互动=窗口内发布笔记口径。
-    </NoticeBar>
-
     <a-row :gutter="12">
       <a-col :span="15">
         <a-card size="small" title="账号留资分层分布">
@@ -123,7 +119,6 @@ import { message } from 'ant-design-vue';
 import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
-import NoticeBar from '../../components/NoticeBar.vue';
 import { getKoxAccounts, getKoxProStaffProgress } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 import { exportExcel } from '../../utils/excel';

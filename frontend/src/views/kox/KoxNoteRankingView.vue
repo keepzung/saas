@@ -453,7 +453,7 @@ function renderCharts() {
     }
     typeChart.setOption({
       tooltip: { trigger: 'axis', valueFormatter: (v) => `${v}%` },
-      legend: { data: ['互动量占比', '获取线索占比'] },
+      legend: { data: ['互动量占比'] },
       grid: { left: 90, right: 30, top: 40, bottom: 40 },
       xAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
       yAxis: { type: 'category', data: types, axisLabel: { width: 84 } },
@@ -464,13 +464,6 @@ function renderCharts() {
           stack: 'x',
           data: interData,
           itemStyle: { color: '#5087ec' },
-          barMaxWidth: 14,
-        },
-        {
-          name: '获取线索占比',
-          type: 'bar',
-          data: leadsData,
-          itemStyle: { color: '#36b37e' },
           barMaxWidth: 14,
         },
       ],

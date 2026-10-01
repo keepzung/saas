@@ -13,11 +13,6 @@
       </FilterTopbar>
     </template>
 
-    <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实投放数据。</NoticeBar>
-    <NoticeBar v-else-if="mode === 'real' && isTesla && platform">
-      数据来源：小红书合作伙伴平台（乐允子账户投放）。总消耗为平台<strong>本月口径</strong>（¥{{ fmtNum(platform.month_fee) }}，快照 {{ snapshotAtText }}）；曝光/点击/私信明细为日存档口径<template v-if="coverage">（{{ coverage.from }} ~ {{ coverage.to }}，平台仅保留昨日/今日快照，日历史自 09-25 起逐日积累）</template>。
-    </NoticeBar>
-    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新。</NoticeBar>
     <a-alert
       v-if="cookieValid === false"
       type="error"
@@ -268,7 +263,6 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import NoticeBar from '../../components/NoticeBar.vue';
 import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion, getSparkStatus } from '../../api/spark';
 import { getKoxNotes } from '../../api/kox';
 import { exportExcel } from '../../utils/excel';
@@ -431,6 +425,13 @@ async function probeAndLoad() {
     }
   } finally {
     loading.value = false;
+    // 首次进入即加载当前明细页签（默认按笔记汇总），避免空表直到手动切换
+    if (detailTab.value === 'note') {
+      notePage.value = 1;
+      loadNoteTab();
+    } else if (detailTab.value === 'region') {
+      loadRegionTab();
+    }
   }
 }
 

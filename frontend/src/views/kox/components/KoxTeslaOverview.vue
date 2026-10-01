@@ -361,13 +361,13 @@ async function reload() {
 
 async function loadRank() {
   try {
-    const res = await getKoxAccountRanking({
-      ...dateParams(),
-      metric: rankMetric.value,
-      page_size: 20,
-      ...(accountTag.value ? { tag: accountTag.value } : {}),
-      ...(regionName.value ? { regionName: regionName.value } : {}),
-    });
+    const params = { ...dateParams(), metric: rankMetric.value, page_size: 20 };
+    // 排行卡自带筛选优先；未选时跟随页面级筛选
+    const tag = rankTag.value ?? accountTag.value;
+    const region = rankRegion.value ?? regionName.value;
+    if (tag) params.tag = tag;
+    if (region) params.regionName = region;
+    const res = await getKoxAccountRanking(params);
     rankList.value = res.list ?? [];
   } catch {
     rankList.value = [];
@@ -512,7 +512,14 @@ function onCoverErr(n) {
 }
 
 function goAccount() {
-  router.push('/kox_df/operation-analysis/author-ranking');
+  const q = new URLSearchParams();
+  q.set('start', range.value?.[0]?.format('YYYY-MM-DD') ?? '');
+  q.set('end', range.value?.[1]?.format('YYYY-MM-DD') ?? '');
+  const tag = rankTag.value ?? accountTag.value;
+  const region = rankRegion.value ?? regionName.value;
+  if (tag) q.set('tag', tag);
+  if (region) q.set('regionName', region);
+  router.push(`/kox_df/operation-analysis/author-ranking?${q.toString()}`);
 }
 
 function goHot() {
