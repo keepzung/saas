@@ -105,6 +105,8 @@ export class KoxService {
     const sort = SORT_FIELDS.includes(query.sort ?? '') ? query.sort! : 'id';
     const order: Prisma.SortOrder = query.order === 'desc' ? 'desc' : 'asc';
 
+    // 筛选项只统计未停用账号（disabled=非大区刷新对照表基线）
+    const facetWhere: Prisma.KosAccountWhereInput = { ...where, status: { not: 'disabled' } };
     const [total, rows, regionFacets, tagFacets] = await Promise.all([
       this.prisma.kosAccount.count({ where }),
       this.prisma.kosAccount.findMany({
@@ -113,14 +115,14 @@ export class KoxService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.kosAccount.groupBy({ by: ['regionName'], where }).then(
+      this.prisma.kosAccount.groupBy({ by: ['regionName'], where: facetWhere }).then(
         (g) =>
           g
             .map((x) => x.regionName)
             .filter((x): x is string => !!x)
             .sort((a, b) => a.localeCompare(b, 'zh')),
       ),
-      this.prisma.kosAccount.groupBy({ by: ['accountTag'], where }).then(
+      this.prisma.kosAccount.groupBy({ by: ['accountTag'], where: facetWhere }).then(
         (g) =>
           g
             .map((x) => x.accountTag)

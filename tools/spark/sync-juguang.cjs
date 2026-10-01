@@ -338,6 +338,10 @@ function monthSegments(start, end) {
         for (let rtry = 1; rtry <= 3; rtry++) {
           list = await popup.evaluate(
             async ({ body }) => {
+              const num0 = (v) => {
+                const n = Number(v ?? 0);
+                return Number.isFinite(n) ? n : 0;
+              };
               const doFetch = async (cols) => {
                 const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
                   method: 'POST',
