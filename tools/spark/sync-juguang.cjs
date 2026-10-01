@@ -351,13 +351,14 @@ function monthSegments(start, end) {
             const colsNames = [...body.columns, 'noteName', 'userName'];
             const attempts = [colsFull, colsNames, body.columns];
             let j = null;
+            let lastRaw = '';
+            let lastStatus = 0;
             for (let ci = 0; ci < attempts.length; ci++) {
               const r1 = await doFetch(attempts[ci]);
+              lastRaw = r1.raw;
+              lastStatus = r1.status;
               j = r1.j;
-              if (j && (j.code === 0 || j.success === true)) {
-                if (ci > 0) console.log(`[cols] 第 ${ci + 1} 档列组合成功`);
-                break;
-              }
+              if (j && (j.code === 0 || j.success === true)) break;
               if (process.env.JG_DEBUG) console.log(`[debug] cols#${ci + 1} failed:`, String(r1.raw).slice(0, 200));
               j = null;
             }
@@ -380,7 +381,7 @@ function monthSegments(start, end) {
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
               });
             }
-            return { out, totalPage: tp, itemKeysSample, debug: out.length ? null : { status: r1.status, head: r1.raw.slice(0, 260) } };
+            return { out, totalPage: tp, itemKeysSample, debug: out.length ? null : { status: lastStatus, head: lastRaw.slice(0, 260) } };
           },
           {
             body: {
