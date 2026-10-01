@@ -296,6 +296,7 @@ function monthSegments(start, end) {
   accountTotal += pageAccounts.length;
   for (const acc of pageAccounts) {
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
+    if (process.env.JG_TARGET && !acc.name.includes(process.env.JG_TARGET)) { console.log(`[${acc.name}] JG_TARGET 跳过`); continue; }
     if (consecutiveJumpFails >= 2) {
       const cd = Number(process.env.JG_FAIL_COOLDOWN ?? 120000);
       console.log(`[cooldown] 连续 ${consecutiveJumpFails} 个账户跳转失败，冷却 ${cd / 1000}s ...`);
@@ -376,7 +377,7 @@ function monthSegments(start, end) {
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
               });
             }
-            return { out, totalPage: tp, itemKeysSample };
+            return { out, totalPage: tp, itemKeysSample, debug: out.length ? null : { status: r1.status, head: r1.raw.slice(0, 260) } };
           },
           {
             body: {
@@ -386,7 +387,8 @@ function monthSegments(start, end) {
               columns: ['time', 'noteId', 'fee', 'impression', 'click', 'interaction', 'messageConsult', 'initiativeMessage', 'msgLeadsNum'],
             },
           },
-        ).catch(() => ({ out: [], totalPage: 1 }));
+        )        .catch(() => ({ out: [], totalPage: 1, debug: { evalErr: true } }));
+        if (list.debug) console.log(`[fetch-debug] ${segStart}~${segEnd} p${pageNum}: ${JSON.stringify(list.debug)}`);
         if (list.itemKeysSample && !agg.size) console.log(`[cols] value keys: ${list.itemKeysSample}`);
         totalPage = list.totalPage || 1;
         for (const r of list.out) {
