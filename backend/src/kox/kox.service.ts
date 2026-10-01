@@ -978,7 +978,8 @@ export class KoxService {
             }
           }
         }
-        // ranf 分日补缺（乐允全口径投流数据）：笔记口径全 0 的日期用 ranf 曝光/阅读/互动填充
+        // ranf 分日补缺（乐允全口径投流数据）：xlsx 基线止日（09-24）之后，曝光/阅读/互动以 ranf 分日为准
+        // （整天全 0 才补会导致 ranf 新建笔记首见日被少量笔记累计值占位，曝光仅几十 vs 实际十几万）
         if (brandId === 6) {
           const ranfDays = await this.prisma.koxRanfDaily.findMany({
             where: { brandId: 6, day: { gte: start, lte: end } },
@@ -986,6 +987,7 @@ export class KoxService {
           });
           for (const r of ranfDays) {
             const key = dayKey08(r.day);
+            if (key <= '2026-09-24') continue; // 基线窗口内保持笔记快照口径
             const existing = byDate.get(key);
             if (!existing) {
               byDate.set(key, {
@@ -995,9 +997,7 @@ export class KoxService {
                 view_sum: Number(r.click),
                 interaction_sum: Number(r.interaction),
               });
-            } else if (
-              !existing.item_cnt && !existing.view_sum && !existing.exposure_sum && !existing.interaction_sum
-            ) {
+            } else {
               existing.exposure_sum = Number(r.impression);
               existing.view_sum = Number(r.click);
               existing.interaction_sum = Number(r.interaction);
