@@ -38,7 +38,7 @@ export class InsightService {
         ? Math.round((negativeCnt / contentCnt) * 1000) / 10
         : 0,
       trend: rows.map((r) => ({
-        date: r.statDate.toISOString().slice(0, 10),
+        date: new Date(r.statDate.getTime() + 8 * 3600000).toISOString().slice(0, 10),
         content_cnt: r.contentCnt,
         view_sum: r.viewSum,
         interaction_sum: r.likeSum + r.commentSum + r.shareSum,

@@ -425,4 +425,4 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-const fmt = (d: Date) => d.toISOString().slice(0, 10);
+const fmt = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);

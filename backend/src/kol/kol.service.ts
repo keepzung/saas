@@ -607,7 +607,7 @@ export class KolService {
         resource_status: c.resourceStatus,
         owner_id: c.ownerId,
         owner_nickname: c.owner?.nickname ?? c.owner?.name ?? null,
-        updated_at_text: c.updatedAt.toISOString().slice(0, 10),
+        updated_at_text: new Date(c.updatedAt.getTime() + 8 * 3600000).toISOString().slice(0, 10),
       })),
       total,
       page,

@@ -1,3 +1,4 @@
+const dayKey08 = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -707,13 +708,22 @@ export class KoxService {
             : proContent
               ? proContent.interaction_sum
               : noteInteractionSum,
+          // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）；新增粉丝 = 窗口内发布笔记的涨粉和
+          interaction_rate: (weeklySnap ? weeklySnap.view_sum : proContent ? proContent.view_sum : noteViewSum)
+            ? r2(
+                ((weeklySnap ? weeklySnap.interaction_sum : proContent ? proContent.interaction_sum : noteInteractionSum) /
+                  (weeklySnap ? weeklySnap.view_sum : proContent ? proContent.view_sum : noteViewSum)) *
+                  100,
+              )
+            : 0,
+          follow_count_sum: noteRows.reduce((acc, n) => acc + n.followCount, 0),
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
       content_source: weeklySnap
         ? `weekly_snapshot(${dayKey2(weeklySnap.weekStart)}~${dayKey2(weeklySnap.weekEnd)})`
         : proContent
-          ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${proContent.stat_date.toISOString().slice(0, 10)})`
+          ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${dayKey08(proContent.stat_date)})`
           : 'spark_notes',
       // 特斯拉版线索转化漏斗：周度快照（客户口径）> 专业号总数据 > 投放+自然
       lead_funnel: await (async () => {
@@ -767,7 +777,7 @@ export class KoxService {
             form_leads: formLeads,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${proLeads.statDate.toISOString().slice(0, 10)}，每日自动同步）${scopeExtra}`,
+            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${dayKey08(proLeads.statDate)}，每日自动同步）${scopeExtra}`,
             source: 'pro_overview',
           };
         }
@@ -816,7 +826,7 @@ export class KoxService {
           }
         >();
         for (const c of campaignRows) {
-          const key = c.statDate.toISOString().slice(0, 10);
+          const key = dayKey08(c.statDate);
           const cur =
             campByDate.get(key) ?? {
               fee: 0,
@@ -846,7 +856,7 @@ export class KoxService {
         >();
         for (const n of noteRows) {
           if (!n.publishTime) continue;
-          const key = n.publishTime.toISOString().slice(0, 10);
+          const key = dayKey08(n.publishTime);
           const cur =
             noteByDate.get(key) ?? {
               item_cnt: 0,
@@ -909,7 +919,7 @@ export class KoxService {
           ad_msg_open: camp?.msg_open ?? 0,
         });
         for (const r of rows) {
-          const key = r.statDate.toISOString().slice(0, 10);
+          const key = dayKey08(r.statDate);
           const camp = campByDate.get(key);
           byDate.set(key, {
             item_cnt: r.itemCnt,
@@ -941,7 +951,7 @@ export class KoxService {
         // 特斯拉：专业号「近1日」快照逐日积累，填充无笔记日期的内容数/阅读量（真实日数据）
         if (proDailies.length) {
           for (const d of proDailies) {
-            const key = d.statDate.toISOString().slice(0, 10);
+            const key = dayKey08(d.statDate);
             const proItems = d.createNoteNum + d.rtbNoteNum;
             const proViews = d.socReadCnt + d.adsReadCnt;
             const existing = byDate.get(key);
@@ -1004,7 +1014,7 @@ export class KoxService {
         task_account_type: t.taskAccountType,
         start_time: t.startTime,
         end_time: t.endTime,
-        time_range: `${t.startTime.toISOString().slice(0, 10)} ~ ${t.endTime.toISOString().slice(0, 10)}`,
+        time_range: `${dayKey08(t.startTime)} ~ ${dayKey08(t.endTime)}`,
         status: t.status,
         created_user: t.createdBy?.nickname ?? t.createdBy?.name ?? t.createdBy?.phone ?? '-',
         author_count: t.authors.length,
@@ -1528,8 +1538,8 @@ export class KoxService {
       dimension,
       metric,
       metric_source: metricSource,
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
+      start: dayKey08(start),
+      end: dayKey08(end),
       summary: { ...summary, account_num: accountTotal, group_num: groups.length },
       list: groups
         .slice((page - 1) * pageSize, page * pageSize)
@@ -2170,7 +2180,7 @@ export class KoxService {
             a.pm_leads += s.msgLeadsNum;
           });
         }
-        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${latestPro.statDate.toISOString().slice(0, 10)})`;
+        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${dayKey08(latestPro.statDate)})`;
       }
     }
     for (const n of notes) {

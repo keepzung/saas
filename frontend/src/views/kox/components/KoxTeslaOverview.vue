@@ -128,7 +128,7 @@
                 <b class="c-violet">{{ ctrPct }}%</b>
               </div>
               <div class="kv"><span>总互动量</span><b>{{ fmt(ov.summary?.interaction_sum) }}</b></div>
-              <div class="kv"><span>互动率</span><b>{{ ov.publish?.interaction_rate ?? 0 }}%</b></div>
+              <div class="kv"><span>互动率</span><b>{{ ov.summary?.interaction_rate ?? 0 }}%</b></div>
             </div>
           </a-tab-pane>
           <a-tab-pane key="lead" tab="线索转化">
