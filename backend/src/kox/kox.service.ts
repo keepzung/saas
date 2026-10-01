@@ -665,6 +665,16 @@ export class KoxService {
           })
         : null;
 
+    // 特斯拉：聚光笔记报表窗口聚合（字段2 回落：专业号快照未覆盖的窗口，曝光/阅读/互动随窗口真实变化）
+    const jugWin =
+      brandId === 6 && !weeklySnap && !proContent
+        ? await this.prisma.koxJuguangNoteDaily.aggregate({
+            where: { brandId: 6, day: { gte: start, lte: end } },
+            _sum: { impression: true, click: true, interaction: true },
+          })
+        : null;
+    const jugHit = !!jugWin && Number(jugWin._sum.impression ?? 0) > 0;
+
     return {
       global: globalBlock,
       store_num: await this.prisma.kosAccount.groupBy({
@@ -720,14 +730,6 @@ export class KoxService {
           }),
           this.prisma.kosAccount.count({ where: accountWhere }),
         ]);
-        const jugWin =
-          brandId === 6 && !weeklySnap && !proContent
-            ? await this.prisma.koxJuguangNoteDaily.aggregate({
-                where: { brandId: 6, day: { gte: start, lte: end } },
-                _sum: { impression: true, click: true, interaction: true },
-              })
-            : null;
-        const jugHit = !!jugWin && Number(jugWin._sum.impression ?? 0) > 0;
         const itemCntN = weeklySnap
           ? weeklySnap.item_cnt
           : proContent
@@ -781,7 +783,9 @@ export class KoxService {
         ? `weekly_snapshot(${dayKey2(weeklySnap.weekStart)}~${dayKey2(weeklySnap.weekEnd)})`
         : proContent
           ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${dayKey08(proContent.stat_date)})`
-          : 'spark_notes',
+          : jugHit
+            ? 'juguang_window'
+            : 'spark_notes',
       // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
         if (proClueFunnel && (proClueFunnel.enter > 0 || proClueFunnel.leads > 0)) {
