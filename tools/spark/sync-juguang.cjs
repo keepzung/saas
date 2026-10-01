@@ -170,14 +170,14 @@ function monthSegments(start, end) {
   }
   await sleep(500);
   const rowsLoc = listPage.locator('tbody tr');
-  // 按页枚举（10 条/页，第二页含「特斯拉KOS项目-基础」）；非特斯拉账号（如阿维塔）跳过
+  // 按页枚举（10 条/页，第二页含「特斯拉KOS项目-基础」）；非特斯拉账号（如阿维塔）与官号投放跳过
   const enumeratePage = async () => {
     const out = [];
     const rowCount = await rowsLoc.count();
     for (let i = 0; i < rowCount; i++) {
       const txt = (await rowsLoc.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ');
       const idm = txt.match(/([0-9a-f]{24})/);
-      if (idm && /特斯拉/.test(txt)) out.push({ name: txt.split(' ')[0].slice(0, 30), id: idm[1], idx: i, status: /冻结/.test(txt) ? 'frozen' : 'active' });
+      if (idm && /特斯拉/.test(txt) && !/官号/.test(txt)) out.push({ name: txt.split(' ')[0].slice(0, 30), id: idm[1], idx: i, status: /冻结/.test(txt) ? 'frozen' : 'active' });
     }
     return out;
   };
