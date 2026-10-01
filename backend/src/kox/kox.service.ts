@@ -515,7 +515,7 @@ export class KoxService {
           const cur =
             regionAgg.get(r) ??
             { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
-          cur.item_cnt += s.createNoteNum + s.rtbNoteNum;
+          cur.item_cnt += s.createNoteNum;
           cur.exposure_sum += s.socImpCnt;
           cur.view_sum += s.socClickCnt;
           cur.interaction_sum += s.socEnageCnt;
@@ -523,7 +523,7 @@ export class KoxService {
           regionAgg.set(r, cur);
         }
         proContent = {
-          item_cnt: sSum((s) => s.createNoteNum + s.rtbNoteNum),
+          item_cnt: sSum((s) => s.createNoteNum),
           exposure_sum: sSum((s) => s.socImpCnt),
           view_sum: sSum((s) => s.socClickCnt),
           interaction_sum: sSum((s) => s.socEnageCnt),
@@ -952,7 +952,7 @@ export class KoxService {
         if (proDailies.length) {
           for (const d of proDailies) {
             const key = dayKey08(d.statDate);
-            const proItems = d.createNoteNum + d.rtbNoteNum;
+            const proItems = d.createNoteNum;
             const proViews = d.socReadCnt + d.adsReadCnt;
             const existing = byDate.get(key);
             if (!existing) {
@@ -2171,7 +2171,7 @@ export class KoxService {
           const accId = s.nickName ? nameToId.get(s.nickName) : null;
           if (accId == null) continue;
           bump(accId, (a) => {
-            a.item_cnt += s.createNoteNum + s.rtbNoteNum;
+            a.item_cnt += s.createNoteNum;
             a.exposure += s.socImpCnt;
             a.view += s.socClickCnt;
             a.interaction += s.socEnageCnt;
