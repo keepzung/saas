@@ -213,21 +213,43 @@ function monthSegments(start, end) {
   const agg = new Map(); // noteId -> {noteId, vSeller, name, rows: Map(day->sum)}
   let accountOk = 0;
   let accountTotal = 0;
-  let hasNextPage = true;
-  for (let pg = 0; pg < 6 && hasNextPage; pg++) {
-  const pageAccounts = await enumeratePage();
-  accountTotal += pageAccounts.length;
-  for (const acc of pageAccounts) {
-    if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
-    const row = rowsLoc.nth(acc.idx);
-    const rowJump = row.locator('text=跳转').first();
-    let popup = null;
-    // 跳转重试（最多 2 次：点击偶发无响应）
-    for (let attempt = 1; attempt <= 2 && !popup; attempt++) {
+
+  // 列表页引导弹窗清理
+  const cleanListPage = async () => {
+    await listPage.evaluate(() => {
+      document.querySelectorAll('.dm-tour-guide-mark, [class*=tour-guide], [class*=tour-mask], [class*=notice-bar]').forEach((e) => e.remove());
+    }).catch(() => {});
+    for (const t of ['知道了', '我知道了']) {
+      const b = listPage.locator(`text=${t}`).first();
+      if (await b.count()) await b.click({ timeout: 1000 }).catch(() => {});
+    }
+  };
+  // 跨页按 id 定位账户行，点击跳转（含 hover 菜单兜底），返回 popup；失败重载列表重试
+  const ensureJump = async (acc) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // 定位行（当前页 → 翻页查找）
+      const rows = listPage.locator('tbody tr');
+      let row = null;
+      for (let pg = 0; pg < 6 && !row; pg++) {
+        const n = await rows.count();
+        for (let i = 0; i < n; i++) {
+          const txt = (await rows.nth(i).innerText().catch(() => ''));
+          if (txt.includes(acc.id)) { row = rows.nth(i); break; }
+        }
+        if (!row) {
+          const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
+          const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
+          if (disabled || !(await nextBtn.count())) break;
+          await nextBtn.click({ timeout: 5000 }).catch(() => {});
+          await sleep(4000);
+        }
+      }
+      if (!row) { console.log(`[${acc.name}] 列表中未找到行`); return null; }
+      const rowJump = row.locator('text=跳转').first();
       const popupPromise = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
       await rowJump.click({ timeout: 8000 }).catch(() => {});
       await sleep(3500);
-      popup = await popupPromise;
+      let popup = await popupPromise;
       if (!popup) {
         await rowJump.hover({ timeout: 4000 }).catch(() => {});
         await sleep(1200);
@@ -241,15 +263,34 @@ function monthSegments(start, end) {
           }
         }
       }
-      if (!popup && attempt === 1) {
-        console.log(`[${acc.name}] 第 1 次跳转失败，回列表重试 ...`);
+      if (popup) {
+        // 等待 URL 出现 vSellerId（SSO 中间跳转）
+        for (let i = 0; i < 10; i++) {
+          if (/vSellerId=|ad\.xiaohongshu\.com/.test(popup.url())) break;
+          await sleep(1500);
+        }
+        if (/ad\.xiaohongshu\.com/.test(popup.url())) return popup;
+        console.log(`[${acc.name}] popup 落地异常: ${popup.url().slice(0, 90)}`);
+        await popup.close().catch(() => {});
+      }
+      if (attempt < 3) {
+        console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，重试 ...`);
         await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
         await sleep(9000);
+        await cleanListPage();
       }
     }
+    return null;
+  };
+
+  let hasNextPage = true;
+  for (let pg = 0; pg < 6 && hasNextPage; pg++) {
+  const pageAccounts = await enumeratePage();
+  accountTotal += pageAccounts.length;
+  for (const acc of pageAccounts) {
+    if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
+    const popup = await ensureJump(acc);
     if (!popup) { console.log(`[${acc.name}] 未进入聚光，跳过`); continue; }
-    await popup.waitForLoadState('domcontentloaded', { timeout: 45000 }).catch(() => {});
-    await sleep(6000);
     const vseller = (popup.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] ?? acc.id;
     // 关键：先导航到「数据→标准投→笔记报表」页（会话模块就绪后报表 API 才返回数据）
     await popup
@@ -280,18 +321,20 @@ function monthSegments(start, end) {
               try { j = JSON.parse(raw); } catch {}
               return { raw, j };
             };
-            // 列尝试：名称列 + 新增种草人群候选列（失败逐级回退）
+            // 列尝试：全候选 → 名称列 → 基础列（逐级回退，保证至少基础列能出数）
+            const colsFull = [...body.columns, 'noteName', 'userName', 'grassUserNum', 'newGrassUserNum', 'tiUserNum'];
             const colsNames = [...body.columns, 'noteName', 'userName'];
-            const colsFull = [...colsNames, 'grassUserNum', 'newGrassUserNum', 'tiUserNum'];
-            let r1 = await doFetch(colsFull);
-            let j = r1.j;
-            if (!j || (j.code !== 0 && j.success !== true)) {
-              if (process.env.JG_DEBUG) console.log('[debug] full cols failed:', String(r1.raw).slice(0, 200));
-              const r2 = await doFetch(colsNames);
-              j = r2.j;
-              if (!j || (j.code !== 0 && j.success !== true)) {
-                if (process.env.JG_DEBUG) console.log('[debug] base failed:', String(r2.raw).slice(0, 300));
+            const attempts = [colsFull, colsNames, body.columns];
+            let j = null;
+            for (let ci = 0; ci < attempts.length; ci++) {
+              const r1 = await doFetch(attempts[ci]);
+              j = r1.j;
+              if (j && (j.code === 0 || j.success === true)) {
+                if (ci > 0) console.log(`[cols] 第 ${ci + 1} 档列组合成功`);
+                break;
               }
+              if (process.env.JG_DEBUG) console.log(`[debug] cols#${ci + 1} failed:`, String(r1.raw).slice(0, 200));
+              j = null;
             }
             const dl = j?.data?.dataList ?? [];
             const tp = j?.data?.page?.totalPage ?? 1;
