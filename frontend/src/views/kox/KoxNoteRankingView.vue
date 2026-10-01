@@ -39,9 +39,6 @@
       </FilterTopbar>
     </template>
 
-    <NoticeBar v-if="mode === 'demo'">该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
-    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台，每日 T+1 更新</NoticeBar>
-
     <div class="overview-blocks">
       <div v-for="b in blocks" :key="b.label" class="block-card">
         <div class="block-content">
@@ -241,7 +238,6 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import NoticeBar from '../../components/NoticeBar.vue';
 import { getKoxAccounts, getKoxNotes, getKoxNotesSummary } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 

@@ -63,7 +63,6 @@
         <b>{{ t.label }}</b>
         <span class="tier-count">{{ t.count }}</span>
       </div>
-      <span class="tier-hint">{{ data.metric_note }}</span>
     </div>
 
     <a-card size="small" :bordered="false">

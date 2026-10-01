@@ -65,7 +65,7 @@
         :columns="columns"
         :data-source="list"
         :loading="loading"
-        :scroll="{ x: 1560 }"
+        :scroll="{ x: 1450 }"
         :pagination="{
           total,
           current: page,
@@ -182,10 +182,6 @@
             <div class="mc-meta-item">
               <span class="muted mini">大区</span>
               <b>{{ record.region_name || '-' }}</b>
-            </div>
-            <div class="mc-meta-item">
-              <span class="muted mini">销售区域</span>
-              <b>{{ record.sale_area || '-' }}</b>
             </div>
             <div class="mc-meta-item">
               <span class="muted mini">门店</span>
@@ -496,7 +492,6 @@ const columns = [
   { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 110, ellipsis: true },
   { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 100, sorter: true },
   { key: 'region_name', title: '大区', dataIndex: 'region_name', width: 100, ellipsis: true },
-  { key: 'sale_area', title: '销售区域', dataIndex: 'sale_area', width: 110, ellipsis: true },
   { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 130, ellipsis: true },
   { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', width: 180, ellipsis: true },
   { key: 'operator_name', title: '运营人', dataIndex: 'operator_name', width: 90, ellipsis: true },
