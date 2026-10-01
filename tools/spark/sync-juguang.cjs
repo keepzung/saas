@@ -268,12 +268,16 @@ function monthSegments(start, end) {
         }
       }
       if (popup) {
-        // 等待 URL 出现 vSellerId（SSO 中间跳转）
+        // 等待 SSO 链路完成：URL 到达聚光域 + 加载稳定（中断会丢账户会话 cookie → 报表 API 无登录信息）
         for (let i = 0; i < 10; i++) {
           if (/vSellerId=|ad\.xiaohongshu\.com/.test(popup.url())) break;
           await sleep(1500);
         }
-        if (/ad\.xiaohongshu\.com/.test(popup.url())) return popup;
+        if (/ad\.xiaohongshu\.com/.test(popup.url())) {
+          await popup.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+          await sleep(6000);
+          return popup;
+        }
         console.log(`[${acc.name}] popup 落地异常: ${popup.url().slice(0, 90)}`);
         await popup.close().catch(() => {});
       }
