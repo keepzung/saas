@@ -71,7 +71,8 @@ if (fs.existsSync(envPath)) {
 }
 const yesterday = () => {
   const t = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-  return new Date(new Date(`${t}T00:00:00+08:00`).getTime() - 86400000).toISOString().slice(0, 10);
+  // 减一天后补回 +8h 再取日期，避免 toISOString（UTC）回退一天
+  return new Date(new Date(`${t}T00:00:00+08:00`).getTime() - 86400000 + 8 * 3600000).toISOString().slice(0, 10);
 };
 // [start,end] 切成自然月段（纯字符串算术，避免 setMonth 时区陷阱死循环）
 function nextMonth(ym) {
@@ -188,7 +189,7 @@ function monthSegments(start, end) {
       const to = c.rawJson?.juguang_synced_to;
       if (!to) continue;
       if (to >= end) continue;
-      const next = new Date(new Date(`${to}T00:00:00+08:00`).getTime() + 86400000).toISOString().slice(0, 10);
+      const next = new Date(new Date(`${to}T00:00:00+08:00`).getTime() + 86400000 + 8 * 3600000).toISOString().slice(0, 10);
       if (next < globalStart) globalStart = next;
     }
     if (FULL) globalStart = FULL_START;
@@ -202,21 +203,30 @@ function monthSegments(start, end) {
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
     const row = rowsLoc.nth(acc.idx);
     const rowJump = row.locator('text=跳转').first();
-    const popupPromise = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
-    await rowJump.click({ timeout: 8000 }).catch(() => {});
-    await sleep(3500);
-    let popup = await popupPromise;
-    if (!popup) {
-      await rowJump.hover({ timeout: 4000 }).catch(() => {});
-      await sleep(1200);
-      const picks = listPage.locator('text="聚光平台"');
-      for (let i = 0; i < (await picks.count()); i++) {
-        if (await picks.nth(i).isVisible().catch(() => false)) {
-          const pp2 = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
-          await picks.nth(i).click({ timeout: 6000 }).catch(() => {});
-          popup = await pp2;
-          break;
+    let popup = null;
+    // 跳转重试（最多 2 次：点击偶发无响应）
+    for (let attempt = 1; attempt <= 2 && !popup; attempt++) {
+      const popupPromise = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
+      await rowJump.click({ timeout: 8000 }).catch(() => {});
+      await sleep(3500);
+      popup = await popupPromise;
+      if (!popup) {
+        await rowJump.hover({ timeout: 4000 }).catch(() => {});
+        await sleep(1200);
+        const picks = listPage.locator('text="聚光平台"');
+        for (let i = 0; i < (await picks.count()); i++) {
+          if (await picks.nth(i).isVisible().catch(() => false)) {
+            const pp2 = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
+            await picks.nth(i).click({ timeout: 6000 }).catch(() => {});
+            popup = await pp2;
+            break;
+          }
         }
+      }
+      if (!popup && attempt === 1) {
+        console.log(`[${acc.name}] 第 1 次跳转失败，回列表重试 ...`);
+        await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(9000);
       }
     }
     if (!popup) { console.log(`[${acc.name}] 未进入聚光，跳过`); continue; }
@@ -319,7 +329,7 @@ function monthSegments(start, end) {
     );
     // 主字段增量：仅游标之后（游标前已在基线/前次增量中）
     const from = cursorRaw && !FULL
-      ? new Date(new Date(`${cursorRaw}T00:00:00+08:00`).getTime() + 86400000).toISOString().slice(0, 10)
+      ? new Date(new Date(`${cursorRaw}T00:00:00+08:00`).getTime() + 86400000 + 8 * 3600000).toISOString().slice(0, 10)
       : allRows[0].day;
     const incRows = allRows.filter((r) => r.day >= from && r.day <= end);
     const newSynced = allRows.reduce((m, r) => (r.day > m ? r.day : m), from);
