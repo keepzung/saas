@@ -274,8 +274,16 @@ function monthSegments(start, end) {
             };
             // 名称列尝试（失败自动回退基础列）
             const withNames = [...body.columns, 'noteName', 'userName'];
-            let { j } = await doFetch(withNames);
-            if (!j || (j.code !== 0 && j.success !== true)) ({ j } = await doFetch(body.columns));
+            let r1 = await doFetch(withNames);
+            let j = r1.j;
+            if (!j || (j.code !== 0 && j.success !== true)) {
+              if (process.env.JG_DEBUG) console.log('[debug] withNames failed:', String(r1.raw).slice(0, 200));
+              const r2 = await doFetch(body.columns);
+              j = r2.j;
+              if (!j || (j.code !== 0 && j.success !== true)) {
+                if (process.env.JG_DEBUG) console.log('[debug] base failed:', String(r2.raw).slice(0, 300));
+              }
+            }
             const dl = j?.data?.dataList ?? [];
             const tp = j?.data?.page?.totalPage ?? 1;
             const out = [];
