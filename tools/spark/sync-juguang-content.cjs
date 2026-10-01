@@ -213,10 +213,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // ── 写库：KoxNote 回填（标题/封面/发布时间/作者/链接；占位空值优先）──
   let titleFixed = 0, coverFixed = 0, pubFixed = 0, authorFixed = 0, missing = 0;
   const noteIds = rowsAll.map((r) => r.noteId).filter(Boolean);
-  const existing = await prisma.koxNote.findMany({
-    where: { brandId: BRAND_ID, noteId: { in: noteIds } },
-    select: { id: true, noteId: true, title: true, coverUrl: true, publishTime: true, authorName: true, noteUrl: true, rawJson: true },
-  });
+  const existing = [];
+  for (let i = 0; i < noteIds.length; i += 20000) {
+    const chunk = noteIds.slice(i, i + 20000);
+    const part = await prisma.koxNote.findMany({
+      where: { brandId: BRAND_ID, noteId: { in: chunk } },
+      select: { id: true, noteId: true, title: true, coverUrl: true, publishTime: true, authorName: true, noteUrl: true, rawJson: true },
+    });
+    existing.push(...part);
+  }
   const exMap = new Map(existing.map((n) => [n.noteId, n]));
   for (const r of rowsAll) {
     if (!r.noteId) continue;
