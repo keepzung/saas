@@ -209,6 +209,10 @@ function monthSegments(start, end) {
   }
   const segments = monthSegments(globalStart, end);
   console.log(`[2] 同步区间: ${globalStart} ~ ${end}（${segments.length} 个月段，${FULL ? '全量' : '增量'}）${DRY ? '（dry-run）' : ''}`);
+  if (process.env.JG_INITIAL_WAIT) {
+    console.log(`[2] 初始等待 ${process.env.JG_INITIAL_WAIT / 1000}s（限流冷却）...`);
+    await sleep(Number(process.env.JG_INITIAL_WAIT));
+  }
 
   const agg = new Map(); // noteId -> {noteId, vSeller, name, rows: Map(day->sum)}
   let accountOk = 0;
@@ -274,8 +278,9 @@ function monthSegments(start, end) {
         await popup.close().catch(() => {});
       }
       if (attempt < 3) {
-        console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，冷却 20s 后重试 ...`);
-        await sleep(20000);
+        const retryWait = Number(process.env.JG_RETRY_WAIT ?? 20000);
+        console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，冷却 ${retryWait / 1000}s 后重试 ...`);
+        await sleep(retryWait);
         await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
         await sleep(9000);
         await cleanListPage();
@@ -292,8 +297,9 @@ function monthSegments(start, end) {
   for (const acc of pageAccounts) {
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
     if (consecutiveJumpFails >= 2) {
-      console.log(`[cooldown] 连续 ${consecutiveJumpFails} 个账户跳转失败，冷却 120s ...`);
-      await sleep(120000);
+      const cd = Number(process.env.JG_FAIL_COOLDOWN ?? 120000);
+      console.log(`[cooldown] 连续 ${consecutiveJumpFails} 个账户跳转失败，冷却 ${cd / 1000}s ...`);
+      await sleep(cd);
       consecutiveJumpFails = 0;
       await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
       await sleep(9000);
@@ -402,7 +408,7 @@ function monthSegments(start, end) {
     accountOk += 1;
     console.log(`[${acc.name}] 笔记日行 ${noteRows} 条`);
     await popup.close().catch(() => {});
-    await sleep(8000);
+    await sleep(Number(process.env.JG_ACCOUNT_WAIT ?? 8000));
   }
   hasNextPage = pg === 0 && !pageAccounts.length ? false : await gotoNextPage();
   }
