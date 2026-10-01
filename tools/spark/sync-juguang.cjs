@@ -274,7 +274,8 @@ function monthSegments(start, end) {
         await popup.close().catch(() => {});
       }
       if (attempt < 3) {
-        console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，重试 ...`);
+        console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，冷却 20s 后重试 ...`);
+        await sleep(20000);
         await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
         await sleep(9000);
         await cleanListPage();
@@ -282,6 +283,7 @@ function monthSegments(start, end) {
     }
     return null;
   };
+  let consecutiveJumpFails = 0;
 
   let hasNextPage = true;
   for (let pg = 0; pg < 6 && hasNextPage; pg++) {
@@ -289,8 +291,21 @@ function monthSegments(start, end) {
   accountTotal += pageAccounts.length;
   for (const acc of pageAccounts) {
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
+    if (consecutiveJumpFails >= 2) {
+      console.log(`[cooldown] 连续 ${consecutiveJumpFails} 个账户跳转失败，冷却 120s ...`);
+      await sleep(120000);
+      consecutiveJumpFails = 0;
+      await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await sleep(9000);
+      await cleanListPage();
+    }
     const popup = await ensureJump(acc);
-    if (!popup) { console.log(`[${acc.name}] 未进入聚光，跳过`); continue; }
+    if (!popup) {
+      consecutiveJumpFails += 1;
+      console.log(`[${acc.name}] 未进入聚光，跳过`);
+      continue;
+    }
+    consecutiveJumpFails = 0;
     const vseller = (popup.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] ?? acc.id;
     // 关键：先导航到「数据→标准投→笔记报表」页（会话模块就绪后报表 API 才返回数据）
     await popup
@@ -387,7 +402,7 @@ function monthSegments(start, end) {
     accountOk += 1;
     console.log(`[${acc.name}] 笔记日行 ${noteRows} 条`);
     await popup.close().catch(() => {});
-    await sleep(2000);
+    await sleep(8000);
   }
   hasNextPage = pg === 0 && !pageAccounts.length ? false : await gotoNextPage();
   }
