@@ -1,19 +1,19 @@
 // 特斯拉笔记规则分类（标题关键词）：内容类型 + 车型
 // 内容：干货 / 种草 / 互动 / 政策（用户口径：干货、种草、互动、政策）
-// 车型：Model3 / Y / YL / YP / 3P / X / S
+// 车型：统一带 Model 前缀（ModelY / ModelYL / ModelYP / Model3P / ModelX / ModelS / Model3）
 export interface NoteClass {
   category: string;
   modelTag: string;
 }
 
 const MODEL_RULES: [RegExp, string][] = [
-  [/model\s*y\s*l|^\s*yl\b|\bYL\b/i, 'YL'],
-  [/model\s*y\s*p(?!u)|\bYP\b/i, 'YP'],
-  [/model\s*3\s*p(?!u)|\b3P\b/i, '3P'],
-  [/model\s*x\b|\bmodelx\b/i, 'X'],
-  [/model\s*s\b|\bmodels\b/i, 'S'],
+  [/model\s*y\s*l|^\s*yl\b|\bYL\b/i, 'ModelYL'],
+  [/model\s*y\s*p(?!u)|\bYP\b/i, 'ModelYP'],
+  [/model\s*3\s*p(?!u)|\b3P\b/i, 'Model3P'],
+  [/model\s*x\b|\bmodelx\b/i, 'ModelX'],
+  [/model\s*s\b|\bmodels\b/i, 'ModelS'],
   [/model\s*3\b|model3|毛豆3/i, 'Model3'],
-  [/model\s*y\b|modely|毛豆y|model\s*y/i, 'Y'],
+  [/model\s*y\b|modely|毛豆y|model\s*y/i, 'ModelY'],
 ];
 
 const CATEGORY_RULES: [RegExp, string][] = [

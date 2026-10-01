@@ -26,9 +26,9 @@
         </div>
       </a-card>
 
-      <a-row :gutter="12">
-        <a-col :span="11">
-          <a-card size="small" :bordered="false">
+      <a-row :gutter="12" class="top-row" align="stretch">
+        <a-col :span="12">
+          <a-card size="small" :bordered="false" class="ov-card">
             <template #title>
               <div class="sec-head"><span class="bar"></span>账号总览</div>
             </template>
@@ -37,11 +37,11 @@
               <div class="ov3-item"><span>门店中心数</span><b>{{ fmt(ov.global?.store_num) }}</b></div>
               <div class="ov3-item"><span>粉丝覆盖人次</span><b class="c-green">{{ fmt(ov.global?.fans_sum) }}</b></div>
             </div>
-            <div ref="regionBarEl" style="height: 240px" />
+            <div ref="regionBarEl" class="chart-fill" />
           </a-card>
         </a-col>
-        <a-col :span="13">
-          <a-card size="small" :bordered="false">
+        <a-col :span="12">
+          <a-card size="small" :bordered="false" class="ov-card">
             <template #title>
               <div class="sec-head"><span class="bar"></span>内容运营表现</div>
             </template>
@@ -53,7 +53,7 @@
               <div class="ov6-item"><span>平均发布数</span><b>{{ ov.summary?.avg_publish ?? 0 }}</b></div>
               <div class="ov6-item" :class="{ active: ovMetric === 'leads' }" @click="ovMetric = 'leads'"><span>线索数据之和</span><b class="c-green">{{ fmt(ov.lead_funnel?.total_leads ?? ov.lead_funnel?.pm_leads) }}</b></div>
             </div>
-            <div ref="regionLineEl" style="height: 240px" />
+            <div ref="regionLineEl" class="chart-fill" />
           </a-card>
         </a-col>
       </a-row>
@@ -154,12 +154,12 @@
       </a-card>
 
       <a-row :gutter="12">
-        <a-col :span="14">
+        <a-col :span="12">
           <a-card size="small" title="运营趋势">
             <div ref="opsChartEl" style="height: 300px" />
           </a-card>
         </a-col>
-        <a-col :span="10">
+        <a-col :span="12">
           <a-card size="small" title="投放趋势">
             <div ref="adChartEl" style="height: 300px" />
           </a-card>
@@ -569,6 +569,29 @@ onBeforeUnmount(() => {
 .q-icon {
   color: #94a3b8;
   font-size: 13px;
+}
+
+/* 顶部两卡等高等宽：卡片纵向 flex，图表区弹性填充 */
+.top-row {
+  align-items: stretch;
+}
+.top-row > .ant-col {
+  display: flex;
+}
+.top-row .ov-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.top-row .ov-card .ant-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.top-row .chart-fill {
+  flex: 1;
+  min-height: 220px;
 }
 
 .ov3 {
