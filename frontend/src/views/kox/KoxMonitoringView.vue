@@ -65,6 +65,7 @@
         :columns="columns"
         :data-source="list"
         :loading="loading"
+        :scroll="{ x: 1560 }"
         :pagination="{
           total,
           current: page,
@@ -79,9 +80,11 @@
           <template v-if="column.key === 'account'">
             <div class="acc-cell">
               <a-avatar :size="32">{{ record.nickname.slice(0, 1) }}</a-avatar>
-              <div>
+              <div class="acc-main">
                 <div class="acc-name">
-                  {{ record.nickname }}
+                  <a-tooltip :title="record.nickname">
+                    <span class="name-ellipsis">{{ record.nickname }}</span>
+                  </a-tooltip>
                   <a-tag :color="typeColor[record.account_type]" class="mini">
                     {{ record.account_type }}
                   </a-tag>
@@ -347,9 +350,9 @@
 
       <template v-if="importRows.length">
         <a-alert
-          type="success"
+          :type="importPreview.added + importPreview.updated ? 'success' : 'warning'"
           show-icon
-          :message="`已解析 ${importRows.length} 条账号（展示前 10 条）`"
+          :message="`已解析 ${importRows.length} 条：新增 ${importPreview.added} · 重叠更新 ${importPreview.updated}` + (importErrors.length ? ` · 错误 ${importErrors.length}` : '')"
           style="margin-top: 12px"
         />
         <a-table
@@ -367,8 +370,16 @@
             <template v-else-if="column.key === 'regionName'">
               {{ record.regionName || record.region || '-' }}
             </template>
+            <template v-else-if="column.key === 'action'">
+              <a-tag v-if="record._action === 'create'" color="green">新增</a-tag>
+              <a-tag v-else-if="record._action === 'update'" color="blue">重叠更新</a-tag>
+              <a-tag v-else>-</a-tag>
+            </template>
           </template>
         </a-table>
+        <p class="muted mini" style="margin-top: 6px">
+          重叠账号仅更新 Excel 提供的字段（昵称与启停状态不变）；展示前 10 条，确认后全部导入。
+        </p>
       </template>
       <a-alert
         v-if="importErrors.length"
@@ -408,31 +419,44 @@ const importing = ref(false);
 const importFileList = ref([]);
 const importRows = ref([]);
 const importErrors = ref([]);
+const importPreview = ref({ added: 0, updated: 0 });
 const importPreviewColumns = [
-  { title: 'UID', dataIndex: 'authorId', width: 210, ellipsis: true },
-  { title: '类型', dataIndex: 'accountType', width: 70 },
+  { title: 'UID', dataIndex: 'authorId', width: 200, ellipsis: true },
+  { title: '昵称', dataIndex: 'nickname', width: 140, ellipsis: true },
+  { title: '类型', dataIndex: 'accountType', width: 64 },
   { title: '大区', key: 'regionName', width: 90 },
-  { title: '销售区域', dataIndex: 'saleArea', width: 100, ellipsis: true },
-  { title: '地区', key: 'area', width: 120 },
-  { title: '门店', dataIndex: 'storeName', ellipsis: true },
+  { title: '门店', dataIndex: 'storeName', width: 150, ellipsis: true },
+  { title: '判定', key: 'action', width: 90 },
 ];
 
 function clearImportFile() {
   importFileList.value = [];
   importRows.value = [];
   importErrors.value = [];
+  importPreview.value = { added: 0, updated: 0 };
 }
 
 async function onImportFile(file) {
   try {
     const { accounts, errors } = await parseAccountWorkbook(file);
-    importRows.value = accounts;
+    importRows.value = [];
     importErrors.value = errors;
     importFileList.value = [{ uid: '-1', name: file.name, status: 'done' }];
+    if (!accounts.length) {
+      message.warning('未解析到有效账号行');
+      importPreview.value = { added: 0, updated: 0 };
+      return false;
+    }
+    // dryRun 预检：标注每行 新增/重叠更新
+    const res = await importKoxAccounts(accounts, true);
+    const cls = new Map((res.classification ?? []).map((c) => [c.authorId, c.action]));
+    importRows.value = accounts.map((a) => ({ ...a, _action: cls.get(a.authorId) }));
+    importPreview.value = { added: res.added ?? 0, updated: res.updated ?? 0 };
     if (!accounts.length) message.warning('未解析到有效账号行');
   } catch (e) {
     message.error(e.message || '文件解析失败');
     importFileList.value = [];
+    importPreview.value = { added: 0, updated: 0 };
   }
   return false;
 }
@@ -444,9 +468,10 @@ async function doImport() {
   }
   importing.value = true;
   try {
-    const res = await importKoxAccounts(importRows.value);
+    const rows = importRows.value.map(({ _action, ...rest }) => rest);
+    const res = await importKoxAccounts(rows, false);
     message.success(
-      `导入完成：新增 ${res.added}，更新 ${res.updated}` +
+      `导入完成：新增 ${res.added}，重叠更新 ${res.updated}` +
         (res.errors.length ? `，失败 ${res.errors.length} 行` : ''),
     );
     importOpen.value = false;
@@ -464,20 +489,20 @@ const typeColor = { KOS: 'blue', KOB: 'purple', KOC: 'cyan' };
 const SORT_MAP = { fans: 'fans', add_time: 'createdAt' };
 
 const columns = [
-  { key: 'account', title: '账号' },
+  { key: 'account', title: '账号', width: 240 },
   { key: 'author_id', title: 'UID', dataIndex: 'author_id', width: 160, ellipsis: true },
   { key: 'platform', title: '平台', width: 90 },
   { key: 'account_type', title: '账号类型', dataIndex: 'account_type', width: 100 },
-  { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 100 },
-  { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 110, sorter: true },
+  { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 110, ellipsis: true },
+  { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 100, sorter: true },
   { key: 'region_name', title: '大区', dataIndex: 'region_name', width: 100, ellipsis: true },
   { key: 'sale_area', title: '销售区域', dataIndex: 'sale_area', width: 110, ellipsis: true },
-  { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 120, ellipsis: true },
-  { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', ellipsis: true },
-  { key: 'operator_name', title: '运营人', dataIndex: 'operator_name', width: 90 },
-  { key: 'add_time', title: '添加时间', dataIndex: 'add_time', width: 120, sorter: true },
-  { key: 'operation', title: '运营', width: 90 },
-  { key: 'action', title: '操作', width: 130 },
+  { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 130, ellipsis: true },
+  { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', width: 180, ellipsis: true },
+  { key: 'operator_name', title: '运营人', dataIndex: 'operator_name', width: 90, ellipsis: true },
+  { key: 'add_time', title: '添加时间', dataIndex: 'add_time', width: 110, sorter: true },
+  { key: 'operation', title: '运营', width: 80 },
+  { key: 'action', title: '操作', width: 120, fixed: 'right' },
 ];
 
 const list = ref([]);
@@ -673,10 +698,23 @@ onMounted(reload);
   gap: 10px;
 }
 
+.acc-main {
+  min-width: 0;
+}
+
 .acc-name {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.name-ellipsis {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
 }
 
 .acc-uid {

@@ -50,11 +50,13 @@ export class KoxController {
   }
 
   @Post('kox/accounts/import')
-  importAccounts(@Body() dto: { accounts: ImportAccountRow[] }) {
+  importAccounts(
+    @Body() dto: { accounts: ImportAccountRow[]; dryRun?: boolean },
+  ) {
     if (!Array.isArray(dto.accounts) || dto.accounts.length === 0) {
       throw new BadRequestException('accounts 不能为空');
     }
-    return this.koxService.importAccounts(dto.accounts);
+    return this.koxService.importAccounts(dto.accounts, dto.dryRun === true);
   }
 
   @Put('kox/accounts/:id')

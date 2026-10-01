@@ -5,8 +5,8 @@ export const getKoxAccounts = (params) =>
 
 export const createKoxAccount = (data) => request.post('/kox/accounts', data);
 
-export const importKoxAccounts = (accounts) =>
-  request.post('/kox/accounts/import', { accounts });
+export const importKoxAccounts = (accounts, dryRun = false) =>
+  request.post('/kox/accounts/import', { accounts, dryRun });
 
 export const updateKoxAccount = (id, data) =>
   request.put(`/kox/accounts/${id}`, data);

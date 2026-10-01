@@ -42,6 +42,7 @@ export interface TaskDto {
 
 export interface ImportAccountRow {
   authorId?: string | number;
+  nickname?: string;
   accountType?: string;
   regionName?: string;
   saleArea?: string;
@@ -50,6 +51,10 @@ export interface ImportAccountRow {
   city?: string;
   storeName?: string;
   authorUrl?: string;
+  fans?: string | number;
+  operatorName?: string;
+  operatorMobile?: string;
+  accountTag?: string;
 }
 
 const num = (v: unknown): number => {
@@ -2642,17 +2647,18 @@ export class KoxService {
     };
   }
 
-  async importAccounts(rows: ImportAccountRow[]) {
+  async importAccounts(rows: ImportAccountRow[], dryRun = false) {
     let added = 0;
     let updated = 0;
     const errors: { row: number; msg: string }[] = [];
-    const seen = new Set<string>();
 
     const clean = (v?: unknown) => {
       const s = (v ?? '').toString().trim();
       return s && s !== '无' ? s : null;
     };
 
+    // 文件内 UID 去重：同一 UID 保留最后一行（最新信息为准）
+    const byUid = new Map<string, { row: ImportAccountRow; rowNo: number }>();
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
       const authorId = (r.authorId ?? '').toString().trim();
@@ -2661,12 +2667,12 @@ export class KoxService {
         errors.push({ row: rowNo, msg: '缺少账号UID' });
         continue;
       }
-      if (seen.has(authorId)) {
-        errors.push({ row: rowNo, msg: '文件内UID重复，已跳过' });
-        continue;
-      }
-      seen.add(authorId);
+      byUid.set(authorId, { row: r, rowNo });
+    }
 
+    const classification: { authorId: string; action: 'create' | 'update' }[] = [];
+
+    for (const [authorId, { row: r, rowNo }] of byUid) {
       const type = (r.accountType ?? '').toString().trim().toUpperCase();
       if (type && !['KOS', 'KOB', 'KOC'].includes(type)) {
         errors.push({ row: rowNo, msg: `账号类型非法：${type}` });
@@ -2680,33 +2686,48 @@ export class KoxService {
       const regionName = clean(r.regionName) ?? clean(r.region);
       const saleArea = clean(r.saleArea);
       const storeName = clean(r.storeName);
+      const nickname = clean(r.nickname);
+      const operatorName = clean(r.operatorName);
+      const operatorMobile = clean(r.operatorMobile);
+      const accountTag = clean(r.accountTag);
+      const fansNum = Number(r.fans);
 
-      const data = {
-        nickname: storeName ?? authorId,
-        accountType: type || 'KOS',
-        regionName,
-        saleArea,
-        areaName: area,
-        storeName,
-        authorUrl: (r.authorUrl ?? '').toString().trim() || null,
-        platform: 'xhs',
-      };
+      // 仅写入 Excel 提供的非空字段（重叠账号不覆盖系统已有昵称/状态）
+      const data: Record<string, unknown> = {};
+      if (type) data.accountType = type;
+      if (regionName) data.regionName = regionName;
+      if (saleArea) data.saleArea = saleArea;
+      if (area) data.areaName = area;
+      if (storeName) data.storeName = storeName;
+      const authorUrl = clean(r.authorUrl);
+      if (authorUrl) data.authorUrl = authorUrl;
+      if (operatorName) data.operatorName = operatorName;
+      if (operatorMobile) data.operatorMobile = operatorMobile;
+      if (accountTag) data.accountTag = accountTag;
+      if (Number.isFinite(fansNum) && fansNum >= 0) data.fans = Math.round(fansNum);
 
       const existing = await this.prisma.kosAccount.findUnique({
         where: { authorId },
       });
       if (existing) {
-        await this.prisma.kosAccount.update({ where: { authorId }, data });
+        // 重叠：昵称仅在原为空时补
+        if (!existing.nickname && nickname) data.nickname = nickname;
+        classification.push({ authorId, action: 'update' });
+        if (!dryRun) await this.prisma.kosAccount.update({ where: { authorId }, data });
         updated += 1;
       } else {
-        await this.prisma.kosAccount.create({
-          data: { authorId, ...data },
-        });
+        // 新增：昵称 = Excel昵称 → 门店名 → UID
+        data.nickname = nickname ?? storeName ?? authorId;
+        data.accountType = type || 'KOS';
+        data.platform = 'xhs';
+        data.fans = data.fans ?? 0;
+        classification.push({ authorId, action: 'create' });
+        if (!dryRun) await this.prisma.kosAccount.create({ data: { authorId, ...data } as never });
         added += 1;
       }
     }
 
-    return { total: rows.length, added, updated, errors };
+    return { total: rows.length, added, updated, errors, classification };
   }
 
   /**

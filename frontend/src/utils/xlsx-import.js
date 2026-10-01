@@ -34,8 +34,10 @@ export async function parseAccountWorkbook(file) {
     }
     const region = clean(pick(r, '大区'));
     const summaryRegion = clean(pick(r, '汇总区域'));
+    const fansRaw = Number(clean(pick(r, '粉丝')));
     accounts.push({
       authorId,
+      nickname: clean(pick(r, '昵称')),
       accountType: clean(pick(r, '账号类型')) || 'KOS',
       regionName: region || summaryRegion,
       saleArea: clean(pick(r, '销售区域')),
@@ -44,6 +46,10 @@ export async function parseAccountWorkbook(file) {
       city: clean(pick(r, '城市')),
       storeName: clean(pick(r, '门店')),
       authorUrl: clean(pick(r, '主页')),
+      fans: Number.isFinite(fansRaw) && fansRaw >= 0 ? fansRaw : undefined,
+      operatorName: clean(pick(r, '运营人')) || clean(pick(r, '实操')),
+      operatorMobile: clean(pick(r, '手机')),
+      accountTag: clean(pick(r, '标签')),
     });
   });
 
