@@ -1,9 +1,6 @@
 <template>
   <PageWrapper title="运营总览" subtitle="特斯拉 KOS 运营数据">
     <div class="tesla-ov">
-      <NoticeBar>
-        {{ dataSourceNote }}
-      </NoticeBar>
       <a-card size="small" class="filter-card">
         <div class="filter-row">
           <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
@@ -264,7 +261,6 @@ import * as echarts from 'echarts';
 import { useRouter } from 'vue-router';
 import { QuestionCircleOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../../components/PageWrapper.vue';
-import NoticeBar from '../../../components/NoticeBar.vue';
 import {
   getKoxAccountRanking,
   getKoxAccounts,
@@ -299,20 +295,10 @@ const ovMetric = ref('item');
 const ov = ref({});
 const rankList = ref([]);
 const hotList = ref([]);
-// 数据来源口径说明（周度快照 > 专业号真实窗口 > 笔记快照）
-const dataSourceNote = computed(() => {
-  const src = ov.value?.content_source ?? '';
-  if (src.startsWith('weekly_snapshot')) {
-    return '本周期为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）。';
-  }
-  if (src.startsWith('pro_staff_window')) {
-    return '本周期内容/线索数据来自专业号平台真实统计窗口（每日自动同步）；笔记级明细快照截至 2026-09-28（乐允周期导出）。';
-  }
-  return '内容指标为乐允导出的笔记周期累计口径（快照截至 2026-09-28，自定义区间按发布时间聚合）；线索为专业号平台口径。';
-});
-// 点击率 = 总阅读量 / 总曝光量
+// 点击率 = 聚光笔记报表 Σ点击/Σ展现（summary.ctr，仅投流口径）；无聚光数据时回退 阅读/曝光
 const ctrPct = computed(() => {
   const s = ov.value?.summary ?? {};
+  if (s.ctr != null) return Number(s.ctr);
   const exp = Number(s.exposure_sum ?? 0);
   const view = Number(s.view_sum ?? 0);
   if (!exp) return 0;

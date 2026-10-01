@@ -239,6 +239,8 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
       ...(accountTag ? { accountTag } : {}),
       ...(regionName ? { regionName } : {}),
+      // 字段1：账号基线 = 大区刷新对照表（192 户），非对照表账号置 disabled 不计入
+      status: 'enabled',
     };
     const campaignWhere: Prisma.KoxCampaignDailyStatWhereInput = {
       statDate: { gte: start, lte: end },
@@ -366,11 +368,15 @@ export class KoxService {
     const hasCampaign = campaignRows.length > 0;
 
     // 账号总览两卡 + 大区分布 + 大区内容发布数：随大区/标签筛选联动（与前端 tooltip 口径一致）
-    const globalAccountWhere: Prisma.KosAccountWhereInput = filteredAccounts
-      ? { id: { in: filteredAccounts.map((a) => a.id) } }
-      : brandId
-        ? { brandId }
-        : {};
+    // 字段1：账号基线 = 大区刷新对照表（disabled 账号不计入）
+    const globalAccountWhere: Prisma.KosAccountWhereInput = {
+      ...(filteredAccounts
+        ? { id: { in: filteredAccounts.map((a) => a.id) } }
+        : brandId
+          ? { brandId }
+          : {}),
+      status: 'enabled',
+    };
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
         where: globalAccountWhere,
@@ -647,6 +653,15 @@ export class KoxService {
           })
         : [];
 
+    // 特斯拉：聚光笔记报表窗口聚合（字段6 新增粉丝=新增种草人群；字段7 点击率=聚光 Σclick/Σimp）
+    const jugAgg =
+      brandId === 6
+        ? await this.prisma.koxJuguangNoteDaily.aggregate({
+            where: { brandId: 6, day: { gte: start, lte: end } },
+            _sum: { click: true, impression: true, grassUser: true },
+          })
+        : null;
+
     return {
       global: globalBlock,
       store_num: await this.prisma.kosAccount.groupBy({
@@ -722,7 +737,7 @@ export class KoxService {
             : proContent
               ? proContent.interaction_sum
               : noteInteractionSum,
-          // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）；新增粉丝 = 窗口内发布笔记的涨粉和
+          // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）
           interaction_rate: (weeklySnap ? weeklySnap.view_sum : proContent ? proContent.view_sum : noteViewSum)
             ? r2(
                 ((weeklySnap ? weeklySnap.interaction_sum : proContent ? proContent.interaction_sum : noteInteractionSum) /
@@ -730,7 +745,15 @@ export class KoxService {
                   100,
               )
             : 0,
-          follow_count_sum: noteRows.reduce((acc, n) => acc + n.followCount, 0),
+          // 字段6：新增粉丝数 = 聚光笔记报表「新增种草人群」窗口加总（12 子账户）
+          follow_count_sum:
+            jugAgg && Number(jugAgg._sum.grassUser ?? 0) > 0
+              ? Number(jugAgg._sum.grassUser)
+              : noteRows.reduce((acc, n) => acc + n.followCount, 0),
+          // 字段7：点击率 = 聚光笔记报表 Σ点击/Σ展现（仅投流口径）
+          ...(jugAgg && Number(jugAgg._sum.impression ?? 0) > 0
+            ? { ctr: r2((Number(jugAgg._sum.click) / Number(jugAgg._sum.impression)) * 100) }
+            : {}),
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
@@ -1007,30 +1030,41 @@ export class KoxService {
             }
           }
         }
-        // ranf 分日补缺（乐允全口径投流数据）：xlsx 基线止日（09-24）之后，曝光/阅读/互动以 ranf 分日为准
-        // （整天全 0 才补会导致 ranf 新建笔记首见日被少量笔记累计值占位，曝光仅几十 vs 实际十几万）
+        // 字段8：运营趋势内容三线 = 聚光笔记报表（12 子账户加总，note×日；弃乐允快照/ranf）
         if (brandId === 6) {
-          const ranfDays = await this.prisma.koxRanfDaily.findMany({
-            where: { brandId: 6, day: { gte: start, lte: end } },
-            select: { day: true, impression: true, click: true, interaction: true },
-          });
-          for (const r of ranfDays) {
+          const jugDaily = await this.prisma.$queryRaw<{
+            day: Date;
+            cnt: bigint;
+            imp: bigint;
+            click: bigint;
+            inter: bigint;
+          }[]>`
+            SELECT day, COUNT(*)::bigint AS cnt, SUM(impression) AS imp, SUM(click) AS click, SUM(interaction) AS inter
+            FROM "KoxJuguangNoteDaily"
+            WHERE "brandId" = 6 AND day >= ${start} AND day <= ${end}
+            GROUP BY day`;
+          for (const r of jugDaily) {
             const key = dayKey08(r.day);
-            if (key <= '2026-09-24') continue; // 基线窗口内保持笔记快照口径
-            const existing = byDate.get(key);
-            if (!existing) {
-              byDate.set(key, {
-                ...emptyRow(),
-                ...campPart(campByDate.get(key)),
-                exposure_sum: Number(r.impression),
-                view_sum: Number(r.click),
-                interaction_sum: Number(r.interaction),
-              });
-            } else {
-              existing.exposure_sum = Number(r.impression);
-              existing.view_sum = Number(r.click);
-              existing.interaction_sum = Number(r.interaction);
-            }
+            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+            cur.item_cnt = Number(r.cnt);
+            cur.exposure_sum = Number(r.imp);
+            cur.view_sum = Number(r.click);
+            cur.interaction_sum = Number(r.inter);
+            byDate.set(key, cur);
+          }
+        }
+        // 字段9：投放趋势进线/开口/留资 = 专业号·线索经营 KOS-only 逐日（剔官号「特斯拉」）
+        if (brandId === 6) {
+          const clueDaily = await this.prisma.proClueDaily.findMany({
+            where: { brandId: 6, day: { gte: start, lte: end } },
+          });
+          for (const r of clueDaily) {
+            const key = dayKey08(r.day);
+            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+            cur.ad_msg_enter = r.enterKos;
+            cur.ad_msg_open = r.openKos;
+            cur.ad_msg_leads = r.leadsKos;
+            byDate.set(key, cur);
           }
         }
         // 横轴按查询区间逐日铺满（无数据天补 0），上限 366 天
