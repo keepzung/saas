@@ -315,8 +315,9 @@ function monthSegments(start, end) {
     consecutiveJumpFails = 0;
     const vseller = (popup.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] ?? acc.id;
     // 关键：先导航到「数据→标准投→笔记报表」页（会话模块就绪后报表 API 才返回数据）
+    const reportUrl = `https://ad.xiaohongshu.com/aurora/ad/datareports-basic/note?vSellerId=${vseller}`;
     await popup
-      .goto(`https://ad.xiaohongshu.com/aurora/ad/datareports-basic/note?vSellerId=${vseller}`, {
+      .goto(reportUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 45000,
       })
@@ -328,21 +329,23 @@ function monthSegments(start, end) {
       let pageNum = 1;
       let totalPage = 1;
       for (; pageNum <= totalPage && pageNum <= 80; pageNum++) {
-        // 页面上下文内解析，仅回传精简字段（避免大响应截断）
-        const list = await popup.evaluate(
-          async ({ body }) => {
-            const doFetch = async (cols) => {
-              const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ ...body, columns: cols }),
-              });
-              const raw = await res.text();
-              let j = null;
-              try { j = JSON.parse(raw); } catch {}
-              return { raw, j };
-            };
+        // 页面上下文内解析；报表页 SPA 偶发重载会销毁执行上下文 → 失败则重新导航重试
+        let list = null;
+        for (let rtry = 1; rtry <= 3; rtry++) {
+          list = await popup.evaluate(
+            async ({ body }) => {
+              const doFetch = async (cols) => {
+                const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({ ...body, columns: cols }),
+                });
+                const raw = await res.text();
+                let j = null;
+                try { j = JSON.parse(raw); } catch {}
+                return { raw, j };
+              };
             // 列尝试：全候选 → 名称列 → 基础列（逐级回退，保证至少基础列能出数）
             const colsFull = [...body.columns, 'noteName', 'userName', 'grassUserNum', 'newGrassUserNum', 'tiUserNum'];
             const colsNames = [...body.columns, 'noteName', 'userName'];
@@ -387,8 +390,15 @@ function monthSegments(start, end) {
               columns: ['time', 'noteId', 'fee', 'impression', 'click', 'interaction', 'messageConsult', 'initiativeMessage', 'msgLeadsNum'],
             },
           },
-        )        .catch(() => ({ out: [], totalPage: 1, debug: { evalErr: true } }));
-        if (list.debug) console.log(`[fetch-debug] ${segStart}~${segEnd} p${pageNum}: ${JSON.stringify(list.debug)}`);
+          ).catch((e) => ({ out: [], totalPage: 1, debug: { evalErr: true, msg: String(e).slice(0, 120) } }));
+          if (list.debug) {
+            console.log(`[fetch-debug] ${segStart}~${segEnd} p${pageNum} try${rtry}: ${JSON.stringify(list.debug)}`);
+            if (rtry < 3) {
+              await popup.goto(reportUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+              await sleep(10000);
+            }
+          } else break;
+        }
         if (list.itemKeysSample && !agg.size) console.log(`[cols] value keys: ${list.itemKeysSample}`);
         totalPage = list.totalPage || 1;
         for (const r of list.out) {
