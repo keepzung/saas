@@ -88,6 +88,8 @@ function weekSegments(start, end) {
   }
   return segs;
 }
+const allRowsFirst = (na) => [...na.rows.keys()].sort()[0];
+const allRowsLast = (na) => [...na.rows.keys()].sort().pop();
 
 (async () => {
   const prisma = new PrismaClient();
@@ -223,17 +225,48 @@ function weekSegments(start, end) {
   console.log(`[4] KoxRanfDaily 写入 ${days.length} 天`);
 
   // ── 写库 2：KoxNote（游标增量叠加）──
-  const noteIds = [...notesAgg.keys()];
+  // 2026-10-01 起：笔记主字段叠加默认停用（投放口径改由聚光「标准投笔记报表」sync-juguang.cjs 接管，避免双算）
+  // ranf 保留：KoxRanfDaily 趋势数据源 + 笔记元数据（noteUrl/作者/ranf_agg 参考值）
+  const NOTE_OVERLAY = process.env.RANF_NOTE_OVERLAY === '1';
+  const noteIds = NOTE_OVERLAY ? [...notesAgg.keys()] : [];
   const existing = await prisma.koxNote.findMany({
-    where: { brandId: BRAND_ID, noteId: { in: noteIds } },
-    select: { id: true, noteId: true, exposure: true, views: true, pmInquiries: true, pmOpenings: true, pmLeads: true, rawJson: true, authorName: true },
+    where: { brandId: BRAND_ID, noteId: { in: noteIds.length ? noteIds : ['__none__'] } },
+    select: { id: true, noteId: true, accountId: true, exposure: true, views: true, pmInquiries: true, pmOpenings: true, pmLeads: true, rawJson: true, authorName: true },
   });
   const existMap = new Map(existing.map((n) => [n.noteId, n]));
   const kosAccounts = await prisma.kosAccount.findMany({ where: { brandId: BRAND_ID }, select: { id: true, nickname: true } });
   const acctIdByNick = new Map(kosAccounts.map((a) => [a.nickname, a.id]));
 
   let created = 0, updated = 0, skipped = 0;
-  for (const na of notesAgg.values()) {
+  if (!NOTE_OVERLAY) {
+    // 元数据模式：只补 noteUrl / 作者归属，不动主字段、不新建笔记（新建交给聚光同步器）
+    for (const na of notesAgg.values()) {
+      const prev = existMap.get(na.noteId);
+      if (!prev) { skipped += 1; continue; }
+      const raw = { ...(prev.rawJson ?? {}) };
+      let changed = false;
+      if (na.url && !raw.ranf_note_url) { raw.ranf_note_url = na.url; changed = true; }
+      const aggSum = [...na.rows.values()].reduce(
+        (a, r) => ({ fee: a.fee + r.fee, imp: a.imp + r.imp, click: a.click + r.click, inter: a.inter + r.inter, inq: a.inq + r.inq, open: a.open + r.open, leads: a.leads + r.leads }),
+        { fee: 0, imp: 0, click: 0, inter: 0, inq: 0, open: 0, leads: 0 },
+      );
+      raw.ranf_agg = {
+        fee: Math.round(aggSum.fee * 100) / 100, imp: aggSum.imp, click: aggSum.click,
+        inter: aggSum.inter, inq: aggSum.inq, open: aggSum.open, leads: aggSum.leads,
+        from: allRowsFirst(na), to: allRowsLast(na), subAccount: na.subAccount, authorId: na.authorId,
+        reference_only: true,
+      };      if (!raw.ranf_synced_to) { raw.ranf_synced_to = allRowsLast(na); changed = true; }
+      const accountId = prev.accountId ?? acctIdByNick.get(na.authorName) ?? null;
+      if (changed || !prev.rawJson?.ranf_agg || accountId != null) {
+        await prisma.koxNote.update({
+          where: { id: prev.id },
+          data: { rawJson: raw, ...(accountId != null ? { accountId } : {}) },
+        });
+        updated += 1;
+      } else skipped += 1;
+    }
+    console.log(`[5] KoxNote 元数据更新 ${updated} / 跳过 ${skipped}（主字段叠加已停用 RANF_NOTE_OVERLAY!=1）`);
+  } else for (const na of notesAgg.values()) {
     const allRows = [...na.rows.entries()].map(([day, d]) => ({ day, ...d })).sort((a, b) => (a.day < b.day ? -1 : 1));
     const prev = existMap.get(na.noteId);
     const cursorRaw = prev?.rawJson?.ranf_synced_to ?? null;

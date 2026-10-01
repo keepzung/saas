@@ -242,31 +242,41 @@ function monthSegments(start, end) {
         // 页面上下文内解析，仅回传精简字段（避免大响应截断）
         const list = await popup.evaluate(
           async ({ body }) => {
-            const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify(body),
-            });
-            const raw = await res.text();
-            if (process.env.JG_DEBUG) console.log('[debug]', res.status, String(raw).slice(0, 200));
-            let j = null;
-            try { j = JSON.parse(raw); } catch {}
+            const doFetch = async (cols) => {
+              const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ ...body, columns: cols }),
+              });
+              const raw = await res.text();
+              let j = null;
+              try { j = JSON.parse(raw); } catch {}
+              return { raw, j };
+            };
+            // 名称列尝试（失败自动回退基础列）
+            const withNames = [...body.columns, 'noteName', 'userName'];
+            let { j } = await doFetch(withNames);
+            if (!j || (j.code !== 0 && j.success !== true)) ({ j } = await doFetch(body.columns));
             const dl = j?.data?.dataList ?? [];
             const tp = j?.data?.page?.totalPage ?? 1;
             const out = [];
+            let itemKeysSample = '';
             for (const item of dl) {
               let v = {};
               try { v = JSON.parse(item.dataValueJson ?? '{}'); } catch {}
+              if (!itemKeysSample) itemKeysSample = Object.keys(item).join(',');
               out.push({
                 noteId: String(v.noteId ?? ''),
                 day: String(v.time ?? ''),
+                name: String(v.noteName ?? item.noteName ?? item.name ?? ''),
+                creator: String(v.userName ?? item.userName ?? ''),
                 fee: num0(v.fee), imp: num0(v.impression), click: num0(v.click),
                 inter: num0(v.interaction), inq: num0(v.messageConsult),
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
               });
             }
-            return { out, totalPage: tp };
+            return { out, totalPage: tp, itemKeysSample };
           },
           {
             body: {
@@ -277,10 +287,13 @@ function monthSegments(start, end) {
             },
           },
         ).catch(() => ({ out: [], totalPage: 1 }));
+        if (list.itemKeysSample && !agg.size) console.log(`[cols] item keys: ${list.itemKeysSample}`);
         totalPage = list.totalPage || 1;
         for (const r of list.out) {
           if (!r.noteId || !r.day) continue;
-          const cur2 = agg.get(r.noteId) ?? { noteId: r.noteId, vSeller: vseller, name: acc.name, days: new Map() };
+          const cur2 = agg.get(r.noteId) ?? { noteId: r.noteId, vSeller: vseller, name: acc.name, title: r.name, creator: r.creator, days: new Map() };
+          if (r.name && !cur2.title) cur2.title = r.name;
+          if (r.creator && !cur2.creator) cur2.creator = r.creator;
           const d = cur2.days.get(r.day) ?? { fee: 0, imp: 0, click: 0, inter: 0, inq: 0, leads: 0, initMsg: 0 };
           d.fee += r.fee; d.imp += r.imp; d.click += r.click; d.inter += r.inter; d.inq += r.inq; d.leads += r.leads; d.initMsg += r.initMsg;
           cur2.days.set(r.day, d);
@@ -308,9 +321,10 @@ function monthSegments(start, end) {
 
   // ── 写库 ──
   const noteIds = [...agg.keys()];
+  const PLACEHOLDER_TITLES = new Set(['(乐允投放笔记)', '(聚光投放笔记)', '(无标题)']);
   const existing = await prisma.koxNote.findMany({
     where: { brandId: BRAND_ID, noteId: { in: noteIds } },
-    select: { id: true, noteId: true, exposure: true, views: true, pmInquiries: true, pmOpenings: true, pmLeads: true, rawJson: true, authorName: true },
+    select: { id: true, noteId: true, accountId: true, title: true, exposure: true, views: true, pmInquiries: true, pmOpenings: true, pmLeads: true, rawJson: true, authorName: true },
   });
   const existMap = new Map(existing.map((n) => [n.noteId, n]));
   const accountsAll = await prisma.koxNote.findMany({ where: { brandId: BRAND_ID }, select: { authorName: true } });
@@ -333,7 +347,10 @@ function monthSegments(start, end) {
       : allRows[0].day;
     const incRows = allRows.filter((r) => r.day >= from && r.day <= end);
     const newSynced = allRows.reduce((m, r) => (r.day > m ? r.day : m), from);
-    const accountId = prev?.authorName ? acctIdByNick.get(prev.authorName) ?? null : null;
+    const accountId = prev?.authorName ? acctIdByNick.get(prev.authorName) ?? null : cur.creator ? acctIdByNick.get(cur.creator) ?? null : null;
+    // 标题/作者回填：占位或空标题 → 聚光真实标题；作者名可匹配账号时补挂
+    const titleFix = cur.title && (!prev?.title || PLACEHOLDER_TITLES.has(prev.title));
+    const authorFix = !prev?.authorName && cur.creator ? cur.creator : null;
 
     if (prev) {
       const d = incRows.reduce(
@@ -356,6 +373,9 @@ function monthSegments(start, end) {
           pmOpenings: prev.pmOpenings + d.open,
           pmLeads: prev.pmLeads + d.leads,
           isRtbAdver: aggSum.fee > 0 ? true : prev.isRtbAdver,
+          ...(titleFix ? { title: cur.title } : {}),
+          ...(authorFix ? { authorName: authorFix } : {}),
+          ...(accountId != null && prev.accountId == null ? { accountId } : {}),
           rawJson: raw,
           statDate: new Date(`${newSynced}T00:00:00+08:00`),
         },
@@ -368,9 +388,10 @@ function monthSegments(start, end) {
         data: {
           noteId: cur.noteId,
           brandId: BRAND_ID,
-          title: '(聚光投放笔记)',
+          title: cur.title || '(聚光投放笔记)',
           noteType: 'normal',
           accountId,
+          authorName: cur.creator || null,
           accountType: 'KOS',
           publishTime: new Date(`${firstDay}T00:00:00+08:00`),
           exposure: d.imp,

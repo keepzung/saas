@@ -624,6 +624,20 @@ export class KoxService {
           }))
         : null;
 
+    // 特斯拉 G3：线索权威口径 = 专业号「线索经营」（KOS-only 剔除官号「特斯拉」，客户行为三分类按客户去重）
+    const proClueFunnel =
+      brandId === 6
+        ? (
+            await this.prisma.$queryRaw<{ enter: number; open: number; leads: number }[]>`
+              SELECT
+                COUNT(DISTINCT "customerUserId") FILTER (WHERE entered)::int AS enter,
+                COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
+                COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
+              FROM "ProClueUserDay"
+              WHERE "brandId" = 6 AND "day" >= ${start} AND "day" <= ${end} AND NOT "isOfficial"`
+          )[0] ?? null
+        : null;
+
     // 特斯拉趋势图补充数据源：专业号「近1日」快照（dateType 1，每日同步积累）
     const proDailies =
       brandId === 6
@@ -725,8 +739,23 @@ export class KoxService {
         : proContent
           ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${dayKey08(proContent.stat_date)})`
           : 'spark_notes',
-      // 特斯拉版线索转化漏斗：周度快照（客户口径）> 专业号总数据 > 投放+自然
+      // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
+        if (proClueFunnel && (proClueFunnel.enter > 0 || proClueFunnel.leads > 0)) {
+          const { enter, open, leads } = proClueFunnel;
+          return {
+            pm_inquiries: enter,
+            pm_openings: open,
+            pm_leads: leads,
+            total_leads: leads,
+            open_rate: enter ? r2((open / enter) * 100) : 0,
+            lead_rate: enter ? r2((leads / enter) * 100) : 0,
+            campaign: { enter: 0, open: 0, leads: 0 },
+            organic: { inquiries: 0, openings: 0, leads: 0 },
+            scope_note: '线索=小红书专业号·线索经营（KOS 口径，剔除官号「特斯拉」，按客户去重；行为时间落窗口内）',
+            source: 'pro_clue',
+          };
+        }
         if (weeklySnap) {
           const { inquiries, openings } = weeklySnap;
           return {

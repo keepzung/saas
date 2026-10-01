@@ -1147,3 +1147,45 @@ model KoxRanfDaily {
 
   @@index([brandId, day])
 }
+
+// 专业号「线索经营」按日聚合（KOS-only = 剔除归属账号官号「特斯拉」；客户行为三分类，行为时间=当日按客户去重）
+model ProClueDaily {
+  id               Int      @id @default(autoincrement())
+  brandId          Int      @default(6)
+  day              DateTime
+  enterKos         Int      @default(0)
+  openKos          Int      @default(0)
+  leadsKos         Int      @default(0)
+  enterAll         Int      @default(0)
+  openAll          Int      @default(0)
+  leadsAll         Int      @default(0)
+  cardEnterNotOpen Int      @default(0)
+  cardOpenNotLeads Int      @default(0)
+  cardLeadsDone    Int      @default(0)
+  cardAdTraffic    Int      @default(0)
+  cardOrganic      Int      @default(0)
+  fetchedAt        DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, day])
+  @@index([brandId, day])
+}
+
+// 专业号「线索经营」客户×日明细（三行为标记；任意窗口按客户去重聚合的数据源）
+model ProClueUserDay {
+  id             Int      @id @default(autoincrement())
+  brandId        Int      @default(6)
+  day            DateTime
+  customerUserId String
+  belongUserId   String?
+  belongUserName String?
+  isOfficial     Boolean  @default(false)
+  entered        Boolean  @default(false)
+  opened         Boolean  @default(false)
+  leads          Boolean  @default(false)
+  sysTagId       Int?
+  nickName       String?
+
+  @@unique([brandId, day, customerUserId])
+  @@index([brandId, day])
+  @@index([brandId, customerUserId])
+}
