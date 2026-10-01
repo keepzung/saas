@@ -389,7 +389,15 @@ function monthSegments(start, end) {
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
               });
             }
-            return { out, totalPage: tp, itemKeysSample, debug: out.length ? null : { status: lastStatus, head: lastRaw.slice(0, 260) } };
+            // debug 仅在请求失败（无 j 或 code!=0）时设置；空月份（code 0、totalPage 0）属正常不重试
+            return {
+              out,
+              totalPage: tp,
+              itemKeysSample,
+              debug: out.length || (j && (j.code === 0 || j.success === true))
+                ? null
+                : { status: lastStatus, head: lastRaw.slice(0, 260) },
+            };
           },
           {
             body: {
