@@ -1130,3 +1130,20 @@ model LaiguLead {
   @@index([brandId, sessionEndedAt])
   @@index([phone])
 }
+
+model KoxRanfDaily {
+  id             Int      @id @default(autoincrement())
+  brandId        Int      @default(6)
+  day            DateTime @unique
+  fee            Decimal  @default(0) @db.Decimal(14, 2)
+  impression     BigInt   @default(0)
+  click          BigInt   @default(0)
+  interaction    BigInt   @default(0)
+  msgInquiries   BigInt   @default(0)
+  msgOpenings    BigInt   @default(0)
+  msgLeads       BigInt   @default(0)
+  noteCnt        Int      @default(0)
+  fetchedAt      DateTime @default(now()) @updatedAt
+
+  @@index([brandId, day])
+}

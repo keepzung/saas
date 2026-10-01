@@ -823,7 +823,7 @@ export class KoxService {
           scope_note: '所选区间无线索数据',
         };
       })(),
-      trend: (() => {
+      trend: await (async () => {
         const campByDate = new Map<
           string,
           {
@@ -975,6 +975,32 @@ export class KoxService {
             } else if (!existing.item_cnt) {
               existing.item_cnt = proItems;
               if (!existing.view_sum) existing.view_sum = proViews;
+            }
+          }
+        }
+        // ranf 分日补缺（乐允全口径投流数据）：笔记口径全 0 的日期用 ranf 曝光/阅读/互动填充
+        if (brandId === 6) {
+          const ranfDays = await this.prisma.koxRanfDaily.findMany({
+            where: { brandId: 6, day: { gte: start, lte: end } },
+            select: { day: true, impression: true, click: true, interaction: true },
+          });
+          for (const r of ranfDays) {
+            const key = dayKey08(r.day);
+            const existing = byDate.get(key);
+            if (!existing) {
+              byDate.set(key, {
+                ...emptyRow(),
+                ...campPart(campByDate.get(key)),
+                exposure_sum: Number(r.impression),
+                view_sum: Number(r.click),
+                interaction_sum: Number(r.interaction),
+              });
+            } else if (
+              !existing.item_cnt && !existing.view_sum && !existing.exposure_sum && !existing.interaction_sum
+            ) {
+              existing.exposure_sum = Number(r.impression);
+              existing.view_sum = Number(r.click);
+              existing.interaction_sum = Number(r.interaction);
             }
           }
         }
