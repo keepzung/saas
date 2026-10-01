@@ -383,7 +383,7 @@ function monthSegments(start, end) {
                 day: String(v.time ?? ''),
                 name: String(v.noteName ?? item.noteName ?? item.name ?? ''),
                 creator: String(v.userName ?? item.userName ?? ''),
-                grass: num0(v.grassUserNum ?? v.newGrassUserNum ?? 0),
+                grass: num0(v.grassUserNum ?? v.newGrassUserNum ?? v.tiUserNum ?? 0),
                 fee: num0(v.fee), imp: num0(v.impression), click: num0(v.click),
                 inter: num0(v.interaction), inq: num0(v.messageConsult),
                 leads: num0(v.msgLeadsNum), initMsg: num0(v.initiativeMessage),
