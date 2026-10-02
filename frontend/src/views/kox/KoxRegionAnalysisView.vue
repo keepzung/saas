@@ -91,8 +91,6 @@
         </template>
       </a-table>
     </a-card>
-
-    <div class="metric-note">{{ isDf ? adMetricNote : rows.metric_note }}</div>
   </PageWrapper>
 </template>
 
