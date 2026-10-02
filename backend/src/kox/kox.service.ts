@@ -2087,6 +2087,11 @@ export class KoxService {
       where: {
         publishTime: { gte: start, lte: end },
         ...(brandId ? { brandId } : {}),
+        // 仅统计基线账号（enabled）的笔记：非基线作者（对照表外新账号/官号）不进区域与标签聚合
+        OR: [
+          { accountId: { in: accounts.map((a) => a.id) } },
+          { authorName: { in: accounts.map((a) => a.nickname) } },
+        ],
       },
       select: {
         accountId: true,
