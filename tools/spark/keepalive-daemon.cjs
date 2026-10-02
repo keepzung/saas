@@ -137,15 +137,15 @@ async function reloginMcc(brandId) {
       await page.locator('input[placeholder="邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
       await page.locator('input[placeholder="密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
-      // 勾选「我已阅读并同意用户协议和隐私条款」：点文案标签 + 强制勾选原生 input（可能隐藏）
+      // 勾选「我已阅读并同意用户协议和隐私条款」：点文案标签 + 页面内 JS 原生 click()（自定义样式组件不吃合成 check()）
       await page.locator('text=我已阅读并同意').first().click({ timeout: 5000 }).catch(() => {});
-      const cbs = page.locator('input[type="checkbox"]');
-      const cbn = await cbs.count().catch(() => 0);
-      for (let i = 0; i < cbn; i++) {
-        await cbs.nth(i).check({ timeout: 2000 }).catch(() => {});
-      }
+      await page.evaluate(() => {
+        document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+          if (!cb.checked) cb.click();
+        });
+      });
       await sleep(400);
-      lastDebug = `round${round + 1} 邮箱值=${(await page.locator('input[placeholder="邮箱"]').first().inputValue().catch(() => '?')).slice(0, 4)}*** 勾选=${await cbs.nth(0).isChecked().catch(() => '?')}`;
+      lastDebug = `round${round + 1} 邮箱值=${(await page.locator('input[placeholder="邮箱"]').first().inputValue().catch(() => '?')).slice(0, 4)}*** 勾选=${await cbs.nth(0).isChecked().catch(() => '?')}/${await cbs.nth(1).isChecked().catch(() => '?')} dom=${await page.evaluate(() => { const cb = document.querySelector('input[type="checkbox"]'); return cb ? cb.outerHTML.slice(0, 80) : 'none'; })}`;
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click().catch(() => {});
       // 等最多 20s
       for (let i = 0; i < 6; i++) {
