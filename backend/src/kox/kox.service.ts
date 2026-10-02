@@ -2185,6 +2185,64 @@ export class KoxService {
       }
     }
 
+    // 特斯拉：曝光/阅读/互动 = 聚光笔记报表按账号窗口聚合（投流口径；乐允/ranf 存量无窗口值）
+    // 私信进线/开口/留资 = 线索经营按归属账号（KOS-only、按客户去重；与 KOS 数据进度一致）
+    if (brandId === 6) {
+      const jugR = await this.prisma.$queryRaw<{
+        acc: bigint;
+        imp: bigint;
+        click: bigint;
+        inter: bigint;
+      }[]>`
+        SELECT COALESCE(a.id, a2.id) AS acc,
+          COALESCE(SUM(j.impression), 0) AS imp,
+          COALESCE(SUM(j.click), 0) AS click,
+          COALESCE(SUM(j.interaction), 0) AS inter
+        FROM "KoxJuguangNoteDaily" j
+        LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
+        LEFT JOIN "KosAccount" a ON a.id = n."accountId"
+        LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
+        WHERE j."brandId" = 6 AND j."day" >= ${start} AND j."day" <= ${end}
+        GROUP BY 1`;
+      const clueR = await this.prisma.$queryRaw<{
+        acc: bigint;
+        enter: number;
+        open: number;
+        leads: number;
+      }[]>`
+        SELECT a.id AS acc,
+          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.entered)::int AS enter,
+          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.opened)::int AS open,
+          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.leads)::int AS leads
+        FROM "ProClueUserDay" c
+        JOIN "KosAccount" a ON a."authorId" = c."belongUserId" AND a."brandId" = 6 AND a.status = 'enabled'
+        WHERE c."brandId" = 6 AND c."day" >= ${start} AND c."day" <= ${end}
+          AND NOT c."isOfficial" AND c."belongUserId" IS NOT NULL
+        GROUP BY a.id`;
+      for (const r of jugR) {
+        const acc = r.acc != null ? idToAcc.get(Number(r.acc)) : undefined;
+        if (!acc) continue;
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        for (const b of [g, tg]) {
+          b.exposure = Number(r.imp);
+          b.view = Number(r.click);
+          b.interaction = Number(r.inter);
+        }
+      }
+      for (const r of clueR) {
+        const acc = r.acc != null ? idToAcc.get(Number(r.acc)) : undefined;
+        if (!acc) continue;
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        for (const b of [g, tg]) {
+          b.pm_inquiries = Number(r.enter);
+          b.pm_openings = Number(r.open);
+          b.pm_leads = Number(r.leads);
+        }
+      }
+    }
+
     const mapRow = ([name, g]: [string, Agg]) => {
       const kosCnt = g.kos.size;
       return {
@@ -2915,6 +2973,36 @@ export class KoxService {
         a.pm_openings = Number(r.open);
         a.pm_leads = Number(r.leads);
       });
+    }
+
+    // 曝光/点击/互动：brand6 = 聚光笔记报表（投流口径）按账号窗口聚合
+    // （窗口内发布笔记的乐允/ranf 存量无窗口曝光值，此前恒 0）
+    if (brandId === 6) {
+      const jugRowsPro = await this.prisma.$queryRaw<{
+        acc: bigint;
+        imp: bigint;
+        click: bigint;
+        inter: bigint;
+      }[]>`
+        SELECT COALESCE(a.id, a2.id) AS acc,
+          COALESCE(SUM(j.impression), 0) AS imp,
+          COALESCE(SUM(j.click), 0) AS click,
+          COALESCE(SUM(j.interaction), 0) AS inter
+        FROM "KoxJuguangNoteDaily" j
+        LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
+        LEFT JOIN "KosAccount" a ON a.id = n."accountId"
+        LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
+        WHERE j."brandId" = 6 AND j."day" >= ${start} AND j."day" <= ${end}
+        GROUP BY 1`;
+      for (const r of jugRowsPro) {
+        const accId = r.acc != null ? Number(r.acc) : null;
+        if (accId == null || !idSet.has(accId)) continue;
+        bump(accId, (a) => {
+          a.exposure_sum = Number(r.imp);
+          a.click_sum = Number(r.click);
+          a.interaction_sum = Number(r.inter);
+        });
+      }
     }
 
     // 投流消耗（rtb_income）仍取乐允投放报表逐日（partner 通道口径）
