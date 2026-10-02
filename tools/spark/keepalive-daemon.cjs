@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+// 会话保活守护（48h pilot）：每 KEEPALIVE_INTERVAL_MINUTES 分钟对每个 active 的 sparkOrgConfig 探活
+//   partner (brand6): GET partner watch-dashboard（manual redirect，30x→login = 失效）
+//   mcc (brand2/7/8): GET mcc aurora-data 页面（redirect→login = 失效）
+// 续期：合并响应 Set-Cookie 回写 sparkOrgConfig.cookie（有变化才写）
+// 失效：partner 无头账密自动重登一次（滑块则标记 need_manual_login）；mcc 预留 SPARK_ACCOUNT_B{brandId} 账密重登
+// 记录：每轮每品牌一条 SparkSyncLog(syncType='keepalive') + keepalive-state.json 心跳文件
+// 用法: pm2 start keepalive-daemon.cjs --name saas-keepalive   （env: KEEPALIVE_INTERVAL_MINUTES=10）
+const fs = require('fs');
+const path = require('path');
+const { createRequire } = require('module');
+
+const ROOT = path.resolve(__dirname, '../..');
+const backendRequire = createRequire(path.join(ROOT, 'backend', 'noop.js'));
+const { PrismaClient } = backendRequire('@prisma/client');
+let chromium;
+try { ({ chromium } = require('playwright')); } catch { ({ chromium } = backendRequire('playwright-core')); }
+
+const envPath = path.join(ROOT, 'backend', '.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*([\w.]+)\s*=\s*"?([^"\r\n]*)"?\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+}
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const INTERVAL_MIN = Number(process.env.KEEPALIVE_INTERVAL_MINUTES || 10);
+const RELOGIN_COOLDOWN_MIN = 30;
+const LOG_DIR = process.env.KEEPALIVE_LOG_DIR || path.join(ROOT, 'tools/spark/state');
+const STATE_FILE = path.join(LOG_DIR, 'keepalive-state.json');
+
+const prisma = new PrismaClient();
+const state = {}; // brandId -> { lastOk, lastFail, consecutiveFails, lastReloginAt, alive, lastLatency }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nowIso = () => new Date().toISOString();
+
+function loadState() {
+  try { Object.assign(state, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))); } catch {}
+}
+function saveState() {
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1)); } catch {}
+}
+
+/** 把 Set-Cookie 头合并进现有 cookie 串 */
+function mergeCookies(cookieStr, setCookieList) {
+  if (!setCookieList || !setCookieList.length) return cookieStr;
+  const jar = new Map();
+  for (const pair of (cookieStr || '').split('; ')) {
+    const i = pair.indexOf('=');
+    if (i > 0) jar.set(pair.slice(0, i), pair.slice(i + 1));
+  }
+  for (const sc of setCookieList) {
+    const first = sc.split(';')[0];
+    const i = first.indexOf('=');
+    if (i > 0) jar.set(first.slice(0, i), first.slice(i + 1));
+  }
+  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+async function probeUrl(url, cookie) {
+  // 返回 { alive, setCookies, status, finalNote }
+  const res = await fetch(url, {
+    redirect: 'manual',
+    headers: { Cookie: cookie || '', 'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9' },
+  });
+  const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+  const loc = res.headers.get('location') || '';
+  const dead = res.status >= 300 && res.status < 400 && /login|signin|passport/i.test(loc);
+  return { alive: !dead && res.status >= 200 && res.status < 400, dead, setCookies, status: res.status, loc };
+}
+
+async function probePartner(cookie) {
+  // 先页面探活（会话续期），再补一次轻 API（双保险维持活跃度）
+  const page = await probeUrl('https://partner.xiaohongshu.com/partner/watch-dashboard', cookie);
+  return page;
+}
+
+async function probeMcc(cookie) {
+  return probeUrl('https://mcc.xiaohongshu.com/micro/aurora-data', cookie);
+}
+
+/** partner 无头账密重登（滑块出现则失败 → need_manual_login） */
+async function reloginPartner(brandId) {
+  const browser = await chromium.launch({ headless: true, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  try {
+    const cfg = await prisma.sparkOrgConfig.findUnique({ where: { brandId } });
+    const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
+    if (cfg?.cookie) {
+      await ctx.addCookies(cfg.cookie.split('; ').map((p) => ({ name: p.slice(0, p.indexOf('=')), value: p.slice(p.indexOf('=') + 1), domain: '.xiaohongshu.com', path: '/' })));
+    }
+    const page = await ctx.newPage();
+    await page.goto('https://partner.xiaohongshu.com/partner/watch-dashboard', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(6000);
+    if (!/login|signin/i.test(page.url())) return { ok: true, cookie: cfg?.cookie || '', note: 'cookie 仍有效（无头页面未跳登录）' };
+    const ACCOUNT = process.env.PARTNER_LOGIN_USER;
+    const PASSWORD = process.env.PARTNER_LOGIN_PASS;
+    if (!ACCOUNT || !PASSWORD) return { ok: false, note: '缺 PARTNER_LOGIN_USER/PASS' };
+    try {
+      const tab = page.locator('text=/账号登录/').first();
+      if (await tab.isVisible({ timeout: 3000 }).catch(() => false)) { await tab.click(); await sleep(600); }
+      await page.locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="邮箱"]').first().fill(ACCOUNT, { timeout: 8000 });
+      await page.locator('input[type="password"]').first().fill(PASSWORD, { timeout: 8000 });
+      await sleep(300);
+      await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
+    } catch (e) {
+      return { ok: false, note: `自动填充失败（滑块/表单异常）: ${String(e).slice(0, 60)}` };
+    }
+    for (let i = 0; i < 60; i++) {
+      await sleep(3000);
+      if (!/login|signin/i.test(page.url())) {
+        const stateJson = await ctx.storageState();
+        const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
+        return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? '无头重登成功' : '重登成功但未取到 cookie' };
+      }
+    }
+    return { ok: false, note: '重登等待超时（大概率滑块）→ need_manual_login' };
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/** mcc 账密重登（实验性，凭据 SPARK_ACCOUNT_B{brandId}/SPARK_PASSWORD_B{brandId}） */
+async function reloginMcc(brandId) {
+  const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
+  const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
+  if (!ACCOUNT || !PASSWORD) return { ok: false, note: `缺 SPARK_ACCOUNT_B${brandId}/SPARK_PASSWORD_B${brandId}` };
+  const browser = await chromium.launch({ headless: true, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  try {
+    const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
+    const page = await ctx.newPage();
+    await page.goto('https://mcc.xiaohongshu.com', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(5000);
+    try {
+      await page.locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="手机"]').first().fill(ACCOUNT, { timeout: 8000 });
+      await page.locator('input[type="password"]').first().fill(PASSWORD, { timeout: 8000 });
+      await sleep(300);
+      await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
+    } catch (e) {
+      return { ok: false, note: `mcc 自动填充失败: ${String(e).slice(0, 60)}` };
+    }
+    for (let i = 0; i < 60; i++) {
+      await sleep(3000);
+      if (!/login|passport/i.test(page.url())) {
+        const stateJson = await ctx.storageState();
+        const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
+        return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? 'mcc 无头重登成功' : 'mcc 重登成功但未取到 cookie' };
+      }
+    }
+    return { ok: false, note: 'mcc 重登等待超时（大概率滑块/验证）→ need_manual_login' };
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+async function keepBrand(org) {
+  const brandId = org.brandId;
+  const t0 = Date.now();
+  const st = state[brandId] || (state[brandId] = { consecutiveFails: 0 });
+  let r;
+  try {
+    r = org.channel === 'partner' ? await probePartner(org.cookie) : await probeMcc(org.cookie);
+  } catch (e) {
+    r = { alive: false, setCookies: [], note: `probe error: ${String(e).slice(0, 80)}` };
+  }
+  const latency = Date.now() - t0;
+
+  // 续期：Set-Cookie 合并回写
+  let cookieUpdated = false;
+  if (r.setCookies?.length) {
+    const merged = mergeCookies(org.cookie, r.setCookies);
+    if (merged && merged !== org.cookie) {
+      await prisma.sparkOrgConfig.update({ where: { brandId }, data: { cookie: merged } }).catch(() => {});
+      org.cookie = merged;
+      cookieUpdated = true;
+    }
+  }
+
+  let status = r.alive ? 'success' : 'failed';
+  let note = r.alive ? `${org.channel} alive` : `${org.channel} session dead`;
+
+  // 失效处理：冷却期内尝试自动重登
+  if (!r.alive) {
+    st.consecutiveFails = (st.consecutiveFails || 0) + 1;
+    const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
+    const canTry = st.consecutiveFails >= 2 && (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs);
+    if (canTry) {
+      st.lastReloginAt = Date.now();
+      console.log(`[${nowIso()}] brand${brandId} 失效，尝试自动重登 (${org.channel}) ...`);
+      let rr;
+      try {
+        rr = org.channel === 'partner' ? await reloginPartner(brandId) : await reloginMcc(brandId);
+      } catch (e) {
+        rr = { ok: false, note: `relogin error: ${String(e).slice(0, 80)}` };
+      }
+      if (rr.ok) {
+        if (rr.cookie && rr.cookie !== org.cookie) {
+          await prisma.sparkOrgConfig.update({ where: { brandId }, data: { cookie: rr.cookie } }).catch(() => {});
+          org.cookie = rr.cookie;
+        }
+        await prisma.sparkOrgConfig.update({ where: { brandId }, data: { lastSyncAt: new Date() } }).catch(() => {});
+        status = 'success';
+        note = `${org.channel} relogin ok: ${rr.note}`;
+        st.consecutiveFails = 0;
+      } else {
+        note = `${org.channel} relogin failed: ${rr.note}`;
+      }
+    }
+  } else {
+    st.consecutiveFails = 0;
+  }
+
+  st.alive = status === 'success';
+  st.lastOk = st.alive ? nowIso() : st.lastOk;
+  st.lastFail = st.alive ? st.lastFail : nowIso();
+  st.lastLatency = latency;
+  saveState();
+
+  await prisma.sparkSyncLog.create({
+    data: {
+      brandId,
+      syncType: 'keepalive',
+      statDate: nowIso().slice(0, 10),
+      status,
+      message: `${note}; ${latency}ms; http=${r.status}; cookieUpdated=${cookieUpdated}; fails=${st.consecutiveFails || 0}`,
+    },
+  }).catch(() => {});
+  console.log(`[${nowIso()}] brand${brandId}(${org.channel}) ${status} ${latency}ms http=${r.status} ${note}`);
+}
+
+async function round() {
+  const orgs = await prisma.sparkOrgConfig.findMany({ where: { active: true, cookie: { not: '' } } });
+  if (!orgs.length) { console.log(`[${nowIso()}] 无 active 组织可探活`); return; }
+  for (const org of orgs) {
+    try { await keepBrand(org); } catch (e) { console.error(`[${nowIso()}] brand${org.brandId} keep error: ${String(e).slice(0, 120)}`); }
+    await sleep(3000);
+  }
+}
+
+(async () => {
+  loadState();
+  console.log(`[${nowIso()}] keepalive daemon started, interval=${INTERVAL_MIN}min`);
+  for (;;) {
+    try { await round(); } catch (e) { console.error(`[${nowIso()}] round error: ${String(e).slice(0, 160)}`); }
+    await sleep(INTERVAL_MIN * 60000);
+  }
+})();
