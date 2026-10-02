@@ -153,65 +153,73 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let total = 0;
   const rowsAll = [];
   for (; pageNum <= Math.min(totalPage || 1, MAX_PAGES); pageNum++) {
-    const r = await popup
-      .evaluate(async ({ vseller, pageNum, pageSize, pubStart, pubEnd }) => {
-        const post = async (body) => {
-          const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify(body),
-          });
-          const raw = await res.text();
-          let j = null;
-          try { j = JSON.parse(raw); } catch {}
-          return j;
-        };
-        const body = {
-          brandUserId: vseller,
-          reportBrandUserId: vseller,
-          noteContentTypeList: [],
-          noteType: 0,
-          spuIdList: [],
-          tagIdList: [],
-          recIdList: [],
-          notePublishTimeStart: pubStart,
-          notePublishTimeEnd: pubEnd,
-          fansNumAccumLower: null,
-          fansNumAccumUpper: null,
-          ownOrderNote: false,
-          staffLabelList: [],
-          staffCountry: [],
-          staffProvince: [],
-          staffCity: [],
-          pageNum,
-          pageSize,
-          sortDirect: '',
-          sortColumn: '',
-          noteCustomType: 0,
-        };
-        const j = await post(body);
-        const d = j?.data ?? {};
-        return {
-          ok: j?.code === 0 || j?.success === true,
-          msg: j?.msg ?? '',
-          total: d.total ?? 0,
-          totalPage: d.totalPage ?? 0,
-          pageSize: d.pageSize ?? pageSize,
-          rows: (d.noteList ?? []).map((n) => ({
-            noteId: String(n.noteId ?? ''),
-            title: n.noteTitle ?? '',
-            cover: n.noteImageUrl ?? '',
-            link: n.noteLink ?? '',
-            publishTime: n.notePublishTime ?? '',
-            authorName: n.authorName ?? '',
-            authorUserId: n.authorUserId ?? '',
-            authorFans: Number(n.authorFansNum ?? 0),
-            isRtb: n.isRtbAdver === 1,
-          })),
-        };
-      }, { vseller, pageNum, pageSize: PAGE_SIZE, pubStart, pubEnd })
-      .catch((e) => ({ ok: false, msg: String(e).slice(0, 120), rows: [], totalPage: 0, total: 0, pageSize: PAGE_SIZE }));
+    let r = null;
+    for (let rtry = 1; rtry <= 3; rtry++) {
+      r = await popup
+        .evaluate(async ({ vseller, pageNum, pageSize, pubStart, pubEnd }) => {
+          const post = async (body) => {
+            const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify(body),
+            });
+            const raw = await res.text();
+            let j = null;
+            try { j = JSON.parse(raw); } catch {}
+            return j;
+          };
+          const body = {
+            brandUserId: vseller,
+            reportBrandUserId: vseller,
+            noteContentTypeList: [],
+            noteType: 0,
+            spuIdList: [],
+            tagIdList: [],
+            recIdList: [],
+            notePublishTimeStart: pubStart,
+            notePublishTimeEnd: pubEnd,
+            fansNumAccumLower: null,
+            fansNumAccumUpper: null,
+            ownOrderNote: false,
+            staffLabelList: [],
+            staffCountry: [],
+            staffProvince: [],
+            staffCity: [],
+            pageNum,
+            pageSize,
+            sortDirect: '',
+            sortColumn: '',
+            noteCustomType: 0,
+          };
+          const j = await post(body);
+          const d = j?.data ?? {};
+          return {
+            ok: j?.code === 0 || j?.success === true,
+            msg: j?.msg ?? '',
+            total: d.total ?? 0,
+            totalPage: d.totalPage ?? 0,
+            pageSize: d.pageSize ?? pageSize,
+            rows: (d.noteList ?? []).map((n) => ({
+              noteId: String(n.noteId ?? ''),
+              title: n.noteTitle ?? '',
+              cover: n.noteImageUrl ?? '',
+              link: n.noteLink ?? '',
+              publishTime: n.notePublishTime ?? '',
+              authorName: n.authorName ?? '',
+              authorUserId: n.authorUserId ?? '',
+              authorFans: Number(n.authorFansNum ?? 0),
+              isRtb: n.isRtbAdver === 1,
+            })),
+          };
+        }, { vseller, pageNum, pageSize: PAGE_SIZE, pubStart, pubEnd })
+        .catch((e) => ({ ok: false, msg: String(e).slice(0, 120), rows: [], totalPage: 0, total: 0, pageSize: PAGE_SIZE }));
+      if (r.ok && r.rows.length) break;
+      if (rtry < 3) {
+        console.log(`[page ${pageNum}] try${rtry} 失败（${r.msg || 'empty'}），5s 后重试 ...`);
+        await sleep(5000);
+      }
+    }
     if (!r.ok || !r.rows.length) {
       console.log(`[page ${pageNum}] 失败或空: ${r.msg || 'empty'}`);
       if (pageNum === 1) { console.error('首页即失败，终止'); break; }
