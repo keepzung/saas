@@ -1858,6 +1858,8 @@ export class KoxService {
         select: { nickname: true, accountType: true, storeName: true },
       },
     };
+    // brand6：剔除官号（特斯拉）笔记
+    if (brandId === 6) where.authorName = { not: '特斯拉' };
     // brand6：曝光/阅读/私信三数以聚光笔记报表 per-note 加总为准（内存排序分页）
     const jug = await this.juguangNoteMap(brandId ?? 0);
     let rows;
