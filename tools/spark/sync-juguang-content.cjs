@@ -121,15 +121,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (!onManage) { console.error('未进入商业内容管理页'); await popup.screenshot({ path: path.join(__dirname, 'state', 'jc-fail.png') }); await browser.close(); process.exit(1); }
   console.log('[2] 商业内容管理页 OK');
 
-  // 分页拉全量
+  // 分页拉取（--days N = 增量：只拉近 N 天发布的笔记；缺省全量）
   const DRYP = process.argv.includes('--dry-run');
+  const daysIdx = process.argv.indexOf('--days');
+  const INC_DAYS = daysIdx > -1 ? Number(process.argv[daysIdx + 1]) || 0 : 0;
+  let pubStart = '';
+  let pubEnd = '';
+  if (INC_DAYS > 0) {
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    pubEnd = today;
+    pubStart = new Date(new Date(`${today}T00:00:00Z`).getTime() - (INC_DAYS - 1) * 86400000 + 8 * 3600000)
+      .toISOString()
+      .slice(0, 10);
+    console.log(`[增量] 发布时间窗口: ${pubStart} ~ ${pubEnd}`);
+  }
   let pageNum = 1;
   let totalPage = 1;
   let total = 0;
   const rowsAll = [];
   for (; pageNum <= Math.min(totalPage || 1, MAX_PAGES); pageNum++) {
     const r = await popup
-      .evaluate(async ({ vseller, pageNum, pageSize }) => {
+      .evaluate(async ({ vseller, pageNum, pageSize, pubStart, pubEnd }) => {
         const post = async (body) => {
           const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
             method: 'POST',
@@ -150,8 +162,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           spuIdList: [],
           tagIdList: [],
           recIdList: [],
-          notePublishTimeStart: '',
-          notePublishTimeEnd: '',
+          notePublishTimeStart: pubStart,
+          notePublishTimeEnd: pubEnd,
           fansNumAccumLower: null,
           fansNumAccumUpper: null,
           ownOrderNote: false,
@@ -185,7 +197,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             isRtb: n.isRtbAdver === 1,
           })),
         };
-      }, { vseller, pageNum, pageSize: PAGE_SIZE })
+      }, { vseller, pageNum, pageSize: PAGE_SIZE, pubStart, pubEnd })
       .catch((e) => ({ ok: false, msg: String(e).slice(0, 120), rows: [], totalPage: 0, total: 0, pageSize: PAGE_SIZE }));
     if (!r.ok || !r.rows.length) {
       console.log(`[page ${pageNum}] 失败或空: ${r.msg || 'empty'}`);
@@ -210,9 +222,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return;
   }
 
-  // ── 写库：KoxNote 回填（标题/封面/发布时间/作者/链接；占位空值优先）──
-  let titleFixed = 0, coverFixed = 0, pubFixed = 0, authorFixed = 0, missing = 0;
-  const noteIds = rowsAll.map((r) => r.noteId).filter(Boolean);
+  // ── 写库：KoxNote 回填（标题/封面/发布时间/作者/链接）+ 新建未入库笔记 ──
+  // 剔官号：authorUserId = 特斯拉官号 userId（5cad9d23...）的笔记不抓不写
+  const OFFICIAL_UID = '5cad9d230000000011005d41';
+  const noteRows = rowsAll.filter((r) => r.noteId && r.authorUserId !== OFFICIAL_UID);
+  const officialSkipped = rowsAll.length - noteRows.length;
+  if (officialSkipped) console.log(`[3.5] 剔除官号笔记 ${officialSkipped} 篇`);
+  let titleFixed = 0, coverFixed = 0, pubFixed = 0, authorFixed = 0, missing = 0, created = 0;
+  const noteIds = noteRows.map((r) => r.noteId).filter(Boolean);
   const existing = [];
   for (let i = 0; i < noteIds.length; i += 20000) {
     const chunk = noteIds.slice(i, i + 20000);
@@ -223,10 +240,42 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     existing.push(...part);
   }
   const exMap = new Map(existing.map((n) => [n.noteId, n]));
-  for (const r of rowsAll) {
-    if (!r.noteId) continue;
+  const accounts = await prisma.kosAccount.findMany({
+    where: { brandId: BRAND_ID, status: 'enabled' },
+    select: { id: true, nickname: true },
+  });
+  const acctIdByNick = new Map(accounts.map((a) => [a.nickname, a.id]));
+  const parsePub = (s) => {
+    if (!s) return null;
+    const d = new Date(String(s).replace(' ', 'T') + '+08:00');
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  for (const r of noteRows) {
     const prev = exMap.get(r.noteId);
-    if (!prev) { missing += 1; continue; }
+    if (!prev) {
+      // 新建未入库笔记（真实发布时间/标题/作者，作者可匹配基线账号时挂 accountId）
+      const pub = parsePub(r.publishTime);
+      const accountId = r.authorName ? acctIdByNick.get(r.authorName) ?? null : null;
+      await prisma.koxNote.create({
+        data: {
+          noteId: r.noteId,
+          brandId: BRAND_ID,
+          title: r.title || '(聚光笔记)',
+          noteType: 'normal',
+          accountType: 'KOS',
+          accountId,
+          authorName: r.authorName || null,
+          publishTime: pub ?? new Date('2026-01-01T00:00:00+08:00'),
+          isRtbAdver: r.isRtb ? true : null,
+          noteUrl: r.link || null,
+          coverUrl: r.cover ? (r.cover.startsWith('http://') ? r.cover.replace('http://', 'https://') : r.cover) : null,
+          rawJson: { publish_time_approx: !pub, source: 'content_manage' },
+          statDate: pub ?? new Date('2026-01-01T00:00:00+08:00'),
+        },
+      });
+      created += 1;
+      continue;
+    }
     const data = {};
     const ph = !prev.title || PLACEHOLDER_TITLES.has(prev.title);
     if (r.title && ph) { data.title = r.title; titleFixed += 1; }
@@ -234,18 +283,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       data.coverUrl = r.cover.startsWith('http://') ? r.cover.replace('http://', 'https://') : r.cover;
       coverFixed += 1;
     }
-    if (r.publishTime) {
-      const d = new Date(r.publishTime.replace(' ', 'T') + '+08:00');
-      if (!Number.isNaN(d.getTime())) {
-        const approx = prev.rawJson?.publish_time_approx === true;
-        if (!prev.publishTime || approx) { data.publishTime = d; pubFixed += 1; }
+    // 发布时间一律以平台真实值覆盖（商业内容管理为权威源）
+    const pub = parsePub(r.publishTime);
+    if (pub) {
+      const differs = !prev.publishTime || Math.abs(pub.getTime() - prev.publishTime.getTime()) > 60000;
+      if (differs) {
+        data.publishTime = pub;
+        const raw = { ...(prev.rawJson ?? {}) };
+        delete raw.publish_time_approx;
+        data.rawJson = raw;
+        pubFixed += 1;
       }
     }
     if (r.authorName && !prev.authorName) { data.authorName = r.authorName; authorFixed += 1; }
     if (r.link && !prev.noteUrl) data.noteUrl = r.link;
     if (Object.keys(data).length) await prisma.koxNote.update({ where: { id: prev.id }, data });
   }
-  console.log(`[4] KoxNote 回填: 标题 ${titleFixed} / 封面 ${coverFixed} / 发布时间 ${pubFixed} / 作者 ${authorFixed}；库内未覆盖 ${missing}`);
+  console.log(`[4] KoxNote: 回填 标题 ${titleFixed} / 封面 ${coverFixed} / 发布时间 ${pubFixed} / 作者 ${authorFixed}；新建 ${created}；库内未覆盖 ${missing}`);
 
   await prisma.sparkSyncLog.create({
     data: {
@@ -253,8 +307,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       syncType: 'juguang_content',
       statDate: new Date(),
       fetched: rowsAll.length,
-      upserted: titleFixed + coverFixed + pubFixed + authorFixed,
-      message: `content-manage rows ${rowsAll.length}/${total}, title ${titleFixed}, cover ${coverFixed}, publishTime ${pubFixed}, author ${authorFixed}`,
+      upserted: titleFixed + coverFixed + pubFixed + authorFixed + created,
+      message: `content-manage rows ${rowsAll.length}/${total} (official skipped ${officialSkipped}), title ${titleFixed}, cover ${coverFixed}, publishTime ${pubFixed}, author ${authorFixed}, created ${created}`,
     },
   }).catch(() => {});
 
