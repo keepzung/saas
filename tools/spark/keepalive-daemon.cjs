@@ -135,6 +135,17 @@ async function reloginMcc(brandId) {
       await page.locator('input[placeholder="邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
       await page.locator('input[placeholder="密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
+      // 勾选「我已阅读并同意用户协议和隐私条款」（不勾选登录按钮为禁用态）
+      const cbs = page.locator('input[type="checkbox"]');
+      const cbn = await cbs.count().catch(() => 0);
+      for (let i = 0; i < cbn; i++) {
+        const cb = cbs.nth(i);
+        if (await cb.isVisible().catch(() => false)) {
+          if (!(await cb.isChecked().catch(() => false))) await cb.check({ timeout: 5000 }).catch(() => {});
+          break;
+        }
+      }
+      await sleep(300);
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
     } catch (e) {
       return { ok: false, note: `mcc 自动填充失败: ${String(e).slice(0, 60)}` };
@@ -146,13 +157,13 @@ async function reloginMcc(brandId) {
         const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
         return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? 'mcc 无头重登成功' : 'mcc 重登成功但未取到 cookie' };
       }
-      // 快速失败：页面出现明确错误文案时不再干等
+      // 快速失败：页面出现明确错误文案时不再干等（注意弹窗底部常驻「收不到验证码？」不算）
       const bodyText = await page.locator('body').innerText().catch(() => '');
       const errHit = bodyText.match(/密码错误|账号或密码|账号不存在|已被冻结|没有权限|权限不足|未开通/);
       if (errHit) return { ok: false, note: `mcc 登录被拒: ${errHit[0]}` };
-      if (/滑块|拖动滑块|安全验证|验证码/.test(bodyText)) {
+      if (/拖动滑块|滑块验证|安全验证/.test(bodyText)) {
         await page.screenshot({ path: path.join(LOG_DIR, `mcc-b${brandId}-captcha.png`).replace(/\\/g, '/'), fullPage: false }).catch(() => {});
-        return { ok: false, note: 'mcc 登录出现滑块/验证码 → need_manual_login（截图见 state/）' };
+        return { ok: false, note: 'mcc 登录出现滑块/安全验证 → need_manual_login（截图见 state/）' };
       }
     }
     // 超时：截图 + 文案快照辅助诊断
