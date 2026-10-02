@@ -110,15 +110,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const vseller = (popup.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] ?? '';
   console.log('[1] vSellerId=', vseller);
 
-  // 进商业内容管理（模块会话）
-  await popup.goto(`https://ad.xiaohongshu.com/microapp/creativity/inspire?vSellerId=${vseller}`, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-  await sleep(8000);
-  await popup.locator('text=创意管理').first().click({ timeout: 6000 }).catch(() => {});
-  await sleep(2000);
-  await popup.locator('text=商业内容管理').first().click({ timeout: 6000 }).catch(() => {});
-  await sleep(9000);
-  const onManage = await popup.evaluate(() => /商业内容管理/.test(document.body.innerText || ''));
-  if (!onManage) { console.error('未进入商业内容管理页'); await popup.screenshot({ path: path.join(__dirname, 'state', 'jc-fail.png') }); await browser.close(); process.exit(1); }
+  // 进商业内容管理（模块会话）；SPA 导航会销毁执行上下文，整体重试
+  let onManage = false;
+  for (let mg = 1; mg <= 3 && !onManage; mg++) {
+    await popup
+      .goto(`https://ad.xiaohongshu.com/microapp/creativity/inspire?vSellerId=${vseller}`, { waitUntil: 'domcontentloaded', timeout: 45000 })
+      .catch(() => {});
+    await sleep(8000);
+    await popup.locator('text=创意管理').first().click({ timeout: 6000 }).catch(() => {});
+    await sleep(2000);
+    await popup.locator('text=商业内容管理').first().click({ timeout: 6000 }).catch(() => {});
+    await sleep(9000);
+    onManage = await popup
+      .evaluate(() => /商业内容管理/.test(document.body.innerText || ''))
+      .catch(() => false);
+    if (!onManage) console.log(`[2] 第 ${mg} 次未进入商业内容管理，重试 ...`);
+  }
+  if (!onManage) {
+    console.error('未进入商业内容管理页');
+    await popup.screenshot({ path: path.join(__dirname, 'state', 'jc-fail.png') }).catch(() => {});
+    await browser.close();
+    process.exit(1);
+  }
   console.log('[2] 商业内容管理页 OK');
 
   // 分页拉取（--days N = 增量：只拉近 N 天发布的笔记；缺省全量）
