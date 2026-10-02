@@ -120,7 +120,7 @@ async function reloginPartner(brandId) {
   }
 }
 
-/** mcc 账密重登（实验性，凭据 SPARK_ACCOUNT_B{brandId}/SPARK_PASSWORD_B{brandId}） */
+/** mcc 账密重登（凭据 SPARK_ACCOUNT_B{brandId}/SPARK_PASSWORD_B{brandId}；/login 默认邮箱+密码表单） */
 async function reloginMcc(brandId) {
   const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
   const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
@@ -129,11 +129,11 @@ async function reloginMcc(brandId) {
   try {
     const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
     const page = await ctx.newPage();
-    await page.goto('https://mcc.xiaohongshu.com', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await sleep(5000);
+    await page.goto('https://mcc.xiaohongshu.com/login', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(10000);
     try {
-      await page.locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="手机"]').first().fill(ACCOUNT, { timeout: 8000 });
-      await page.locator('input[type="password"]').first().fill(PASSWORD, { timeout: 8000 });
+      await page.locator('input[placeholder="邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
+      await page.locator('input[placeholder="密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
     } catch (e) {
@@ -147,7 +147,7 @@ async function reloginMcc(brandId) {
         return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? 'mcc 无头重登成功' : 'mcc 重登成功但未取到 cookie' };
       }
     }
-    return { ok: false, note: 'mcc 重登等待超时（大概率滑块/验证）→ need_manual_login' };
+    return { ok: false, note: 'mcc 重登等待超时（大概率滑块/验证/权限）→ need_manual_login' };
   } finally {
     await browser.close().catch(() => {});
   }
