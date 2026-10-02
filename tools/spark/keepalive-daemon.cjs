@@ -131,52 +131,45 @@ async function reloginMcc(brandId) {
     const page = await ctx.newPage();
     await page.goto('https://mcc.xiaohongshu.com/login', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await sleep(10000);
-    try {
+    // 完整重试流程：每轮 填表→勾协议→点登录→等 20s；共 3 轮（不依赖 disabled 属性判断，样式类按钮不可靠）
+    let lastDebug = '';
+    for (let round = 0; round < 3; round++) {
       await page.locator('input[placeholder="邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
       await page.locator('input[placeholder="密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
-      // 勾选「我已阅读并同意用户协议和隐私条款」：自定义样式 checkbox 的原生 input 常被隐藏，
-      // 直接点击文案标签切换勾选；点完校验登录按钮是否仍禁用，最多重试两轮
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const btn = page.locator('button:has-text("登 录"), button:has-text("登录")').first();
-        const disabled = await btn.isDisabled().catch(() => false);
-        if (!disabled) break;
-        await page.locator('text=我已阅读并同意').first().click({ timeout: 5000 }).catch(() => {});
-        const cbs = page.locator('input[type="checkbox"]');
-        const cbn = await cbs.count().catch(() => 0);
-        for (let i = 0; i < cbn; i++) {
-          const cb = cbs.nth(i);
-          if (!(await cb.isChecked().catch(() => false))) await cb.check({ timeout: 3000 }).catch(() => {});
+      // 勾选「我已阅读并同意用户协议和隐私条款」：点文案标签 + 强制勾选原生 input（可能隐藏）
+      await page.locator('text=我已阅读并同意').first().click({ timeout: 5000 }).catch(() => {});
+      const cbs = page.locator('input[type="checkbox"]');
+      const cbn = await cbs.count().catch(() => 0);
+      for (let i = 0; i < cbn; i++) {
+        await cbs.nth(i).check({ timeout: 2000 }).catch(() => {});
+      }
+      await sleep(400);
+      lastDebug = `round${round + 1} 邮箱值=${(await page.locator('input[placeholder="邮箱"]').first().inputValue().catch(() => '?')).slice(0, 4)}*** 勾选=${await cbs.nth(0).isChecked().catch(() => '?')}`;
+      await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click().catch(() => {});
+      // 等最多 20s
+      for (let i = 0; i < 6; i++) {
+        await sleep(3000);
+        if (!/login|passport/i.test(page.url())) {
+          const stateJson = await ctx.storageState();
+          const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
+          return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? 'mcc 无头重登成功' : 'mcc 重登成功但未取到 cookie' };
         }
-        await sleep(500);
-      }
-      await sleep(300);
-      await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
-    } catch (e) {
-      return { ok: false, note: `mcc 自动填充失败: ${String(e).slice(0, 60)}` };
-    }
-    for (let i = 0; i < 60; i++) {
-      await sleep(3000);
-      if (!/login|passport/i.test(page.url())) {
-        const stateJson = await ctx.storageState();
-        const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
-        return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? 'mcc 无头重登成功' : 'mcc 重登成功但未取到 cookie' };
-      }
-      // 快速失败：页面出现明确错误文案时不再干等（注意弹窗底部常驻「收不到验证码？」不算）
-      const bodyText = await page.locator('body').innerText().catch(() => '');
-      const errHit = bodyText.match(/密码错误|账号或密码|账号不存在|已被冻结|没有权限|权限不足|未开通/);
-      if (errHit) return { ok: false, note: `mcc 登录被拒: ${errHit[0]}` };
-      if (/拖动滑块|滑块验证|安全验证/.test(bodyText)) {
-        await page.screenshot({ path: path.join(LOG_DIR, `mcc-b${brandId}-captcha.png`).replace(/\\/g, '/'), fullPage: false }).catch(() => {});
-        return { ok: false, note: 'mcc 登录出现滑块/安全验证 → need_manual_login（截图见 state/）' };
+        const bodyText = await page.locator('body').innerText().catch(() => '');
+        const errHit = bodyText.match(/密码错误|账号或密码|账号不存在|已被冻结|没有权限|权限不足|未开通/);
+        if (errHit) return { ok: false, note: `mcc 登录被拒: ${errHit[0]}` };
+        if (/拖动滑块|滑块验证|安全验证/.test(bodyText)) {
+          await page.screenshot({ path: path.join(LOG_DIR, `mcc-b${brandId}-captcha.png`).replace(/\\/g, '/'), fullPage: false }).catch(() => {});
+          return { ok: false, note: 'mcc 登录出现滑块/安全验证 → need_manual_login（截图见 state/）' };
+        }
       }
     }
     // 超时：截图 + 文案快照辅助诊断
     const shot = path.join(LOG_DIR, `mcc-b${brandId}-timeout.png`).replace(/\\/g, '/');
     await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
     const bodyText = await page.locator('body').innerText().catch(() => '');
-    const snippet = bodyText.replace(/\s+/g, ' ').slice(0, 160);
-    return { ok: false, note: `mcc 重登等待超时；页面片段: ${snippet}（截图 state/mcc-b${brandId}-timeout.png）` };
+    const snippet = bodyText.replace(/\s+/g, ' ').slice(0, 120);
+    return { ok: false, note: `mcc 重登等待超时；${lastDebug}; 页面片段: ${snippet}（截图 state/mcc-b${brandId}-timeout.png）` };
   } finally {
     await browser.close().catch(() => {});
   }
