@@ -145,6 +145,7 @@ async function reloginMcc(brandId) {
         });
       });
       await sleep(400);
+      const cbs = page.locator('input[type="checkbox"]');
       lastDebug = `round${round + 1} 邮箱值=${(await page.locator('input[placeholder="邮箱"]').first().inputValue().catch(() => '?')).slice(0, 4)}*** 勾选=${await cbs.nth(0).isChecked().catch(() => '?')}/${await cbs.nth(1).isChecked().catch(() => '?')} dom=${await page.evaluate(() => { const cb = document.querySelector('input[type="checkbox"]'); return cb ? cb.outerHTML.slice(0, 80) : 'none'; })}`;
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click().catch(() => {});
       // 等最多 20s
