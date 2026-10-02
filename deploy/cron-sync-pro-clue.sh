@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # 专业号「线索经营」每日同步 —— deploy 用户 crontab 调用
 set -u
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:$PATH"
