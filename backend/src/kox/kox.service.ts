@@ -663,7 +663,7 @@ export class KoxService {
               COUNT(DISTINCT "customerUserId") FILTER (WHERE opened) AS open,
               COUNT(DISTINCT "customerUserId") FILTER (WHERE leads) AS leads
             FROM "ProClueUserDay"
-            WHERE "brandId" = 6 AND "day" >= ${start} AND "day" <= ${end}
+            WHERE "brandId" = 6 AND ("day" AT TIME ZONE 'UTC') >= ${start} AND ("day" AT TIME ZONE 'UTC') <= ${end}
               AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
               AND "belongUserId" IN (${Prisma.join(clueUids)})
             GROUP BY "belongUserId"
@@ -702,7 +702,7 @@ export class KoxService {
                  COALESCE(SUM(j.click), 0)::bigint AS click,
                  COALESCE(SUM(j.interaction), 0)::bigint AS inter
           FROM "KoxJuguangNoteDaily" j
-          WHERE j."brandId" = 6 AND j."day" >= ${start} AND j."day" <= ${end}
+          WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
             AND EXISTS (
               SELECT 1 FROM "KoxNote" n
               WHERE n."noteId" = j."noteId" AND n."brandId" = 6
@@ -1108,9 +1108,9 @@ export class KoxService {
             click: bigint;
             inter: bigint;
           }[]>`
-            SELECT day, COUNT(*)::bigint AS cnt, SUM(impression) AS imp, SUM(click) AS click, SUM(interaction) AS inter
+            SELECT (day AT TIME ZONE 'UTC') AS day, COUNT(*)::bigint AS cnt, SUM(impression) AS imp, SUM(click) AS click, SUM(interaction) AS inter
             FROM "KoxJuguangNoteDaily"
-            WHERE "brandId" = 6 AND day >= ${start} AND day <= ${end}
+            WHERE "brandId" = 6 AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
             GROUP BY day`;
           for (const r of jugDaily) {
             const key = dayKey08(r.day);
@@ -2188,6 +2188,15 @@ export class KoxService {
     // 特斯拉：曝光/阅读/互动 = 聚光笔记报表按账号窗口聚合（投流口径；乐允/ranf 存量无窗口值）
     // 私信进线/开口/留资 = 线索经营按归属账号（KOS-only、按客户去重；与 KOS 数据进度一致）
     if (brandId === 6) {
+      // 清零通用聚合（KoxNote 累计口径）的对应字段，避免窗口值叠加双算；CES/自然留资仍用笔记累计口径
+      for (const b of [...groups.values(), ...tagGroups.values()]) {
+        b.exposure = 0;
+        b.view = 0;
+        b.interaction = 0;
+        b.pm_inquiries = 0;
+        b.pm_openings = 0;
+        b.pm_leads = 0;
+      }
       const jugR = await this.prisma.$queryRaw<{
         acc: bigint;
         imp: bigint;
@@ -2202,7 +2211,7 @@ export class KoxService {
         LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
         LEFT JOIN "KosAccount" a ON a.id = n."accountId"
         LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
-        WHERE j."brandId" = 6 AND j."day" >= ${start} AND j."day" <= ${end}
+        WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
         GROUP BY 1`;
       const clueR = await this.prisma.$queryRaw<{
         acc: bigint;
@@ -2216,7 +2225,7 @@ export class KoxService {
           COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.leads)::int AS leads
         FROM "ProClueUserDay" c
         JOIN "KosAccount" a ON a."authorId" = c."belongUserId" AND a."brandId" = 6 AND a.status = 'enabled'
-        WHERE c."brandId" = 6 AND c."day" >= ${start} AND c."day" <= ${end}
+        WHERE c."brandId" = 6 AND (c."day" AT TIME ZONE 'UTC') >= ${start} AND (c."day" AT TIME ZONE 'UTC') <= ${end}
           AND NOT c."isOfficial" AND c."belongUserId" IS NOT NULL
         GROUP BY a.id`;
       for (const r of jugR) {
@@ -2225,9 +2234,10 @@ export class KoxService {
         const g = bucketOf(groups, regionOf(acc));
         const tg = bucketOf(tagGroups, tagOf(acc));
         for (const b of [g, tg]) {
-          b.exposure = Number(r.imp);
-          b.view = Number(r.click);
-          b.interaction = Number(r.inter);
+          // 区域/标签桶是多账号聚合，必须累加（覆盖会只留最后一个账号的值）
+          b.exposure += Number(r.imp);
+          b.view += Number(r.click);
+          b.interaction += Number(r.inter);
         }
       }
       for (const r of clueR) {
@@ -2236,9 +2246,9 @@ export class KoxService {
         const g = bucketOf(groups, regionOf(acc));
         const tg = bucketOf(tagGroups, tagOf(acc));
         for (const b of [g, tg]) {
-          b.pm_inquiries = Number(r.enter);
-          b.pm_openings = Number(r.open);
-          b.pm_leads = Number(r.leads);
+          b.pm_inquiries += Number(r.enter);
+          b.pm_openings += Number(r.open);
+          b.pm_leads += Number(r.leads);
         }
       }
     }
@@ -2411,16 +2421,37 @@ export class KoxService {
     };
     // 员工矩阵/笔记聚合前的公共映射
     const nameToId = new Map(accounts.map((a) => [a.nickname, a.id]));
+    // 员工矩阵是否可用：≤7 天且窗口内（或含今天的昨日回退）存在快照分区。
+    // 无分区（如未同步的历史单日、未来日期）→ 回退笔记口径（发布数=窗口内实际发布；曝光/阅读=笔记累计值）
+    let matrixApplied = false;
     if (useProStaff) {
       const proDateType = days <= 1 ? 1 : 2;
-      const latestPro = await this.prisma.proKosStaff.findFirst({
+      // 员工矩阵快照按「数据日」分区：只取落在查询窗口内的最新分区，避免选历史/未来日期时
+      // 仍然显示最新快照（此前选未来日期内容发布/曝光仍非 0 的根因）。
+      // 窗口含「今天」时允许回退昨天的分区（当日快照次日才产出）。
+      const winStartDay = dayKey08(start);
+      const winEndDay = dayKey08(end);
+      const todayDay = dayKey08(new Date());
+      const yesterdayDay = dayKey08(new Date(Date.now() - 86400000));
+      const partDays = await this.prisma.proKosStaff.findMany({
         where: { brandId: 6, dateType: proDateType },
         orderBy: { statDate: 'desc' },
+        distinct: ['statDate'],
         select: { statDate: true },
+        take: 30,
       });
-      if (latestPro) {
+      const chosen =
+        partDays.find((r) => {
+          const d = dayKey08(r.statDate);
+          return d >= winStartDay && d <= winEndDay;
+        }) ??
+        (winEndDay === todayDay || winStartDay === todayDay
+          ? partDays.find((r) => dayKey08(r.statDate) === yesterdayDay)
+          : undefined);
+      if (chosen) {
+        matrixApplied = true;
         const staffRowsPro = await this.prisma.proKosStaff.findMany({
-          where: { brandId: 6, statDate: latestPro.statDate, dateType: proDateType },
+          where: { brandId: 6, statDate: chosen.statDate, dateType: proDateType },
           take: 1000,
         });
         for (const s of staffRowsPro) {
@@ -2433,7 +2464,9 @@ export class KoxService {
             a.interaction += s.socEnageCnt;
           });
         }
-        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${dayKey08(latestPro.statDate)})`;
+        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${dayKey08(chosen.statDate)})`;
+      } else {
+        metric_source = 'spark_notes(no_pro_staff_partition)';
       }
     }
     for (const n of notes) {
@@ -2442,8 +2475,9 @@ export class KoxService {
       else if (n.authorName) accId = nameToId.get(n.authorName) ?? null;
       if (accId == null) continue;
       bump(accId, (a) => {
-        // 员工矩阵档：发布/曝光/阅读/互动/私信来自平台矩阵与线索经营，笔记行仅补赞/藏/评/分享/CES
-        if (!useProStaff) {
+        // 员工矩阵档：发布/曝光/阅读/互动/私信来自平台矩阵与线索经营，笔记行仅补赞/藏/评/分享/CES；
+        // 矩阵无分区时回退笔记口径（发布数精确、曝光/阅读为笔记累计值）
+        if (!matrixApplied) {
           a.item_cnt += 1;
           a.exposure += n.exposure;
           a.view += n.views;
@@ -2473,7 +2507,7 @@ export class KoxService {
           COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
           COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
         FROM "ProClueUserDay"
-        WHERE "brandId" = 6 AND day >= ${start} AND day <= ${end}
+        WHERE "brandId" = 6 AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
           AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
         GROUP BY "belongUserId"`;
       const authorToId = new Map(
@@ -2959,7 +2993,7 @@ export class KoxService {
         COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
         COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
       FROM "ProClueUserDay"
-      WHERE "brandId" = ${brandId} AND day >= ${start} AND day <= ${end}
+      WHERE "brandId" = ${brandId} AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
         AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
       GROUP BY "belongUserId"`;
     const authorToIdPro = new Map(
@@ -2992,7 +3026,7 @@ export class KoxService {
         LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
         LEFT JOIN "KosAccount" a ON a.id = n."accountId"
         LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
-        WHERE j."brandId" = 6 AND j."day" >= ${start} AND j."day" <= ${end}
+        WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
         GROUP BY 1`;
       for (const r of jugRowsPro) {
         const accId = r.acc != null ? Number(r.acc) : null;

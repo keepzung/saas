@@ -451,13 +451,28 @@ function monthSegments(start, end) {
   }
 
   // ── 写库 0：KoxJuguangNoteDaily（note×日，运营趋势数据源；受影响天整体重建，幂等）──
+  // 口径：剔除官号「特斯拉」作者/官号 userId 的笔记（子账户枚举已跳官号投放户，此处再按作者兜底）
+  const OFFICIAL_UID_JG = '5cad9d230000000011005d41';
+  const officialNoteIds = new Set(
+    (
+      await prisma.koxNote.findMany({
+        where: { brandId: BRAND_ID, OR: [{ authorName: '特斯拉' }, { rawJson: { path: ['authorUserId'], equals: OFFICIAL_UID_JG } }] },
+        select: { noteId: true },
+      })
+    ).map((n) => n.noteId),
+  );
   const touchedDays = new Set();
   for (const cur of agg.values()) for (const day of cur.days.keys()) touchedDays.add(day);
   for (const day of [...touchedDays].sort()) {
     await prisma.koxJuguangNoteDaily.deleteMany({ where: { brandId: BRAND_ID, day: new Date(`${day}T00:00:00+08:00`) } });
   }
   const dailyRows = [];
+  let officialDailySkipped = 0;
   for (const cur of agg.values()) {
+    if (officialNoteIds.has(cur.noteId)) {
+      officialDailySkipped += cur.days.size;
+      continue;
+    }
     for (const [day, d] of cur.days) {
       dailyRows.push({
         brandId: BRAND_ID,
@@ -480,7 +495,7 @@ function monthSegments(start, end) {
   for (let i = 0; i < dailyRows.length; i += 1000) {
     await prisma.koxJuguangNoteDaily.createMany({ data: dailyRows.slice(i, i + 1000), skipDuplicates: true });
   }
-  console.log(`[3.5] KoxJuguangNoteDaily 写入 ${dailyRows.length} 行（${touchedDays.size} 天）`);
+  console.log(`[3.5] KoxJuguangNoteDaily 写入 ${dailyRows.length} 行（${touchedDays.size} 天，剔官号笔记行 ${officialDailySkipped}）`);
 
   // ── 写库 ──
   const noteIds = [...agg.keys()];
