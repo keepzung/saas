@@ -157,6 +157,32 @@ async function keepBrand(org) {
   const brandId = org.brandId;
   const t0 = Date.now();
   const st = state[brandId] || (state[brandId] = { consecutiveFails: 0 });
+
+  // 引导：无 cookie 但配置了账密 → 先尝试自动登录拿 cookie（mcc 引导登录）
+  if (!org.cookie) {
+    const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
+    const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
+    if (!ACCOUNT || !PASSWORD) return; // 无 cookie 无凭据，静默跳过
+    const st2 = state[brandId];
+    const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
+    if (st2.lastReloginAt && Date.now() - st2.lastReloginAt < cooldownMs) return;
+    st2.lastReloginAt = Date.now();
+    console.log(`[${nowIso()}] brand${brandId} 无 cookie，尝试 mcc 账密引导登录 ...`);
+    let rr;
+    try { rr = await reloginMcc(brandId); } catch (e) { rr = { ok: false, note: `bootstrap error: ${String(e).slice(0, 80)}` }; }
+    if (rr.ok && rr.cookie) {
+      await prisma.sparkOrgConfig.update({ where: { brandId }, data: { cookie: rr.cookie, lastSyncAt: new Date() } }).catch(() => {});
+      org.cookie = rr.cookie;
+      st2.consecutiveFails = 0;
+      console.log(`[${nowIso()}] brand${brandId} 引导登录成功: ${rr.note}`);
+      await prisma.sparkSyncLog.create({ data: { brandId, syncType: 'keepalive', statDate: nowIso().slice(0, 10), status: 'success', message: `bootstrap login ok: ${rr.note}` } }).catch(() => {});
+    } else {
+      console.log(`[${nowIso()}] brand${brandId} 引导登录失败: ${rr?.note}`);
+      await prisma.sparkSyncLog.create({ data: { brandId, syncType: 'keepalive', statDate: nowIso().slice(0, 10), status: 'failed', message: `bootstrap login failed: ${rr?.note}` } }).catch(() => {});
+    }
+    return;
+  }
+
   let r;
   try {
     r = org.channel === 'partner' ? await probePartner(org.cookie) : await probeMcc(org.cookie);
@@ -229,7 +255,7 @@ async function keepBrand(org) {
 }
 
 async function round() {
-  const orgs = await prisma.sparkOrgConfig.findMany({ where: { active: true, cookie: { not: '' } } });
+  const orgs = await prisma.sparkOrgConfig.findMany({ where: { active: true } });
   if (!orgs.length) { console.log(`[${nowIso()}] 无 active 组织可探活`); return; }
   for (const org of orgs) {
     try { await keepBrand(org); } catch (e) { console.error(`[${nowIso()}] brand${org.brandId} keep error: ${String(e).slice(0, 120)}`); }
