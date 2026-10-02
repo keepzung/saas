@@ -135,15 +135,20 @@ async function reloginMcc(brandId) {
       await page.locator('input[placeholder="邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
       await page.locator('input[placeholder="密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
-      // 勾选「我已阅读并同意用户协议和隐私条款」（不勾选登录按钮为禁用态）
-      const cbs = page.locator('input[type="checkbox"]');
-      const cbn = await cbs.count().catch(() => 0);
-      for (let i = 0; i < cbn; i++) {
-        const cb = cbs.nth(i);
-        if (await cb.isVisible().catch(() => false)) {
-          if (!(await cb.isChecked().catch(() => false))) await cb.check({ timeout: 5000 }).catch(() => {});
-          break;
+      // 勾选「我已阅读并同意用户协议和隐私条款」：自定义样式 checkbox 的原生 input 常被隐藏，
+      // 直接点击文案标签切换勾选；点完校验登录按钮是否仍禁用，最多重试两轮
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const btn = page.locator('button:has-text("登 录"), button:has-text("登录")').first();
+        const disabled = await btn.isDisabled().catch(() => false);
+        if (!disabled) break;
+        await page.locator('text=我已阅读并同意').first().click({ timeout: 5000 }).catch(() => {});
+        const cbs = page.locator('input[type="checkbox"]');
+        const cbn = await cbs.count().catch(() => 0);
+        for (let i = 0; i < cbn; i++) {
+          const cb = cbs.nth(i);
+          if (!(await cb.isChecked().catch(() => false))) await cb.check({ timeout: 3000 }).catch(() => {});
         }
+        await sleep(500);
       }
       await sleep(300);
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
