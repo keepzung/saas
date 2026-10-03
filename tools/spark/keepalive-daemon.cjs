@@ -71,9 +71,26 @@ async function probeUrl(url, cookie) {
 }
 
 async function probePartner(cookie) {
-  // 先页面探活（会话续期），再补一次轻 API（双保险维持活跃度）
-  const page = await probeUrl('https://partner.xiaohongshu.com/partner/watch-dashboard', cookie);
-  return page;
+  // API 级探活为准（HTML 页面 200 但客户端跳登录会假阳性）；页面 GET 保留用于会话续期
+  try {
+    const res = await fetch('https://partner.xiaohongshu.com/api/vision/dashboard/target_detail_list', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        Cookie: cookie || '',
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+        Origin: 'https://partner.xiaohongshu.com',
+        Referer: 'https://partner.xiaohongshu.com/partner/watch-dashboard',
+      },
+      body: JSON.stringify({ reportCode: '', viewAlias: 'partner_customerManage_monitorAssistant_vsellerMonitorView', chart: 'virtual_seller', dynamicTargets: ['virtual_seller_id', 'virtual_seller_name'], pageNum: 1, pageSize: 1 }),
+    });
+    const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    const dead = res.status === 401 || res.status === 403;
+    return { alive: !dead && res.status >= 200 && res.status < 300, dead, setCookies, status: res.status, loc: res.headers.get('location') || '' };
+  } catch (e) {
+    return { alive: false, dead: false, setCookies: [], status: undefined, loc: '', note: `api probe error: ${String(e).slice(0, 60)}` };
+  }
 }
 
 async function probeMcc(cookie) {
