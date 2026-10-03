@@ -19,7 +19,7 @@
       <div class="wz-actions">
         <a-button size="small" class="dark-btn" @click="resetAll">再写一篇</a-button>
         <a-button size="small" class="dark-btn" @click="goHistory">历史记录</a-button>
-        <span class="wz-quota">⚡ 可用算力 {{ health.llm ? '∞' : '1,905' }}</span>
+        <span v-if="quota" class="wz-quota">⚡ 可用算力 {{ quota.available.toLocaleString() }}</span>
       </div>
     </div>
 
@@ -264,6 +264,9 @@
               <a-button type="primary" block :loading="publishing" @click="publish">
                 <QrcodeOutlined /> 保存草稿，生成发布二维码
               </a-button>
+              <a-button block @click="openAddToPackage" :disabled="!draftId">
+                <InboxOutlined /> 添加到内容包
+              </a-button>
               <a-button block @click="copyText"><CopyOutlined /> 复制文案</a-button>
               <a-button block @click="downloadImages"><DownloadOutlined /> 下载图片</a-button>
             </a-space>
@@ -283,6 +286,24 @@
         </div>
       </template>
     </div>
+
+    <!-- 添加到内容包 -->
+    <a-modal v-model:open="pkgOpen" title="添加到内容包" width="520px" :confirm-loading="pkgMoving" @ok="confirmAddToPackage">
+      <div class="move-tip">将本篇草稿移入内容包，后续在「内容包Pro」中提交审核。</div>
+      <a-select
+        v-model:value="pkgTarget"
+        style="width: 100%; margin-top: 12px"
+        show-search
+        option-filter-prop="label"
+        :options="pkgOptions"
+        placeholder="选择内容包"
+      />
+      <div class="pkg-new-row">
+        <span>没有合适的？</span>
+        <a-input v-model:value="pkgNewName" size="small" style="width: 200px" placeholder="新内容包名称" :maxlength="30" />
+        <a-button size="small" :loading="pkgCreating" @click="createPkgInline">新建内容包</a-button>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -311,6 +332,7 @@ import {
   UploadOutlined,
   QrcodeOutlined,
   DownloadOutlined,
+  InboxOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../../stores/auth';
 import { getProducts } from '../../api/content';
@@ -324,6 +346,10 @@ import {
   getMaterialSets,
   getMaterialImages,
   uploadMaterialImage,
+  getQuota,
+  getPackagesPro,
+  createPackagePro,
+  moveToPackage,
 } from '../../api/contentpro';
 import CoverEditor from './CoverEditor.vue';
 
@@ -341,6 +367,7 @@ const steps = [
 
 const step = ref(1);
 const health = ref({ llm: false, model: 'glm-4-flash' });
+const quota = ref(null);
 
 // step1
 const productOptions = ref([]);
@@ -403,10 +430,11 @@ const flattenProducts = (nodes, out = []) => {
 };
 
 const loadBase = async () => {
-  const [products, st, h] = await Promise.all([
+  const [products, st, h, q] = await Promise.all([
     getProducts({ brandId: brandId.value }),
     getStrategies({ brandId: brandId.value }),
     aiHealth(),
+    getQuota({ brandId: brandId.value }).catch(() => null),
   ]);
   productOptions.value = flattenProducts(products);
   if (!productId.value && productOptions.value.length) productId.value = productOptions.value[0].value;
@@ -416,6 +444,17 @@ const loadBase = async () => {
     strategyId.value = first.id;
   }
   health.value = h ?? health.value;
+  quota.value = q ?? null;
+};
+
+const refreshQuota = async () => {
+  try {
+    const q = await getQuota({ brandId: brandId.value });
+    quota.value = q ?? null;
+    window.dispatchEvent(new CustomEvent('quota-refresh'));
+  } catch {
+    /* ignore */
+  }
 };
 
 const loadMaterialMeta = async () => {
@@ -440,7 +479,9 @@ const generate = async () => {
       {
         productId: productId.value,
         strategyId: strategyId.value,
-        extra: [extra.value, dir ? `内容方向：${dir.name}（${dir.description ?? ''}）` : ''].filter(Boolean).join('；'),
+        directionName: dir?.name ?? null,
+        wordCount: '300-600',
+        extra: extra.value || undefined,
       },
       { brandId: brandId.value },
     );
@@ -452,6 +493,7 @@ const generate = async () => {
     if (res?.source === 'template') {
       message.info('当前为内置模板生成，配置 LLM_API_KEY 后自动切换大模型');
     }
+    refreshQuota();
   } catch (e) {
     message.error(e?.response?.data?.msg ?? '生成失败');
     step.value = 1;
@@ -464,8 +506,15 @@ const regenerate = async () => {
   if (!regenPrompt.value.trim()) return;
   generating.value = true;
   try {
+    const dir = currentDirections.value[directionIndex.value];
     const res = await generateArticle(
-      { productId: productId.value, strategyId: strategyId.value, extra: `${extra.value}；${regenPrompt.value}` },
+      {
+        productId: productId.value,
+        strategyId: strategyId.value,
+        directionName: dir?.name ?? null,
+        wordCount: '300-600',
+        extra: [extra.value, regenPrompt.value].filter(Boolean).join('；'),
+      },
       { brandId: brandId.value },
     );
     titles.value = res?.titles ?? titles.value;
@@ -473,6 +522,7 @@ const regenerate = async () => {
     content.value = res?.content ?? content.value;
     tags.value = res?.tags ?? tags.value;
     regenPrompt.value = '';
+    refreshQuota();
   } finally {
     generating.value = false;
   }
@@ -551,8 +601,14 @@ const uploadLocal = async (file) => {
   return false;
 };
 
-const onCoverApply = async ({ dataUrl }) => {
+const onCoverApply = async ({ dataUrl, remoteUrl }) => {
   try {
+    if (remoteUrl) {
+      images.value.unshift({ url: remoteUrl, name: '创客贴封面' });
+      coverOpen.value = false;
+      message.success('创客贴封面已添加');
+      return;
+    }
     const blob = await (await fetch(dataUrl)).blob();
     const file = new File([blob], 'cover.png', { type: 'image/png' });
     const res = await uploadMaterialImage(file, brandId.value);
@@ -605,6 +661,53 @@ const copy = async (text) => {
 };
 const copyText = () =>
   copy(`${titles.value[selectedTitle.value]}\n\n${content.value}\n\n${tags.value.map((t) => `#${t}`).join(' ')}`);
+
+// ── 添加到内容包（step5，需先保存草稿）
+const pkgOpen = ref(false);
+const pkgTarget = ref(null);
+const pkgOptions = ref([]);
+const pkgNewName = ref('');
+const pkgCreating = ref(false);
+const pkgMoving = ref(false);
+
+const openAddToPackage = async () => {
+  if (!draftId.value) return message.warning('请先保存草稿');
+  pkgTarget.value = null;
+  pkgNewName.value = '';
+  const res = await getPackagesPro({ brandId: brandId.value });
+  pkgOptions.value = (res?.list ?? []).map((p) => ({ value: p.id, label: p.name }));
+  pkgOpen.value = true;
+};
+
+const createPkgInline = async () => {
+  if (!pkgNewName.value.trim()) return message.warning('请输入新内容包名称');
+  pkgCreating.value = true;
+  try {
+    const res = await createPackagePro({ name: pkgNewName.value.trim() }, { brandId: brandId.value });
+    const list = await getPackagesPro({ brandId: brandId.value });
+    pkgOptions.value = (list.data?.list ?? []).map((p) => ({ value: p.id, label: p.name }));
+    pkgTarget.value = res?.id;
+    message.success('内容包已创建');
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '创建失败');
+  } finally {
+    pkgCreating.value = false;
+  }
+};
+
+const confirmAddToPackage = async () => {
+  if (!pkgTarget.value) return message.warning('请选择目标内容包');
+  pkgMoving.value = true;
+  try {
+    await moveToPackage(pkgTarget.value, [draftId.value], { brandId: brandId.value });
+    message.success('已添加到内容包，可在「内容包Pro」中提交审核');
+    pkgOpen.value = false;
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '添加失败');
+  } finally {
+    pkgMoving.value = false;
+  }
+};
 
 const downloadImages = () => {
   images.value.forEach((img, i) => {
@@ -731,6 +834,20 @@ onMounted(async () => {
   color: #facc15;
   font-size: 13px;
   white-space: nowrap;
+}
+
+.move-tip {
+  font-size: 13px;
+  color: #334155;
+}
+
+.pkg-new-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .wz-body {

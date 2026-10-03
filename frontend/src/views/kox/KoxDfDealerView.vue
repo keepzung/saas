@@ -1,6 +1,10 @@
 <template>
   <PageWrapper title="经销商排行" subtitle="代理商能力分层 · 综合排行">
     <template #extra>
+      <a-radio-group v-model:value="mode" size="small" button-style="solid" @change="onModeChange">
+        <a-radio-button value="live">实时聚合</a-radio-button>
+        <a-radio-button value="snapshot">考核快照</a-radio-button>
+      </a-radio-group>
       <a-select
         v-model:value="regionName"
         size="small"
@@ -14,8 +18,9 @@
         v-model:value="statMonth"
         size="small"
         style="width: 120px"
-        placeholder="考核月份"
+        :placeholder="mode === 'live' ? '月份' : '考核月份'"
         :options="monthOptions"
+        allow-clear
         @change="reload"
       />
     </template>
@@ -24,7 +29,9 @@
       <template #title>
         <div class="sec-head">
           <span class="bar"></span>代理商能力分层
-          <a-tooltip title="分级标准（月度留资）：头部 ≥25 ｜ 腰部 12.5–25 ｜ 尾部 6.25–12.5 ｜ 沉默 <6（数据源=旧系统导出快照）">
+          <a-tooltip :title="mode === 'live'
+            ? '实时聚合=星火笔记 T+1 × 门店账号基线（自然月窗口）；分层（月度留资）：头部 ≥20 ｜ 腰部 5–19 ｜ 尾部 1–4 ｜ 沉默 0；综合得分=内容分×40%+留资分×60%；曝光/留资/成交完成度无目标值口径故显示 —'
+            : '分级标准（月度留资）：头部 ≥25 ｜ 腰部 12.5–25 ｜ 尾部 6.25–12.5 ｜ 沉默 <6（数据源=旧系统导出快照）'">
             <question-circle-outlined class="q-icon" />
           </a-tooltip>
         </div>
@@ -106,7 +113,8 @@
             <span class="tier-tag" :style="{ background: tierColor(record.tier) }">{{ record.tier }}</span>
           </template>
           <template v-else-if="['content_pct', 'exposure_pct', 'leads_pct', 'deals_pct'].includes(column.key)">
-            <div class="prog-cell">
+            <div v-if="record[column.key] === null || record[column.key] === undefined" class="prog-num">—</div>
+            <div v-else class="prog-cell">
               <div class="prog"><div class="prog-inner" :style="{ width: Math.min(100, record[column.key]) + '%', background: progColor(record[column.key]) }"></div></div>
               <span class="prog-num">{{ record[column.key] }}%</span>
             </div>
@@ -143,6 +151,7 @@ const TIERS = [
 
 const regionName = ref(undefined);
 const statMonth = ref(undefined);
+const mode = ref('live');
 const keyword = ref('');
 const monthOptions = ref([]);
 const regionOptions = ref([]);
@@ -245,9 +254,11 @@ async function reload() {
     const res = await getKoxDealerSnapshot({
       brandId: auth.currentBrandId ?? 7,
       statMonth: statMonth.value ?? undefined,
+      mode: mode.value,
     });
     data.value = res;
     monthOptions.value = (res.stat_months ?? []).map((m) => ({ label: m, value: m }));
+    if (!statMonth.value && res.stat_month) statMonth.value = res.stat_month;
     if (!regionOptions.value.length) {
       regionOptions.value = [
         ...new Set((res.list ?? []).map((r) => r.region_name).filter(Boolean)),
@@ -260,6 +271,13 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+}
+
+function onModeChange() {
+  statMonth.value = undefined;
+  regionName.value = undefined;
+  regionOptions.value = [];
+  reload();
 }
 
 function onResize() {

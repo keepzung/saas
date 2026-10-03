@@ -136,7 +136,7 @@ export class KoxController {
   }
 
   @Get('kox/dealer-snapshot')
-  dealerSnapshot(@Query() query: { brandId?: string; statMonth?: string }) {
+  dealerSnapshot(@Query() query: { brandId?: string; statMonth?: string; mode?: string }) {
     return this.koxService.dealerSnapshot(query);
   }
 

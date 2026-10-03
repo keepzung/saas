@@ -93,6 +93,80 @@ export const batchGenerate = (data, params) =>
 export const getBatchTasks = (params) =>
   request.get('/content-pro/batch-tasks', { params });
 
+export const updateHistoryContent = (id, data, params) =>
+  request.put(`/content-pro/history/xhs/${id}/content`, data, { params });
+
+export const discardHistories = (ids, params) =>
+  request.post('/content-pro/history/discard', { ids }, { params });
+
+// ─── 算力配额 / 智能编辑 / 创客贴 ────────────────────────────────────
+export const getQuota = (params) => request.get('/content-pro/quota', { params });
+
+export const grantQuota = (data, params) =>
+  request.post('/content-pro/quota/grant', data, { params });
+
+export const getCoverEditStatus = (params) =>
+  request.get('/content-pro/cover-edit/status', { params });
+
+export const useCoverEdit = (params) =>
+  request.post('/content-pro/cover-edit/use', {}, { params });
+
+export const getChuangkitConfig = () =>
+  request.get('/content-pro/chuangkit/config');
+
+export const importChuangkitImage = (data, params) =>
+  request.post('/content-pro/chuangkit/import', data, { params });
+
+// ─── 内容包 Pro ─────────────────────────────────────────────────────
+export const getPackagesPro = (params) =>
+  request.get('/content-pro/packages', { params });
+
+export const createPackagePro = (data, params) =>
+  request.post('/content-pro/packages', data, { params });
+
+export const updatePackagePro = (id, data, params) =>
+  request.put(`/content-pro/packages/${id}`, data, { params });
+
+export const deletePackagePro = (id, params) =>
+  request.delete(`/content-pro/packages/${id}`, { params });
+
+export const getPackageDetail = (id, params) =>
+  request.get(`/content-pro/packages/${id}`, { params });
+
+export const moveToPackage = (id, historyIds, params) =>
+  request.post(`/content-pro/packages/${id}/move`, { historyIds }, { params });
+
+export const moveOutOfPackage = (historyIds, params) =>
+  request.post('/content-pro/packages/move-out', { historyIds }, { params });
+
+export const submitAudit = (historyIds, params) =>
+  request.post('/content-pro/history/submit-audit', { historyIds }, { params });
+
+export const approveHistory = (historyIds, params) =>
+  request.post('/content-pro/history/approve', { historyIds }, { params });
+
+export const rejectHistory = (historyIds, reason, params) =>
+  request.post('/content-pro/history/reject', { historyIds, reason }, { params });
+
+export const getAuditList = (params) =>
+  request.get('/content-pro/audit/list', { params });
+
+export const dispatchHistory = (historyIds, userId, params) =>
+  request.post('/content-pro/history/dispatch', { historyIds, userId }, { params });
+
+export const getClaimLog = (params) =>
+  request.get('/content-pro/claim-log', { params });
+
+// ─── H5 领用 ────────────────────────────────────────────────────────
+export const getMobilePackages = (params) =>
+  request.get('/content-pro/mobile/packages', { params });
+
+export const claimMobilePackage = (data, params) =>
+  request.post('/content-pro/mobile/claim', data, { params });
+
+export const getMobileClaims = (params) =>
+  request.get('/content-pro/mobile/claims', { params });
+
 // ─── 内容创作任务（任务分发）────────────────────────────────────────
 export const getContentTasks = (params) =>
   request.get('/content-tasks', { params });

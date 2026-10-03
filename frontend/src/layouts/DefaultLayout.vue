@@ -82,6 +82,13 @@
         >
           {{ t.name }}
         </button>
+        <span
+          v-if="activeTabKey === 'factory' && factoryQuota"
+          class="wt-quota"
+          title="算力用于 AI 生成内容，1 篇 = 1 算力"
+        >
+          <ThunderboltOutlined /> 可用算力 {{ factoryQuota.available.toLocaleString() }}
+        </span>
       </div>
 
       <a-layout-content class="content">
@@ -211,9 +218,11 @@ import {
   CheckOutlined,
   CloseOutlined,
   InfoCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
 import { getCompaniesByUserId } from '../api/auth';
+import { getQuota } from '../api/contentpro';
 import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_MENU_NAME_OVERRIDES, BRAND_WORKSPACE_TABS } from '../config/brands';
 import { useBreakpoint } from '../composables/useBreakpoint';
 import SideNav from '../components/SideNav.vue';
@@ -271,6 +280,23 @@ const theme = computed(() => brandTheme(auth.currentBrandId));
 
 // 顶部工作区 Tab（仅东风奕境/格力），按路由前缀推导激活态
 const workspaceTabs = computed(() => BRAND_WORKSPACE_TABS[auth.currentBrandId] ?? null);
+
+// 内容工厂算力徽章（quota-refresh 事件由生成页面触发刷新）
+const factoryQuota = ref(null);
+const loadFactoryQuota = async () => {
+  if (!BRAND_WORKSPACE_TABS[auth.currentBrandId]) {
+    factoryQuota.value = null;
+    return;
+  }
+  try {
+    const res = await getQuota({ brandId: auth.currentBrandId });
+    factoryQuota.value = res;
+  } catch {
+    factoryQuota.value = null;
+  }
+};
+watch([workspaceTabs, () => auth.currentBrandId], loadFactoryQuota, { immediate: true });
+window.addEventListener('quota-refresh', loadFactoryQuota);
 const activeTabKey = computed(() => {
   if (!workspaceTabs.value) return null;
   const path = route.path;
@@ -279,7 +305,8 @@ const activeTabKey = computed(() => {
 });
 
 // 内容工厂Pro / 内容创作任务 菜单在模块树中的位置约定
-const isFactoryCat = (cat) => cat.key === 'm_factory';
+// 注意：companymodulelist 返回的分组节点把 key 塞在 id 字段（无 key 字段），两者都兼容
+const isFactoryCat = (cat) => (cat.key ?? cat.id) === 'm_factory';
 const isTaskGroup = (g) => g.name === '内容创作任务';
 
 const categories = computed(() => {
@@ -610,6 +637,23 @@ onMounted(async () => {
 .workspace-tab.active {
   color: var(--color-primary);
   font-weight: 600;
+}
+
+.wt-quota {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d97706;
+  background: #fff7e6;
+  border: 1px solid #ffe1b3;
+  border-radius: 999px;
+  padding: 3px 12px;
+  white-space: nowrap;
+  cursor: default;
 }
 
 .workspace-tab.active::after {

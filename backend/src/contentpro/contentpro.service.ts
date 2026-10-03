@@ -5,14 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
+import { QuotaService } from './quota.service';
 
 @Injectable()
 export class ContentproService {
   constructor(
     private prisma: PrismaService,
     private ai: AiService,
+    private quota: QuotaService,
   ) {}
 
   // ─── 素材库 ────────────────────────────────────────────────────────
@@ -240,6 +243,12 @@ export class ContentproService {
     keyword?: string;
     status?: string;
     taskId?: string;
+    batchTaskId?: string;
+    batchOnly?: string;
+    unpackaged?: string;
+    packaged?: string;
+    reviewStatus?: string;
+    packageId?: string;
     page?: string;
     pageSize?: string;
   }) {
@@ -250,6 +259,15 @@ export class ContentproService {
     if (query.status === 'draft' || query.status === '0') where.status = 0;
     if (query.status === 'published' || query.status === '1') where.status = 1;
     if (query.taskId) where.contentTaskId = Number(query.taskId);
+    if (query.batchTaskId) where.batchTaskId = Number(query.batchTaskId);
+    if (query.batchOnly === '1') where.batchTaskId = { not: null };
+    if (query.reviewStatus) {
+      const statuses = query.reviewStatus.split(',').map((s) => s.trim()).filter(Boolean);
+      where.reviewStatus = statuses.length > 1 ? { in: statuses } : statuses[0];
+    }
+    if (query.packageId) where.packageId = Number(query.packageId);
+    if (query.unpackaged === '1') where.packageId = null;
+    if (query.packaged === '1') where.packageId = { not: null };
     const [total, rows] = await Promise.all([
       this.prisma.xhsHistory.count({ where }),
       this.prisma.xhsHistory.findMany({
@@ -260,27 +278,40 @@ export class ContentproService {
       }),
     ]);
     return {
-      list: rows.map((h) => ({
-        id: h.id,
-        title: h.title,
-        content: h.content,
-        tags: h.tags,
-        img_list: h.imgList,
-        cover_url: h.coverUrl,
-        source: h.source,
-        status: h.status,
-        content_task_id: h.contentTaskId,
-        upload_time: h.uploadTime,
-      })),
+      list: rows.map((h) => this.mapHistory(h)),
       total,
       page,
       page_size: pageSize,
     };
   }
 
-  async historyDetail(brandId: number, id: number) {
-    const h = await this.prisma.xhsHistory.findUnique({ where: { id } });
-    if (!h || h.brandId !== brandId) throw new NotFoundException('记录不存在');
+  /** XhsHistory → 前端契约（含内容包审核/领用字段） */
+  private mapHistory(
+    h: {
+      id: number;
+      title: string;
+      content: string;
+      tags: string[];
+      imgList: string[];
+      coverUrl: string | null;
+      source: string;
+      status: number;
+      contentTaskId: number | null;
+      batchTaskId: number | null;
+      contentForm: string;
+      strategyId: number | null;
+      directionName: string | null;
+      packageId: number | null;
+      reviewStatus: string;
+      rejectReason: string | null;
+      claimedById: number | null;
+      claimedAt: Date | null;
+      dispatchedToId: number | null;
+      dispatchedAt: Date | null;
+      uploadTime: Date;
+    },
+    packageName?: string | null,
+  ) {
     return {
       id: h.id,
       title: h.title,
@@ -291,8 +322,26 @@ export class ContentproService {
       source: h.source,
       status: h.status,
       content_task_id: h.contentTaskId,
+      batch_task_id: h.batchTaskId,
+      content_form: h.contentForm,
+      strategy_id: h.strategyId,
+      direction_name: h.directionName,
+      package_id: h.packageId,
+      package_name: packageName ?? null,
+      review_status: h.reviewStatus,
+      reject_reason: h.rejectReason,
+      claimed_by_id: h.claimedById,
+      claimed_at: h.claimedAt,
+      dispatched_to_id: h.dispatchedToId,
+      dispatched_at: h.dispatchedAt,
       upload_time: h.uploadTime,
     };
+  }
+
+  async historyDetail(brandId: number, id: number) {
+    const h = await this.prisma.xhsHistory.findUnique({ where: { id } });
+    if (!h || h.brandId !== brandId) throw new NotFoundException('记录不存在');
+    return this.mapHistory(h);
   }
 
   async saveHistory(brandId: number, dto: {
@@ -352,12 +401,65 @@ export class ContentproService {
   }
 
   // ─── AI 生成 ───────────────────────────────────────────────────────
-  generate(input: { brandId: number; productId: number; strategyId?: number | null; extra?: string }) {
-    return this.ai.generateArticle(input);
+  async generate(input: { brandId: number; productId: number; strategyId?: number | null; extra?: string; directionName?: string | null; wordCount?: string | null }, userId?: number) {
+    await this.quota.assertEnough(input.brandId, 1);
+    await this.quota.consume(input.brandId, 1, userId, '单篇生成');
+    try {
+      const result = await this.ai.generateArticle(input);
+      return result;
+    } catch (e) {
+      await this.quota.refund(input.brandId, 1, userId, '单篇生成失败退回');
+      throw e;
+    }
   }
 
   aiHealth() {
     return this.ai.health();
+  }
+
+  // ─── 算力配额 ──────────────────────────────────────────────────────
+  quotaSummary(brandId: number) {
+    return this.quota.summary(brandId);
+  }
+
+  async quotaGrant(brandId: number, amount: number, operator: { id: number; role: string }, remark?: string) {
+    if (operator.role !== 'ADMIN') throw new ForbiddenException('仅超级管理员可调整算力');
+    return this.quota.grant(brandId, amount, operator.id, remark);
+  }
+
+  async coverEditStatus(brandId: number, userId: number) {
+    return this.quota.coverEditStatus(brandId, userId);
+  }
+
+  async coverEditUse(brandId: number, userId: number) {
+    return this.quota.coverEditConsume(brandId, userId);
+  }
+
+  // ─── 创客贴（CHUANGKIT_APP_KEY 配置后启用）──────────────────────────
+  chuangkitConfig() {
+    return {
+      enabled: Boolean(process.env.CHUANGKIT_APP_KEY),
+      editor_url: process.env.CHUANGKIT_EDITOR_URL ?? '',
+    };
+  }
+
+  /** 创客贴导出图转存本地（外链有时效，落库转 /uploads） */
+  async chuangkitImport(brandId: number, dto: { url: string }) {
+    if (!/^https?:\/\//.test(dto.url)) throw new BadRequestException('URL 不合法');
+    const res = await fetch(dto.url);
+    if (!res.ok) throw new BadRequestException(`下载失败 http ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new BadRequestException('下载内容为空');
+    const path = await import('path');
+    const fs = await import('fs');
+    const root = process.env.UPLOAD_ROOT
+      ? process.env.UPLOAD_ROOT
+      : path.resolve(__dirname, '..', '..', 'uploads');
+    const dir = path.join(root, 'materials', String(brandId));
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `chuangkit_${randomUUID()}.png`;
+    fs.writeFileSync(path.join(dir, filename), buf);
+    return { url: `/uploads/materials/${brandId}/${filename}` };
   }
 
   randomImages(brandId: number, productId?: string, num?: string) {
@@ -365,7 +467,9 @@ export class ContentproService {
   }
 
   /**
-   * 批量图文：创建 BatchTask 后台顺序生成，逐条落 XhsHistory 并回写计数
+   * 批量图文：创建 BatchTask 后台顺序生成，逐条落 XhsHistory 并回写计数。
+   * 支持策略矩阵 items[]（策略×内容方向×数量×字数×配图方式），兼容旧单策略入参。
+   * 算力：每篇 1 算力，创建前预检、逐篇扣减、失败退回。
    */
   async batchGenerate(brandId: number, dto: {
     productId: number;
@@ -374,8 +478,8 @@ export class ContentproService {
     taskName?: string;
     extra?: string;
     imageMode?: string;
+    items?: { strategyId?: number | null; directionName?: string | null; count: number; wordCount?: string | null }[];
   }, userId: number) {
-    const qty = Math.min(20, Math.max(1, dto.targetQuantity ?? 5));
     let product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
     if (!product) {
       product = await this.prisma.product.findFirst({
@@ -384,65 +488,127 @@ export class ContentproService {
       });
     }
     if (!product) throw new NotFoundException('该工作区尚无产品，请先在资料库配置产品树');
+
+    // 归一化生成计划：items 优先，回退旧单策略×数量
+    const items = (dto.items?.length ? dto.items : [{
+      strategyId: dto.strategyId ?? null,
+      directionName: null,
+      count: Math.min(20, Math.max(1, dto.targetQuantity ?? 5)),
+      wordCount: null,
+    }])
+      .map((it) => ({ ...it, count: Math.min(20, Math.max(1, Number(it.count) || 1)) }))
+      .filter((it) => it.strategyId || it.directionName || true);
+    const totalQty = Math.min(50, items.reduce((s, it) => s + it.count, 0));
+
+    // 校验策略归属品牌 + 组装任务名称
+    const strategyIds = [...new Set(items.map((it) => it.strategyId).filter((x): x is number => !!x))];
+    if (strategyIds.length) {
+      const found = await this.prisma.writingStrategy.count({ where: { id: { in: strategyIds }, brandId } });
+      if (found < strategyIds.length) throw new BadRequestException('包含其他工作区的创作策略');
+    }
+    const strategyNameMap = new Map(
+      (strategyIds.length
+        ? await this.prisma.writingStrategy.findMany({ where: { id: { in: strategyIds } }, select: { id: true, name: true } })
+        : []
+      ).map((s) => [s.id, s.name]),
+    );
+
+    // 算力预检
+    await this.quota.assertEnough(brandId, totalQty);
+
     const task = await this.prisma.batchTask.create({
       data: {
-        taskName: dto.taskName?.trim() || `${product.displayName ?? product.name} × ${qty} 篇`,
+        taskName:
+          dto.taskName?.trim() ||
+          (items.length === 1 && items[0].strategyId
+            ? `${strategyNameMap.get(items[0].strategyId!)} × ${items[0].count} 篇`
+            : `${product.displayName ?? product.name} × ${totalQty} 篇`),
         status: 'pending',
         productId: product.id,
-        targetQty: qty,
+        targetQty: totalQty,
         model: 'random',
-        config: { imageMode: dto.imageMode ?? 'auto_match', strategyId: dto.strategyId ?? null, extra: dto.extra ?? '' } as unknown as Prisma.InputJsonValue,
+        config: {
+          imageMode: dto.imageMode ?? 'auto_match',
+          extra: dto.extra ?? '',
+          items: items.map((it) => ({
+            strategy_id: it.strategyId ?? null,
+            strategy_name: it.strategyId ? (strategyNameMap.get(it.strategyId) ?? null) : null,
+            direction_name: it.directionName ?? null,
+            count: it.count,
+            word_count: it.wordCount ?? null,
+          })),
+        } as unknown as Prisma.InputJsonValue,
         brandId,
+        pointsTotal: totalQty,
         createdById: userId,
       },
     });
-    this.runBatch(task.id, brandId, { ...dto, productId: product.id }, userId).catch(() => undefined);
-    return { id: task.id, status: 'pending', target_quantity: qty };
+    this.runBatch(task.id, brandId, { ...dto, productId: product.id, items }, userId).catch(() => undefined);
+    return { id: task.id, status: 'pending', target_quantity: totalQty, points_total: totalQty };
   }
 
   private async runBatch(taskId: number, brandId: number, dto: {
     productId: number;
     strategyId?: number | null;
     extra?: string;
+    items?: { strategyId?: number | null; directionName?: string | null; count: number; wordCount?: string | null }[];
   }, userId: number) {
     await this.prisma.batchTask.update({ where: { id: taskId }, data: { status: 'running' } });
     const task = await this.prisma.batchTask.findUnique({ where: { id: taskId } });
-    const qty = task?.targetQty ?? 1;
-    for (let i = 0; i < qty; i++) {
-      try {
-        const result = await this.ai.generateArticle({
-          brandId,
-          productId: dto.productId,
-          strategyId: dto.strategyId,
-          extra: dto.extra,
-        });
-        const imgs = await this.ai.randomImages(brandId, dto.productId, 4);
-        await this.prisma.xhsHistory.create({
-          data: {
+    const items = dto.items?.length
+      ? dto.items
+      : [{ strategyId: dto.strategyId ?? null, directionName: null, count: task?.targetQty ?? 1, wordCount: null }];
+    let done = 0;
+    for (const item of items) {
+      for (let i = 0; i < item.count; i++) {
+        try {
+          const result = await this.ai.generateArticle({
             brandId,
-            title: result.titles[i % result.titles.length] ?? result.titles[0],
-            content: result.content,
-            tags: result.tags,
-            imgList: imgs.map((x) => x.url),
-            source: `batch:${result.source}`,
-            batchTaskId: taskId,
-            createdById: userId,
-          },
-        });
-        await this.prisma.batchTask.update({
-          where: { id: taskId },
-          data: { successCount: { increment: 1 }, status: i === qty - 1 ? 'completed' : 'running' },
-        });
-      } catch {
-        await this.prisma.batchTask.update({
-          where: { id: taskId },
-          data: { failedCount: { increment: 1 }, status: 'running' },
-        });
+            productId: dto.productId,
+            strategyId: item.strategyId,
+            directionName: item.directionName ?? undefined,
+            wordCount: item.wordCount ?? undefined,
+            extra: dto.extra,
+          });
+          const imgs = await this.ai.randomImages(brandId, dto.productId, 4);
+          await this.quota.consume(brandId, 1, userId, `批量生成 #${taskId}`);
+          await this.prisma.xhsHistory.create({
+            data: {
+              brandId,
+              title: result.titles[i % result.titles.length] ?? result.titles[0],
+              content: result.content,
+              tags: result.tags,
+              imgList: imgs.map((x) => x.url),
+              source: `batch:${result.source}`,
+              batchTaskId: taskId,
+              strategyId: item.strategyId ?? null,
+              directionName: item.directionName ?? null,
+              reviewStatus: 'draft',
+              createdById: userId,
+            },
+          });
+          done += 1;
+          await this.prisma.batchTask.update({
+            where: { id: taskId },
+            data: { successCount: { increment: 1 }, status: done >= (task?.targetQty ?? 1) ? 'completed' : 'running' },
+          });
+        } catch {
+          // 生成失败：算力退回
+          await this.quota.refund(brandId, 1, userId, `批量生成失败退回 #${taskId}`);
+          await this.prisma.batchTask.update({
+            where: { id: taskId },
+            data: {
+              failedCount: { increment: 1 },
+              pointsRefunded: { increment: 1 },
+              status: 'running',
+            },
+          });
+        }
       }
     }
-    const done = await this.prisma.batchTask.findUnique({ where: { id: taskId } });
-    if (done && done.status !== 'cancelled') {
-      const status = done.successCount > 0 ? 'completed' : 'failed';
+    const finished = await this.prisma.batchTask.findUnique({ where: { id: taskId } });
+    if (finished && finished.status !== 'cancelled') {
+      const status = finished.successCount > 0 ? 'completed' : 'failed';
       await this.prisma.batchTask.update({ where: { id: taskId }, data: { status } });
     }
   }
@@ -472,7 +638,460 @@ export class ContentproService {
         target_quantity: t.targetQty,
         success_count: t.successCount,
         failed_count: t.failedCount,
+        points_total: t.pointsTotal,
+        points_refunded: t.pointsRefunded,
         created_at: t.createdAt,
+      })),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  // ─── 内容包 Pro（生成 → 审核 → 领用/分发 闭环）──────────────────────
+
+  /** 包内六态统计（对齐旧系统 stats：total/draft/pending/approved/rejected/used） */
+  private async packageStats(packageId: number) {
+    const grouped = await this.prisma.xhsHistory.groupBy({
+      by: ['reviewStatus'],
+      where: { packageId, reviewStatus: { not: 'discarded' } },
+      _count: { _all: true },
+    });
+    const get = (k: string) => grouped.find((g) => g.reviewStatus === k)?._count._all ?? 0;
+    const draft = get('draft') + get('rejected');
+    const pending = get('pending');
+    const approved = get('approved');
+    const used = await this.prisma.packageClaim.count({ where: { packageId } });
+    return {
+      total: draft + pending + approved,
+      draft,
+      pending,
+      approved,
+      rejected: get('rejected'),
+      used,
+    };
+  }
+
+  /** 产品名映射（FactoryPackage.productId 无关联，统一批量查） */
+  private async productNameMap(brandId: number, productIds: (number | null)[]) {
+    const ids = [...new Set(productIds.filter((x): x is number => !!x))];
+    if (!ids.length) return new Map<number, string>();
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: ids }, brandId },
+      select: { id: true, displayName: true, name: true },
+    });
+    return new Map(rows.map((r) => [r.id, r.displayName ?? r.name]));
+  }
+
+  async packagesList(brandId: number, query: { scope?: string; keyword?: string; userId?: number }) {
+    const where: Prisma.FactoryPackageWhereInput = { brandId, deletedAt: null };
+    if (query.scope === 'mine' && query.userId) where.createdById = query.userId;
+    if (query.keyword) where.name = { contains: query.keyword };
+    const rows = await this.prisma.factoryPackage.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    const pNames = await this.productNameMap(brandId, rows.map((p) => p.productId));
+    const list = await Promise.all(
+      rows.map(async (p) => ({
+        id: p.id,
+        uid: p.uid,
+        name: p.name,
+        description: p.description,
+        product_id: p.productId,
+        product_name: p.productId ? (pNames.get(p.productId) ?? null) : null,
+        open_flag: p.openFlag,
+        claim_once: p.claimOnce,
+        review_mode: p.reviewMode,
+        creator_user_id: p.createdById,
+        created_at: p.createdAt,
+        stats: await this.packageStats(p.id),
+      })),
+    );
+    return { list, total: list.length };
+  }
+
+  async createPackage(brandId: number, dto: {
+    name: string;
+    description?: string;
+    productId?: number | null;
+    openFlag?: boolean;
+    claimOnce?: boolean;
+    reviewMode?: number;
+  }, userId: number) {
+    const p = await this.prisma.factoryPackage.create({
+      data: {
+        brandId,
+        uid: randomUUID(),
+        name: dto.name.trim(),
+        description: dto.description ?? null,
+        productId: dto.productId ?? null,
+        openFlag: dto.openFlag ?? true,
+        claimOnce: dto.claimOnce ?? true,
+        reviewMode: dto.reviewMode ?? 1,
+        createdById: userId,
+      },
+    });
+    return { id: p.id, uid: p.uid };
+  }
+
+  async updatePackage(brandId: number, id: number, dto: {
+    name?: string;
+    description?: string | null;
+    openFlag?: boolean;
+    claimOnce?: boolean;
+    reviewMode?: number;
+    productId?: number | null;
+  }) {
+    const p = await this.prisma.factoryPackage.findFirst({ where: { id, brandId, deletedAt: null } });
+    if (!p) throw new NotFoundException('内容包不存在');
+    await this.prisma.factoryPackage.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.openFlag !== undefined ? { openFlag: dto.openFlag } : {}),
+        ...(dto.claimOnce !== undefined ? { claimOnce: dto.claimOnce } : {}),
+        ...(dto.reviewMode !== undefined ? { reviewMode: dto.reviewMode } : {}),
+        ...(dto.productId !== undefined ? { productId: dto.productId } : {}),
+      },
+    });
+    return { id };
+  }
+
+  async deletePackage(brandId: number, id: number) {
+    const p = await this.prisma.factoryPackage.findFirst({ where: { id, brandId, deletedAt: null } });
+    if (!p) throw new NotFoundException('内容包不存在');
+    // 包内仍有内容时禁止删除
+    const cnt = await this.prisma.xhsHistory.count({ where: { packageId: id, reviewStatus: { not: 'discarded' } } });
+    if (cnt > 0) throw new BadRequestException(`包内还有 ${cnt} 条内容，请先移出或废弃`);
+    await this.prisma.factoryPackage.update({ where: { id }, data: { deletedAt: new Date() } });
+    return { id };
+  }
+
+  /** 包详情：素材列表（状态页签筛选 + 指派/领用信息） */
+  async packageDetail(brandId: number, id: number, query: { tab?: string; keyword?: string; page?: string; pageSize?: string }) {
+    const p = await this.prisma.factoryPackage.findFirst({ where: { id, brandId, deletedAt: null } });
+    if (!p) throw new NotFoundException('内容包不存在');
+    const pNames = await this.productNameMap(brandId, [p.productId]);
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(50, Number(query.pageSize ?? 20) || 20);
+    const where: Prisma.XhsHistoryWhereInput = { packageId: id, reviewStatus: { not: 'discarded' } };
+    if (query.tab === 'draft') where.reviewStatus = { in: ['draft', 'rejected'] };
+    if (query.tab === 'pending') where.reviewStatus = 'pending';
+    if (query.tab === 'approved') where.reviewStatus = 'approved';
+    if (query.tab === 'rejected') where.reviewStatus = 'rejected';
+    if (query.keyword) where.title = { contains: query.keyword };
+    const [total, rows] = await Promise.all([
+      this.prisma.xhsHistory.count({ where }),
+      this.prisma.xhsHistory.findMany({ where, orderBy: { uploadTime: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+    ]);
+    const userIds = [
+      ...rows.map((r) => r.claimedById).filter((x): x is number => !!x),
+      ...rows.map((r) => r.dispatchedToId).filter((x): x is number => !!x),
+    ];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: [...new Set(userIds)] } }, select: { id: true, nickname: true } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u.nickname]));
+    return {
+      id: p.id,
+      uid: p.uid,
+      name: p.name,
+      description: p.description,
+      product_id: p.productId,
+      product_name: p.productId ? (pNames.get(p.productId) ?? null) : null,
+      open_flag: p.openFlag,
+      claim_once: p.claimOnce,
+      review_mode: p.reviewMode,
+      creator_user_id: p.createdById,
+      created_at: p.createdAt,
+      stats: await this.packageStats(p.id),
+      items: rows.map((h) => ({
+        ...this.mapHistory(h),
+        claimed_by_name: h.claimedById ? (userMap.get(h.claimedById) ?? null) : null,
+        dispatched_to_name: h.dispatchedToId ? (userMap.get(h.dispatchedToId) ?? null) : null,
+      })),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  /** 批量移入内容包（待处理 → 包内草稿；已废弃不可移） */
+  async moveToPackage(brandId: number, packageId: number, historyIds: number[]) {
+    if (!historyIds.length) throw new BadRequestException('请选择要移动的内容');
+    const pkg = await this.prisma.factoryPackage.findFirst({ where: { id: packageId, brandId, deletedAt: null } });
+    if (!pkg) throw new NotFoundException('内容包不存在');
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const movable = rows.filter((r) => r.reviewStatus !== 'discarded');
+    if (!movable.length) throw new BadRequestException('所选内容均已废弃，不可移动');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: movable.map((r) => r.id) } },
+      data: { packageId, reviewStatus: 'draft', rejectReason: null },
+    });
+    return { moved: movable.length };
+  }
+
+  /** 从内容包移出（回到待处理） */
+  async moveOutOfPackage(brandId: number, historyIds: number[]) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const movable = rows.filter((r) => r.packageId && ['draft', 'rejected'].includes(r.reviewStatus));
+    if (!movable.length) throw new BadRequestException('仅包内草稿/被驳回内容可移出');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: movable.map((r) => r.id) } },
+      data: { packageId: null, rejectReason: null },
+    });
+    return { moved: movable.length };
+  }
+
+  /** 批量废弃（待处理/包内草稿可废弃；已进入审核或被领用的不可废弃） */
+  async discardHistories(brandId: number, historyIds: number[]) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => ['draft'].includes(r.reviewStatus));
+    if (!ok.length) throw new BadRequestException('仅草稿/待处理内容可废弃');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { reviewStatus: 'discarded' },
+    });
+    return { discarded: ok.length };
+  }
+
+  /** 轻量编辑（批量结果/包内编辑：只更新内容字段，不动状态与任务归属） */
+  async updateHistoryContent(brandId: number, id: number, dto: {
+    title?: string;
+    content?: string;
+    tags?: string[];
+    imgList?: string[];
+    coverUrl?: string | null;
+  }) {
+    const h = await this.prisma.xhsHistory.findFirst({ where: { id, brandId } });
+    if (!h) throw new NotFoundException('内容不存在');
+    if (!['draft', 'rejected'].includes(h.reviewStatus)) {
+      throw new BadRequestException('当前状态不可编辑');
+    }
+    await this.prisma.xhsHistory.update({
+      where: { id },
+      data: {
+        ...(dto.title !== undefined ? { title: dto.title } : {}),
+        ...(dto.content !== undefined ? { content: dto.content } : {}),
+        ...(dto.tags !== undefined ? { tags: dto.tags } : {}),
+        ...(dto.imgList !== undefined ? { imgList: dto.imgList } : {}),
+        ...(dto.coverUrl !== undefined ? { coverUrl: dto.coverUrl } : {}),
+      },
+    });
+    return { id };
+  }
+
+  /** 提交审核：包内草稿/被驳回 → 待审核 */
+  async submitAudit(brandId: number, historyIds: number[]) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => r.packageId && ['draft', 'rejected'].includes(r.reviewStatus));
+    if (!ok.length) throw new BadRequestException('仅包内草稿/被驳回内容可提交审核');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { reviewStatus: 'pending', rejectReason: null },
+    });
+    return { submitted: ok.length };
+  }
+
+  /** 审核通过：待审核 → 过审待领用 */
+  async approveHistory(brandId: number, historyIds: number[]) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => r.reviewStatus === 'pending');
+    if (!ok.length) throw new BadRequestException('仅待审核内容可通过');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { reviewStatus: 'approved', rejectReason: null },
+    });
+    return { approved: ok.length };
+  }
+
+  /** 审核驳回：待审核 → 被驳回（可改后重新提交） */
+  async rejectHistory(brandId: number, historyIds: number[], reason?: string) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => r.reviewStatus === 'pending');
+    if (!ok.length) throw new BadRequestException('仅待审核内容可驳回');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { reviewStatus: 'rejected', rejectReason: reason ?? '不符合要求' },
+    });
+    return { rejected: ok.length };
+  }
+
+  /** 跨包待审核列表（内容审核页） */
+  async auditList(brandId: number, query: { packageId?: string; keyword?: string; page?: string; pageSize?: string }) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(50, Number(query.pageSize ?? 20) || 20);
+    const where: Prisma.XhsHistoryWhereInput = { brandId, reviewStatus: 'pending', packageId: { not: null } };
+    if (query.packageId) where.packageId = Number(query.packageId);
+    if (query.keyword) where.title = { contains: query.keyword };
+    const [total, rows] = await Promise.all([
+      this.prisma.xhsHistory.count({ where }),
+      this.prisma.xhsHistory.findMany({
+        where,
+        orderBy: { uploadTime: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { package: { select: { name: true } } },
+      }),
+    ]);
+    return {
+      list: rows.map((h) => this.mapHistory(h, h.package?.name ?? null)),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  /** 分发：把过审内容指派给指定 KOS 用户（H5 可见） */
+  async dispatchHistory(brandId: number, historyIds: number[], targetUserId: number) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => r.reviewStatus === 'approved' && r.packageId);
+    if (!ok.length) throw new BadRequestException('仅「过审待领用」的内容可分发');
+    const target = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!target) throw new NotFoundException('目标用户不存在');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { dispatchedToId: targetUserId, dispatchedAt: new Date() },
+    });
+    return { dispatched: ok.length, to: target.nickname };
+  }
+
+  /** 领用：从开放包领一条过审内容（每人限领一次的包做幂等校验；分发给自己的优先） */
+  async claimFromPackage(brandId: number, userId: number, packageId: number, source = 'h5') {
+    const pkg = await this.prisma.factoryPackage.findFirst({ where: { id: packageId, brandId, deletedAt: null } });
+    if (!pkg) throw new NotFoundException('内容包不存在');
+    if (!pkg.openFlag) throw new BadRequestException('该内容包未开放领用');
+    if (pkg.claimOnce) {
+      const claimed = await this.prisma.packageClaim.findFirst({ where: { packageId, userId } });
+      if (claimed) throw new BadRequestException('你已领用过该内容包的内容');
+    }
+    // 分发给自己的优先，否则取最早过审的未领用内容
+    const candidate =
+      (await this.prisma.xhsHistory.findFirst({
+        where: { packageId, reviewStatus: 'approved', claimedById: null, dispatchedToId: userId },
+        orderBy: { dispatchedAt: 'asc' },
+      })) ??
+      (await this.prisma.xhsHistory.findFirst({
+        where: { packageId, reviewStatus: 'approved', claimedById: null },
+        orderBy: { uploadTime: 'asc' },
+      }));
+    if (!candidate) throw new BadRequestException('包内暂无可领用内容');
+    await this.prisma.xhsHistory.update({
+      where: { id: candidate.id },
+      data: { claimedById: userId, claimedAt: new Date() },
+    });
+    await this.prisma.packageClaim.create({
+      data: { packageId, historyId: candidate.id, userId, source },
+    });
+    return { history_id: candidate.id, package_id: packageId };
+  }
+
+  /** 我的领用 + 分发给我未领用的内容（H5 领用中心） */
+  async myClaims(brandId: number, userId: number) {
+    const claims = await this.prisma.packageClaim.findMany({
+      where: { userId, package: { brandId, deletedAt: null } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        history: true,
+        package: { select: { id: true, name: true } },
+      },
+    });
+    const dispatched = await this.prisma.xhsHistory.findMany({
+      where: { brandId, dispatchedToId: userId, claimedById: null, reviewStatus: 'approved', packageId: { not: null } },
+      include: { package: { select: { id: true, name: true } } },
+      orderBy: { dispatchedAt: 'desc' },
+    });
+    return {
+      claims: claims
+        .filter((c) => c.history)
+        .map((c) => ({
+          ...this.mapHistory(c.history!, c.package.name),
+          claim_id: c.id,
+          claimed_source: c.source,
+          claim_time: c.createdAt,
+          package_id: c.package.id,
+          package_name: c.package.name,
+        })),
+      dispatched: dispatched.map((h) => this.mapHistory(h, h.package?.name ?? null)),
+    };
+  }
+
+  /** 可领用包列表（H5：开放中 + 有可领内容） */
+  async mobilePackages(brandId: number, userId: number) {
+    const pkgs = await this.prisma.factoryPackage.findMany({
+      where: { brandId, deletedAt: null, openFlag: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const myClaimsByPkg = new Map<number, number>();
+    const myClaims = await this.prisma.packageClaim.groupBy({
+      by: ['packageId'],
+      where: { userId, package: { brandId } },
+      _count: { _all: true },
+    });
+    myClaims.forEach((c) => myClaimsByPkg.set(c.packageId, c._count._all));
+    const list = [];
+    for (const p of pkgs) {
+      const [claimable, mine] = await Promise.all([
+        this.prisma.xhsHistory.count({ where: { packageId: p.id, reviewStatus: 'approved', claimedById: null } }),
+        this.prisma.xhsHistory.count({
+          where: { packageId: p.id, reviewStatus: 'approved', claimedById: null, dispatchedToId: userId },
+        }),
+      ]);
+      if (!claimable) continue;
+      list.push({
+        id: p.id,
+        uid: p.uid,
+        name: p.name,
+        description: p.description,
+        claimable,
+        dispatched_to_me: mine,
+        my_claimed: myClaimsByPkg.get(p.id) ?? 0,
+        claim_once: p.claimOnce,
+        created_at: p.createdAt,
+      });
+    }
+    return { list, total: list.length };
+  }
+
+  /** 领用记录流水（领用记录页） */
+  async claimLog(brandId: number, query: { packageId?: string; page?: string; pageSize?: string }) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(100, Number(query.pageSize ?? 20) || 20);
+    const where: Prisma.PackageClaimWhereInput = { package: { brandId, deletedAt: null } };
+    if (query.packageId) where.packageId = Number(query.packageId);
+    const [total, rows] = await Promise.all([
+      this.prisma.packageClaim.count({ where }),
+      this.prisma.packageClaim.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          history: { select: { id: true, title: true, status: true, coverUrl: true } },
+          package: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, nickname: true } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u.nickname]));
+    return {
+      list: rows.map((c) => ({
+        id: c.id,
+        package_id: c.package.id,
+        package_name: c.package.name,
+        history_id: c.history?.id ?? null,
+        title: c.history?.title ?? '(已删除)',
+        cover_url: c.history?.coverUrl ?? null,
+        published: (c.history?.status ?? 0) === 1,
+        user_id: c.userId,
+        user_name: userMap.get(c.userId) ?? `用户${c.userId}`,
+        source: c.source,
+        claimed_at: c.createdAt,
       })),
       total,
       page,

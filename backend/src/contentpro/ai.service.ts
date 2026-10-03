@@ -25,8 +25,17 @@ export class AiService {
     return Boolean(process.env.LLM_API_KEY);
   }
 
+  /** OpenAI 兼容网关：智谱/DeepSeek/通义/Kimi 等仅靠环境变量切换 */
+  private llmBase() {
+    return (process.env.LLM_BASE_URL ?? 'https://open.bigmodel.cn/api/paas/v4').replace(/\/+$/, '');
+  }
+
+  private llmModel() {
+    return process.env.LLM_MODEL ?? 'glm-4-flash';
+  }
+
   async health() {
-    return { llm: this.enabled(), model: process.env.LLM_MODEL ?? 'glm-4-flash' };
+    return { llm: this.enabled(), model: this.llmModel(), base_url: this.llmBase() };
   }
 
   async generateArticle(input: {
@@ -34,6 +43,8 @@ export class AiService {
     productId: number;
     strategyId?: number | null;
     extra?: string;
+    directionName?: string | null;
+    wordCount?: string | null;
   }): Promise<GenerateResult> {
     let product = await this.prisma.product.findUnique({ where: { id: input.productId } });
     if (!product) {
@@ -58,7 +69,7 @@ export class AiService {
     const directions = (strategy?.contentDirections as unknown) as
       | { name: string; description?: string }[]
       | null;
-    const directionName = directions?.[0]?.name ?? '';
+    const directionName = input.directionName ?? directions?.[0]?.name ?? '';
 
     if (this.enabled()) {
       try {
@@ -70,6 +81,10 @@ export class AiService {
           sellingPoints,
           audience,
           directionName,
+          directionDescription: input.directionName
+            ? directions?.find((d) => d.name === input.directionName)?.description
+            : undefined,
+          wordCount: input.wordCount ?? undefined,
           extra: input.extra,
         });
       } catch (e) {
@@ -97,12 +112,15 @@ export class AiService {
     sellingPoints: string[];
     audience: string[];
     directionName: string;
+    directionDescription?: string;
+    wordCount?: string;
     extra?: string;
   }): Promise<GenerateResult> {
+    const wc = ctx.wordCount ?? '300-600';
     const sys = [
       '你是小红书 KOS 笔记写手，用门店销售第一人称口语化写作。',
       '输出严格 JSON：{"titles":["标题1","标题2","标题3"],"content":"正文","tags":["标签1",...]}',
-      '要求：标题 ≤20 字；正文 300-600 字，分段自然，可用 emoji 列卖点，结尾引导私信/到店；',
+      `要求：标题 ≤20 字；正文 ${wc} 字，分段自然，可用 emoji 列卖点，结尾引导私信/到店；`,
       '标签 4-6 个，# 后接关键词。',
     ].join('\n');
     const user = [
@@ -111,21 +129,21 @@ export class AiService {
       ctx.persona.length ? `人设：${ctx.persona.join('；')}` : '',
       ctx.sellingPoints.length ? `必须覆盖的卖点：\n- ${ctx.sellingPoints.join('\n- ')}` : '',
       ctx.audience.length ? `目标受众：${ctx.audience.join('、')}` : '',
-      ctx.directionName ? `内容方向：${ctx.directionName}` : '',
+      ctx.directionName ? `内容方向：${ctx.directionName}${ctx.directionDescription ? `（${ctx.directionDescription}）` : ''}` : '',
       ctx.knowledge ? `产品知识（节选）：\n${ctx.knowledge}` : '',
       ctx.extra ? `额外写作要求：${ctx.extra}` : '',
     ]
       .filter(Boolean)
       .join('\n');
 
-    const res = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+    const res = await fetch(`${this.llmBase()}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${process.env.LLM_API_KEY}`,
       },
       body: JSON.stringify({
-        model: process.env.LLM_MODEL ?? 'glm-4-flash',
+        model: this.llmModel(),
         messages: [
           { role: 'system', content: sys },
           { role: 'user', content: user },

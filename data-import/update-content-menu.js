@@ -48,6 +48,15 @@ const FACTORY_CATEGORY = {
     },
     {
       key: 'm_factory_g3',
+      name: '内容管理',
+      features: [
+        { name: '内容包Pro', path: '/content-pro/package' },
+        { name: '内容审核', path: '/content-pro/audit' },
+        { name: '领用记录', path: '/content-pro/claim-log' },
+      ],
+    },
+    {
+      key: 'm_factory_g4',
       name: '热门内容分析',
       features: [
         { name: '热门内容分析', path: '/content-pro/hot-content' },

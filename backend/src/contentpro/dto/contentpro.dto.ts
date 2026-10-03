@@ -51,6 +51,8 @@ export class GenerateArticleDto {
   @IsOptional() strategyId?: number | null;
   @IsOptional() @IsString() extra?: string;
   @IsOptional() @IsInt() strategyDirectionIndex?: number | null;
+  @IsOptional() @IsString() directionName?: string | null;
+  @IsOptional() @IsString() wordCount?: string | null;
 }
 
 export class SaveArticleDto {
@@ -72,7 +74,60 @@ export class BatchGenerateDto {
   @IsInt() @IsOptional() targetQuantity?: number;
   @IsOptional() @IsString() taskName?: string;
   @IsOptional() @IsString() extra?: string;
-  @IsOptional() imageMode?: string;
+  @IsOptional() @IsString() imageMode?: string;
+  @IsOptional() items?: BatchGenerateItemDto[];
+}
+
+export class BatchGenerateItemDto {
+  @IsOptional() strategyId?: number | null;
+  @IsOptional() @IsString() directionName?: string | null;
+  @IsInt() count: number;
+  @IsOptional() @IsString() wordCount?: string | null;
+}
+
+// ─── 内容包 Pro ──────────────────────────────────────────────────────
+export class PackageDto {
+  @IsString() @MaxLength(60) name: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() productId?: number | null;
+  @IsOptional() @IsBoolean() openFlag?: boolean;
+  @IsOptional() @IsBoolean() claimOnce?: boolean;
+  @IsOptional() @IsInt() reviewMode?: number;
+}
+
+export class MoveToPackageDto {
+  @IsArray() historyIds: number[];
+}
+
+export class RejectDto {
+  @IsOptional() @IsString() reason?: string;
+}
+
+export class DispatchDto {
+  @IsArray() historyIds: number[];
+  @IsInt() userId: number;
+}
+
+export class ClaimDto {
+  @IsInt() packageId: number;
+  @IsOptional() @IsString() source?: string;
+}
+
+export class QuotaGrantDto {
+  @IsInt() amount: number;
+  @IsOptional() @IsString() remark?: string;
+}
+
+export class ChuangkitImportDto {
+  @IsString() url: string;
+}
+
+export class UpdateHistoryContentDto {
+  @IsOptional() @IsString() title?: string;
+  @IsOptional() @IsString() content?: string;
+  @IsOptional() tags?: string[];
+  @IsOptional() imgList?: string[];
+  @IsOptional() coverUrl?: string | null;
 }
 
 // ─── 内容创作任务（任务分发）─────────────────────────────────────────

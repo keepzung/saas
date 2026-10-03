@@ -266,6 +266,26 @@ const routes = [
         meta: { title: '热门内容分析' },
       },
       {
+        path: '/content-pro/package',
+        component: () => import('../views/factory/PackageProView.vue'),
+        meta: { title: '内容包Pro' },
+      },
+      {
+        path: '/content-pro/package/:id',
+        component: () => import('../views/factory/PackageProDetailView.vue'),
+        meta: { title: '内容包详情' },
+      },
+      {
+        path: '/content-pro/audit',
+        component: () => import('../views/factory/AuditView.vue'),
+        meta: { title: '内容审核' },
+      },
+      {
+        path: '/content-pro/claim-log',
+        component: () => import('../views/factory/ClaimLogView.vue'),
+        meta: { title: '领用记录' },
+      },
+      {
         path: '/kox_task/content-task/task-list',
         component: () => import('../views/task/ContentTaskListView.vue'),
         meta: { title: '任务列表' },

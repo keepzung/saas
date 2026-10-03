@@ -5,11 +5,11 @@
         <div class="ce-brand">
           <PictureOutlined />
           <span class="ce-name">智能编辑</span>
-          <span class="ce-quota">今日还可使用 ★ 5/5</span>
+          <span v-if="coverStatus" class="ce-quota">今日还可使用 ★ {{ coverStatus.remaining }}/{{ coverStatus.limit }}</span>
         </div>
         <div class="ce-tabs">
           <button
-            v-for="t in tabs"
+            v-for="t in tabsVisible"
             :key="t.key"
             type="button"
             class="ce-tab"
@@ -76,14 +76,33 @@
           </div>
         </div>
       </div>
+
+      <!-- 创客贴模板（CHUANGKIT_APP_KEY 配置后出现） -->
+      <div v-else-if="stage === 'chuangkit'" class="ce-body editor">
+        <iframe :src="chuangkitUrl" class="ck-frame" allow="clipboard-write" />
+        <div class="ck-side">
+          <div class="ck-title">创客贴设计</div>
+          <div class="ck-tip">在左侧编辑器完成设计并导出后，把导出的图片链接粘贴到这里导入。</div>
+          <a-input v-model:value="ckUrl" placeholder="粘贴创客贴导出图片链接" />
+          <a-button type="primary" block :loading="ckImporting" @click="importCk">导入为封面</a-button>
+          <div class="ck-hint">创客贴开放平台接入中，导出回调直连后将免粘贴。</div>
+        </div>
+      </div>
     </div>
   </Teleport>
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { AppstoreOutlined, PictureOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
+import { useAuthStore } from '../../stores/auth';
+import {
+  getCoverEditStatus,
+  useCoverEdit,
+  getChuangkitConfig,
+  importChuangkitImage,
+} from '../../api/contentpro';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -91,6 +110,9 @@ const props = defineProps({
   title: { type: String, default: '' },
 });
 const emit = defineEmits(['close', 'apply']);
+
+const auth = useAuthStore();
+const brandId = computed(() => auth.currentBrandId ?? 1);
 
 const tabs = [
   { key: 'free', name: '自由设计' },
@@ -103,6 +125,43 @@ const generated = ref(false);
 const uploading = ref(false);
 const previewCanvas = ref(null);
 const tplCanvases = {};
+
+// ── 智能编辑每日配额（5 次）+ 创客贴开关
+const coverStatus = ref(null);
+const ckEnabled = ref(false);
+const chuangkitUrl = ref('');
+const ckUrl = ref('');
+const ckImporting = ref(false);
+
+const tabsVisible = computed(() =>
+  ckEnabled.value ? [...tabs, { key: 'chuangkit', name: '创客贴模板' }] : tabs,
+);
+
+const loadEditorMeta = async () => {
+  coverStatus.value = await getCoverEditStatus({ brandId: brandId.value }).then((r) => r).catch(() => null);
+  const ck = await getChuangkitConfig().then((r) => r).catch(() => null);
+  ckEnabled.value = Boolean(ck?.enabled && ck?.editor_url);
+  chuangkitUrl.value = ck?.editor_url ?? '';
+};
+
+watch(activeTab, (v) => {
+  if (v === 'chuangkit') stage.value = 'chuangkit';
+  else stage.value = stage.value === 'chuangkit' ? 'gallery' : stage.value;
+});
+
+const importCk = async () => {
+  if (!/^https?:\/\//.test(ckUrl.value)) return message.warning('请粘贴合法的图片链接');
+  ckImporting.value = true;
+  try {
+    const res = await importChuangkitImage({ url: ckUrl.value.trim() }, { brandId: brandId.value });
+    if (!res?.url) throw new Error('导入失败');
+    emit('apply', { remoteUrl: res.data.url });
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? e?.message ?? '导入失败');
+  } finally {
+    ckImporting.value = false;
+  }
+};
 
 // 5 段文字：主标题 / 副标题 / 小字政策1-3
 const textFieldDefs = [
@@ -268,7 +327,14 @@ const renderGallery = async () => {
   templates.forEach((tpl) => drawTpl(tplCanvases[tpl.id], tpl));
 };
 
-const render = () => {
+const render = async () => {
+  // 每日 5 次配额（模板预览免费，生成设计消耗 1 次）
+  try {
+    coverStatus.value = await useCoverEdit({ brandId: brandId.value }).then((r) => r);
+  } catch (e) {
+    message.warning(e?.response?.data?.msg ?? '今日次数已用完');
+    return;
+  }
   drawTpl(previewCanvas.value, templates.find((t) => t.id === selectedTpl.value));
   generated.value = true;
 };
@@ -297,9 +363,11 @@ watch(
   (v) => {
     if (v) {
       stage.value = 'gallery';
+      activeTab.value = 'free';
       generated.value = false;
       texts.value = ['', '', '', '', ''];
       renderGallery();
+      loadEditorMeta();
     }
   },
 );
@@ -340,6 +408,40 @@ watch(
   background: rgba(250, 204, 21, 0.16);
   color: #facc15;
   font-size: 12px;
+}
+
+.ck-frame {
+  flex: 1;
+  border: none;
+  background: #f8fafc;
+}
+
+.ck-side {
+  width: 300px;
+  padding: 18px 16px;
+  border-left: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #fff;
+}
+
+.ck-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.ck-tip {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.7;
+}
+
+.ck-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: auto;
 }
 
 .ce-tabs {

@@ -23,14 +23,22 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ContentproService } from './contentpro.service';
 import {
   BatchGenerateDto,
+  ClaimDto,
   ContentTaskDto,
+  ChuangkitImportDto,
+  DispatchDto,
   GenerateArticleDto,
   MaterialImageAssignDto,
   MaterialImageImportDto,
   MaterialSetDto,
   MaterialTagDto,
+  MoveToPackageDto,
+  PackageDto,
+  QuotaGrantDto,
+  RejectDto,
   SaveArticleDto,
   StrategyDto,
+  UpdateHistoryContentDto,
 } from './dto/contentpro.dto';
 
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT
@@ -180,8 +188,9 @@ export class ContentproController {
   }
 
   @Post('content-pro/ai/generate-article')
-  generate(@Body() dto: GenerateArticleDto, @Query('brandId') brandId?: string) {
-    return this.service.generate({ ...dto, brandId: Number(brandId ?? 1) });
+  generate(@Body() dto: GenerateArticleDto, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.generate({ ...dto, brandId: Number(brandId ?? 1) }, user.id);
   }
 
   @Get('content-pro/ai/random-images')
@@ -201,6 +210,12 @@ export class ContentproController {
       keyword?: string;
       status?: string;
       taskId?: string;
+      batchTaskId?: string;
+      batchOnly?: string;
+      unpackaged?: string;
+      packaged?: string;
+      reviewStatus?: string;
+      packageId?: string;
       page?: string;
       pageSize?: string;
     },
@@ -211,6 +226,20 @@ export class ContentproController {
   @Get('content-pro/history/xhs/:id')
   historyDetail(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
     return this.service.historyDetail(Number(brandId ?? 1), id);
+  }
+
+  @Put('content-pro/history/xhs/:id/content')
+  updateHistoryContent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateHistoryContentDto,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.service.updateHistoryContent(Number(brandId ?? 1), id, dto);
+  }
+
+  @Post('content-pro/history/discard')
+  discardHistories(@Body() body: { ids: number[] }, @Query('brandId') brandId?: string) {
+    return this.service.discardHistories(Number(brandId ?? 1), body.ids ?? []);
   }
 
   @Post('content-pro/history/xhs')
@@ -236,6 +265,147 @@ export class ContentproController {
     @Query() query: { brandId?: string; page?: string; page_size?: string; status?: string },
   ) {
     return this.service.batchTasks(Number(query.brandId ?? 1), query);
+  }
+
+  // ─── 算力配额 ────────────────────────────────────────────────────
+  @Get('content-pro/quota')
+  quotaSummary(@Query('brandId') brandId?: string) {
+    return this.service.quotaSummary(Number(brandId ?? 1));
+  }
+
+  @Post('content-pro/quota/grant')
+  quotaGrant(@Body() dto: QuotaGrantDto, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number; role: string };
+    return this.service.quotaGrant(Number(brandId ?? 1), dto.amount, user, dto.remark);
+  }
+
+  // ─── 智能编辑每日配额 ────────────────────────────────────────────
+  @Get('content-pro/cover-edit/status')
+  coverEditStatus(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.coverEditStatus(Number(brandId ?? 1), user.id);
+  }
+
+  @Post('content-pro/cover-edit/use')
+  coverEditUse(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.coverEditUse(Number(brandId ?? 1), user.id);
+  }
+
+  // ─── 创客贴 ──────────────────────────────────────────────────────
+  @Get('content-pro/chuangkit/config')
+  chuangkitConfig() {
+    return this.service.chuangkitConfig();
+  }
+
+  @Post('content-pro/chuangkit/import')
+  chuangkitImport(@Body() dto: ChuangkitImportDto, @Query('brandId') brandId?: string) {
+    return this.service.chuangkitImport(Number(brandId ?? 1), dto);
+  }
+
+  // ─── 内容包 Pro ──────────────────────────────────────────────────
+  @Get('content-pro/packages')
+  packagesList(
+    @Req() req: Request,
+    @Query() query: { brandId?: string; scope?: string; keyword?: string },
+  ) {
+    const user = req.user as { id: number };
+    return this.service.packagesList(Number(query.brandId ?? 1), { ...query, userId: user.id });
+  }
+
+  @Post('content-pro/packages')
+  createPackage(@Body() dto: PackageDto, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.createPackage(Number(brandId ?? 1), dto, user.id);
+  }
+
+  @Put('content-pro/packages/:id')
+  updatePackage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: Partial<PackageDto>,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.service.updatePackage(Number(brandId ?? 1), id, dto);
+  }
+
+  @Delete('content-pro/packages/:id')
+  deletePackage(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.service.deletePackage(Number(brandId ?? 1), id);
+  }
+
+  @Get('content-pro/packages/:id')
+  packageDetail(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: { brandId?: string; tab?: string; keyword?: string; page?: string; pageSize?: string },
+  ) {
+    return this.service.packageDetail(Number(query.brandId ?? 1), id, query);
+  }
+
+  @Post('content-pro/packages/:id/move')
+  moveToPackage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MoveToPackageDto,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.service.moveToPackage(Number(brandId ?? 1), id, dto.historyIds ?? []);
+  }
+
+  @Post('content-pro/packages/move-out')
+  moveOutOfPackage(@Body() dto: MoveToPackageDto, @Query('brandId') brandId?: string) {
+    return this.service.moveOutOfPackage(Number(brandId ?? 1), dto.historyIds ?? []);
+  }
+
+  @Post('content-pro/history/submit-audit')
+  submitAudit(@Body() dto: MoveToPackageDto, @Query('brandId') brandId?: string) {
+    return this.service.submitAudit(Number(brandId ?? 1), dto.historyIds ?? []);
+  }
+
+  @Post('content-pro/history/approve')
+  approveHistory(@Body() dto: MoveToPackageDto, @Query('brandId') brandId?: string) {
+    return this.service.approveHistory(Number(brandId ?? 1), dto.historyIds ?? []);
+  }
+
+  @Post('content-pro/history/reject')
+  rejectHistory(@Body() dto: RejectDto & { historyIds: number[] }, @Query('brandId') brandId?: string) {
+    return this.service.rejectHistory(Number(brandId ?? 1), dto.historyIds ?? [], dto.reason);
+  }
+
+  @Get('content-pro/audit/list')
+  auditList(
+    @Query() query: { brandId?: string; packageId?: string; keyword?: string; page?: string; pageSize?: string },
+  ) {
+    return this.service.auditList(Number(query.brandId ?? 1), query);
+  }
+
+  @Post('content-pro/history/dispatch')
+  dispatchHistory(@Body() dto: DispatchDto, @Query('brandId') brandId?: string) {
+    return this.service.dispatchHistory(Number(brandId ?? 1), dto.historyIds ?? [], dto.userId);
+  }
+
+  @Get('content-pro/claim-log')
+  claimLog(
+    @Query() query: { brandId?: string; packageId?: string; page?: string; pageSize?: string },
+  ) {
+    return this.service.claimLog(Number(query.brandId ?? 1), query);
+  }
+
+  // ─── H5 领用（对齐旧系统 /mobile/packages|claim|claim-history）────
+  @Get('content-pro/mobile/packages')
+  mobilePackages(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.mobilePackages(Number(brandId ?? 1), user.id);
+  }
+
+  @Post('content-pro/mobile/claim')
+  mobileClaim(@Body() dto: ClaimDto, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.claimFromPackage(Number(brandId ?? 1), user.id, dto.packageId, dto.source ?? 'h5');
+  }
+
+  @Get('content-pro/mobile/claims')
+  mobileClaims(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.myClaims(Number(brandId ?? 1), user.id);
   }
 
   // ─── 内容创作任务（任务分发）────────────────────────────────────

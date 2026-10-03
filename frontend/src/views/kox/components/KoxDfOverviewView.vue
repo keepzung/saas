@@ -36,7 +36,7 @@
       <a-card :bordered="false" class="hero-card">
         <div class="sec-title">
           <span class="bar"></span>运营总览
-          <a-tooltip title="账号/内容指标随筛选联动；留资=笔记私信口径，投流=旧系统导出投放快照">
+          <a-tooltip title="账号/内容指标随筛选联动；留资=笔记私信口径，投流=星火聚光投放（T+1 逐日自动同步）">
             <question-circle-outlined class="q-icon" />
           </a-tooltip>
         </div>

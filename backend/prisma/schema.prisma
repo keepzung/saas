@@ -425,10 +425,12 @@ model BatchTask {
   targetQty   Int       @default(1)
   successCount Int      @default(0)
   failedCount Int       @default(0)
-  model       String    @default("random")
+  model      String    @default("random")
   packageId   Int?
   config      Json?
   brandId     Int       @default(1)
+  pointsTotal    Int     @default(0)
+  pointsRefunded Int     @default(0)
   createdById Int
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -941,24 +943,107 @@ model WritingStrategy {
 }
 
 model XhsHistory {
-  id             Int          @id @default(autoincrement())
-  brandId        Int          @default(7)
+  id             Int             @id @default(autoincrement())
+  brandId        Int             @default(7)
   title          String
-  content        String       @db.Text
-  tags           String[]     @default([])
-  imgList        String[]     @default([])
+  content        String          @db.Text
+  tags           String[]        @default([])
+  imgList        String[]        @default([])
   coverUrl       String?
   batchTaskId    Int?
-  status         Int          @default(0)
+  status         Int             @default(0)
   conversationId String?
-  source         String       @default("ai")
-  uploadTime     DateTime     @default(now())
+  source         String          @default("ai")
+  uploadTime     DateTime        @default(now())
   createdById    Int?
   contentTaskId  Int?
-  contentTask    ContentTask? @relation(fields: [contentTaskId], references: [id], onDelete: SetNull)
+  contentTask    ContentTask?    @relation(fields: [contentTaskId], references: [id], onDelete: SetNull)
+  contentForm    String          @default("image_text")
+  strategyId     Int?
+  directionName  String?
+  packageId      Int?
+  package        FactoryPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  reviewStatus   String          @default("draft")
+  rejectReason   String?
+  claimedById    Int?
+  claimedAt      DateTime?
+  dispatchedToId Int?
+  dispatchedAt   DateTime?
+  claims         PackageClaim[]  @relation("PackageClaimHistory")
 
   @@index([brandId, uploadTime])
   @@index([contentTaskId])
+  @@index([packageId, reviewStatus])
+  @@index([batchTaskId])
+}
+
+// ─── 内容包 Pro（生成 → 审核 → 领用/分发 闭环）────────────────────────
+
+model FactoryPackage {
+  id          Int            @id @default(autoincrement())
+  brandId     Int            @default(7)
+  uid         String         @unique
+  name        String
+  description String?
+  productId   Int?
+  openFlag    Boolean        @default(true)
+  claimOnce   Boolean        @default(true)
+  reviewMode  Int            @default(1)
+  createdById Int?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+  items       XhsHistory[]
+  claims      PackageClaim[]
+
+  @@index([brandId, createdAt])
+}
+
+model PackageClaim {
+  id        Int             @id @default(autoincrement())
+  packageId Int
+  package   FactoryPackage  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  historyId Int
+  history   XhsHistory?     @relation("PackageClaimHistory", fields: [historyId], references: [id], onDelete: Cascade)
+  userId    Int
+  source    String          @default("h5")
+  createdAt DateTime        @default(now())
+
+  @@unique([packageId, userId, historyId])
+  @@index([userId])
+  @@index([packageId])
+}
+
+// ─── 算力配额（生成 1 篇 = 1 算力，失败退回；智能编辑每日独立 5 次）────
+
+model BrandQuota {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @unique
+  total     Int      @default(0)
+  used      Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model QuotaLog {
+  id        Int      @id @default(autoincrement())
+  brandId   Int
+  userId    Int?
+  delta     Int
+  kind      String
+  remark    String?
+  createdAt DateTime @default(now())
+
+  @@index([brandId, createdAt])
+}
+
+model CoverEditUsage {
+  id      Int    @id @default(autoincrement())
+  brandId Int
+  userId  Int
+  day     String
+  count   Int    @default(0)
+
+  @@unique([userId, day])
 }
 
 // ─── 内容创作任务（任务分发）───────────────────────────────────────────

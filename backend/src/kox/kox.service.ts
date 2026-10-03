@@ -907,7 +907,7 @@ export class KoxService {
             lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
             campaign: funnelCampaign,
             organic,
-            scope_note: `线索=投放逐日聚合（乐允报表 2026-01-07 起 + partner T+1）+ 自然笔记私信，随区间与大区/标签筛选变化`,
+            scope_note: `线索=星火聚光投放逐日 T+1 + 自然笔记私信，随区间与大区/标签筛选变化`,
           };
         }
         // 兜底：无逐日投放数据时用专业号三档快照（不随自定义区间变化）
@@ -2780,7 +2780,8 @@ export class KoxService {
   }
 
   /** 东风·经销商快照排行（旧系统导出聚合，真实完成度/得分） */
-  async dealerSnapshot(query: { brandId?: string; statMonth?: string }) {
+  async dealerSnapshot(query: { brandId?: string; statMonth?: string; mode?: string }) {
+    if (query.mode === 'live') return this.dealerLive(query);
     const brandId = query.brandId ? Number(query.brandId) : 7;
     const months = await this.prisma.koxDealerSnapshot.findMany({
       where: { brandId },
@@ -2842,6 +2843,144 @@ export class KoxService {
         deals: r.deals,
         deals_pct: r.dealsPct != null ? Number(r.dealsPct) : 0,
       })),
+    };
+  }
+
+  /**
+   * 经销商排行·实时聚合（星火笔记 × 门店账号，按自然月窗口）
+   * 分层（月度留资）：头部 ≥20 ｜ 腰部 5–19 ｜ 尾部 1–4 ｜ 沉默 0
+   * 综合得分 = 内容分（有发布账号占比）×40% + 留资分（店留资 / 最高店 ×100）×60%
+   * 曝光/留资/成交完成度无目标值口径 → null（前端显示 —）
+   */
+  private async dealerLive(query: { brandId?: string; statMonth?: string }) {
+    const brandId = query.brandId ? Number(query.brandId) : 7;
+    const now = new Date();
+    const bj = new Date(now.getTime() + 8 * 3600 * 1000);
+    const month =
+      query.statMonth ??
+      `${bj.getUTCFullYear()}-${String(bj.getUTCMonth() + 1).padStart(2, '0')}`;
+    const start = new Date(`${month}-01T00:00:00.000+08:00`);
+    const end = new Date(start);
+    end.setUTCMonth(end.getUTCMonth() + 1);
+
+    const months: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(start);
+      d.setUTCMonth(d.getUTCMonth() - i);
+      months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: { brandId, status: 'enabled' },
+      select: { id: true, nickname: true, storeName: true, regionName: true, areaName: true },
+    });
+    const grouped = await this.prisma.koxNote.groupBy({
+      by: ['accountId'],
+      where: { brandId, publishTime: { gte: start, lt: end } },
+      _count: { _all: true },
+      _sum: {
+        exposure: true,
+        views: true,
+        likes: true,
+        comments: true,
+        collects: true,
+        shares: true,
+        pmInquiries: true,
+        pmOpenings: true,
+        pmLeads: true,
+      },
+    });
+    const noteMap = new Map(grouped.map((g) => [g.accountId, g]));
+
+    const dealers = new Map<
+      string,
+      {
+        region: string | null; city: string | null; accounts: number; published: number;
+        publishCnt: number; exposure: number; viewSum: number; interaction: number;
+        inquiries: number; openings: number; leads: number;
+      }
+    >();
+    for (const a of accounts) {
+      const name = a.storeName || a.nickname;
+      const d =
+        dealers.get(name) ??
+        {
+          region: a.regionName, city: a.areaName, accounts: 0, published: 0,
+          publishCnt: 0, exposure: 0, viewSum: 0, interaction: 0,
+          inquiries: 0, openings: 0, leads: 0,
+        };
+      d.accounts += 1;
+      const g = noteMap.get(a.id);
+      if (g) {
+        d.published += 1;
+        d.publishCnt += g._count._all;
+        d.exposure += g._sum.exposure ?? 0;
+        d.viewSum += g._sum.views ?? 0;
+        d.interaction += (g._sum.likes ?? 0) + (g._sum.comments ?? 0) + (g._sum.collects ?? 0) + (g._sum.shares ?? 0);
+        d.inquiries += g._sum.pmInquiries ?? 0;
+        d.openings += g._sum.pmOpenings ?? 0;
+        d.leads += g._sum.pmLeads ?? 0;
+      }
+      dealers.set(name, d);
+    }
+
+    const maxLeads = Math.max(1, ...[...dealers.values()].map((d) => d.leads));
+    const tierOf = (leads: number) => (leads >= 20 ? '头部' : leads >= 5 ? '腰部' : leads >= 1 ? '尾部' : '沉默');
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    const rows = [...dealers.entries()]
+      .map(([name, d]) => {
+        const contentPct = d.accounts ? Math.round((d.published / d.accounts) * 1000) / 10 : 0;
+        const leadsScore = (d.leads / maxLeads) * 100;
+        const score = r1(contentPct * 0.4 + leadsScore * 0.6);
+        return {
+          dealer_name: name,
+          region_name: d.region,
+          city_name: d.city,
+          tier: tierOf(d.leads),
+          score,
+          account_cnt: d.accounts,
+          publish_cnt: d.publishCnt,
+          content_pct: contentPct,
+          exposure: d.exposure,
+          exposure_pct: null,
+          inquiries: d.inquiries,
+          openings: d.openings,
+          leads: d.leads,
+          leads_pct: null,
+          deals: null,
+          deals_pct: null,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const tierCount: Record<string, number> = { 头部: 0, 腰部: 0, 尾部: 0, 沉默: 0 };
+    for (const r of rows) tierCount[r.tier] += 1;
+    const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((s, r) => s + f(r), 0);
+    const totalAccounts = sum((r) => r.account_cnt);
+    const totalPublish = sum((r) => r.publish_cnt);
+    const wavgContent = totalAccounts
+      ? r1(sum((r) => r.content_pct * r.account_cnt) / totalAccounts)
+      : 0;
+
+    return {
+      mode: 'live',
+      stat_month: month,
+      stat_months: months,
+      tier_stat: tierCount,
+      summary: {
+        dealer_cnt: rows.length,
+        account_cnt: totalAccounts,
+        publish_cnt: totalPublish,
+        content_pct: wavgContent,
+        exposure: sum((r) => r.exposure),
+        inquiries: sum((r) => r.inquiries),
+        openings: sum((r) => r.openings),
+        leads: sum((r) => r.leads),
+        deals: 0,
+        avg_exposure_per_note: totalPublish ? r1(sum((r) => r.exposure) / totalPublish) : 0,
+        interaction_rate: 0,
+      },
+      list: rows.map((r, i) => ({ rank: i + 1, ...r })),
     };
   }
 
