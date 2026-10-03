@@ -205,6 +205,23 @@ export class KoxController {
     return this.koxService.notesSummary(query);
   }
 
+  @Get('kox/notes/wordcloud')
+  notesWordcloud(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      category?: string;
+      modelTag?: string;
+      keyword?: string;
+      author?: string;
+      source?: string;
+    },
+  ) {
+    return this.koxService.notesWordcloud(query);
+  }
+
   @Get('kox/tasks')
   tasks(@Query() query: { page?: string; page_size?: string; status?: string }) {
     return this.koxService.tasks(query);

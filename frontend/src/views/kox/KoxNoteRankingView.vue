@@ -48,6 +48,34 @@
       </div>
     </div>
 
+    <a-card v-if="mode === 'real'" :bordered="false" size="small" class="wordcloud-card">
+      <template #title>
+        <div class="card-header">
+          <span class="bar"></span>
+          <span class="title">高频词云</span>
+          <a-radio-group v-model:value="wcSource" size="small" class="wc-tabs" @change="loadWordcloud">
+            <a-radio-button value="title">内容词云（标题）</a-radio-button>
+            <a-radio-button v-if="isTesla" value="comments">用户词云（评论）</a-radio-button>
+          </a-radio-group>
+          <a-radio-group v-model:value="wcMetric" size="small" class="wc-tabs" @change="renderWordcloud">
+            <a-radio-button value="count">按篇数</a-radio-button>
+            <a-radio-button value="engagement">按互动</a-radio-button>
+          </a-radio-group>
+          <span v-if="wcTotalTexts" class="muted mini">基于 {{ wcTotalTexts }} 条{{ wcSource === 'comments' ? '评论' : '笔记标题' }} · 点击词语可筛选内容列表</span>
+        </div>
+      </template>
+      <div v-show="wcMode === 'cloud'" ref="wordcloudEl" class="wordcloud-chart" />
+      <div v-if="wcMode === 'bar'" class="wc-fallback">
+        <div v-for="w in wcWords.slice(0, 30)" :key="w.word" class="wc-bar-row" @click="onWordClick(w.word)">
+          <span class="wc-word">{{ w.word }}</span>
+          <div class="wc-bar-track"><div class="wc-bar" :style="{ width: wcBarPct(w) + '%' }"></div></div>
+          <span class="wc-val">{{ wcMetric === 'count' ? w.count : fmt(w.engagement) }}</span>
+        </div>
+        <div v-if="!wcWords.length" class="muted mini">暂无数据</div>
+      </div>
+      <div v-if="wcMode === 'cloud' && !wcWords.length" class="muted mini" style="padding: 20px">暂无数据</div>
+    </a-card>
+
     <a-card v-if="isDf" :bordered="false" size="small" class="ces-top-card">
       <template #title>
         <div class="card-header">
@@ -238,7 +266,7 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import { getKoxAccounts, getKoxNotes, getKoxNotesSummary } from '../../api/kox';
+import { getKoxAccounts, getKoxNotes, getKoxNotesSummary, getKoxWordcloud } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
@@ -418,6 +446,85 @@ const typeEffEl = ref(null);
 const modelPieEl = ref(null);
 let typeChart = null;
 let pieChart = null;
+
+// ── 词云（内容标题话题 / 用户评论意图）──
+const wordcloudEl = ref(null);
+let wcChart = null;
+const wcSource = ref('title');
+const wcMetric = ref('count');
+const wcWords = ref([]);
+const wcTotalTexts = ref(0);
+const wcMode = ref('cloud'); // 'cloud' | 'bar'（echarts-wordcloud 不可用时降级条形榜）
+let wcLibReady = false;
+const WC_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+
+import('echarts-wordcloud')
+  .then(() => {
+    wcLibReady = true;
+    nextTick(renderWordcloud);
+  })
+  .catch(() => {
+    wcLibReady = false;
+    wcMode.value = 'bar';
+    nextTick(renderWordcloud);
+  });
+
+function wcBarPct(w) {
+  const vals = wcWords.value.slice(0, 30).map((x) => (wcMetric.value === 'count' ? x.count : x.engagement) || 0);
+  const max = Math.max(1, ...vals);
+  const v = (wcMetric.value === 'count' ? w.count : w.engagement) || 0;
+  return Math.max(4, Math.round((v / max) * 100));
+}
+
+async function loadWordcloud() {
+  if (mode.value !== 'real') return;
+  try {
+    const res = await getKoxWordcloud(realParams({ source: wcSource.value }));
+    wcWords.value = res.words ?? [];
+    wcTotalTexts.value = res.total_texts ?? 0;
+    nextTick(renderWordcloud);
+  } catch {
+    /* 词云加载失败不影响主列表 */
+  }
+}
+
+function renderWordcloud() {
+  if (wcMode.value !== 'cloud' || !wcLibReady || !wordcloudEl.value) return;
+  if (!wcChart) wcChart = echarts.init(wordcloudEl.value);
+  const key = wcMetric.value;
+  const data = wcWords.value
+    .slice(0, 100)
+    .map((w) => ({ name: w.word, value: Math.max(1, Math.round(Number(w[key]) || 1)) }));
+  wcChart.setOption({
+    tooltip: { formatter: (p) => `${p.name}：${p.value}${wcMetric.value === 'count' ? '篇' : '互动'}` },
+    series: [
+      {
+        type: 'wordCloud',
+        shape: 'circle',
+        width: '96%',
+        height: '96%',
+        sizeRange: [13, 48],
+        rotationRange: [0, 0],
+        gridSize: 7,
+        drawOutOfBound: false,
+        layoutAnimation: true,
+        textStyle: {
+          fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+          color: () => WC_COLORS[Math.floor(Math.random() * WC_COLORS.length)],
+        },
+        emphasis: { textStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.25)' } },
+        data,
+      },
+    ],
+  });
+  wcChart.off('click');
+  wcChart.on('click', (p) => onWordClick(p.name));
+}
+
+function onWordClick(word) {
+  keyword.value = word;
+  onFilterChange();
+}
 
 function renderCharts() {
   if (typeEffEl.value) {
@@ -610,6 +717,7 @@ async function loadReal({ fetchSummary = true } = {}) {
         .catch(() => {});
     }
     nextTick(renderCharts);
+    nextTick(loadWordcloud);
   } catch {
     message.error('加载笔记数据失败');
   } finally {
@@ -825,6 +933,7 @@ async function loadAccounts() {
 function onResize() {
   typeChart?.resize();
   pieChart?.resize();
+  wcChart?.resize();
 }
 
 onMounted(async () => {
@@ -845,6 +954,7 @@ onMounted(async () => {
       notes.value = (probe.list ?? []).map(mapRealRow);
       summaryData.value = await getKoxNotesSummary(realParams());
       nextTick(renderCharts);
+      nextTick(loadWordcloud);
     } else {
       mode.value = 'demo';
       await loadAccounts();
@@ -864,6 +974,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
   typeChart?.dispose();
   pieChart?.dispose();
+  wcChart?.dispose();
 });
 </script>
 
@@ -1226,5 +1337,60 @@ onBeforeUnmount(() => {
   .note-analysis-row {
     grid-template-columns: 1fr;
   }
+}
+
+.wordcloud-card {
+  margin-bottom: 12px;
+}
+.wordcloud-card .card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wordcloud-chart {
+  height: 320px;
+}
+.wc-tabs {
+  margin-left: 12px;
+}
+.wc-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wc-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.wc-bar-row:hover .wc-word {
+  color: #3b82f6;
+}
+.wc-word {
+  width: 120px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.wc-bar-track {
+  flex: 1;
+  height: 14px;
+  background: #eef2f7;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.wc-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #8cc8ff, #5087ec);
+  border-radius: 7px;
+}
+.wc-val {
+  width: 70px;
+  font-size: 12px;
+  color: #666;
 }
 </style>

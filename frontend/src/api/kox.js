@@ -37,6 +37,9 @@ export const getKoxNotes = (params) =>
 export const getKoxNotesSummary = (params) =>
   request.get('/kox/notes/summary', { params });
 
+export const getKoxWordcloud = (params) =>
+  request.get('/kox/notes/wordcloud', { params });
+
 export const getKoxRegionAnalysis = (params) =>
   request.get('/kox/region-analysis', { params });
 

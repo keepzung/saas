@@ -1,4 +1,18 @@
 const dayKey08 = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+
+// 词云停用词：虚词/泛词（特斯拉在品牌工作区内全篇出现，无区分度；model 裸词由车型原子化处理）
+const NOTES_WC_STOPWORDS = new Set(
+  [
+    '的', '了', '是', '在', '我', '有', '和', '就', '不', '都', '一', '上', '也', '很', '到', '说',
+    '要', '进', '去', '你', '们', '这', '那', '吗', '什么', '没', '还', '自己', '我们', '觉得',
+    '然后', '可以', '这个', '那个', '就是', '一个', '已经', '现在', '直接', '怎么', '这么', '那么',
+    '出来', '起来', '如果', '因为', '所以', '但是', '大家', '好的', '谢谢', '需要', '时间', '问题',
+    '今天', '明天', '昨天', '以及', '还是', '不是', '一下', '一般', '真的', '好多', '多少', '其他',
+    '特斯拉', 'model', '中国', '请问', '回复', '知道', '希望', '喜欢', '支持', '体验', '分享',
+    '没有', '还有', '哪里', '什么时候', '怎么样', '怎么样了',
+  ].filter((w) => w.length >= 1),
+);
+
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1787,6 +1801,73 @@ export class KoxService {
       delete where.OR;
     }
     return { where, base, start, end };
+  }
+
+  /** 内容表现分析 · 词云（title=笔记标题话题 / comments=用户评论意图）；
+   *  分词用 Node 原生 Intl.Segmenter（零依赖），过滤：单字/纯数字/标点符号emoji/停用词；车型词原子化保留 */
+  async notesWordcloud(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    category?: string;
+    modelTag?: string;
+    author?: string;
+    keyword?: string;
+    source?: string;
+  }) {
+    const source = query.source === 'comments' ? 'comments' : 'title';
+    const brandId = query.brandId ? Number(query.brandId) : 6;
+    const { where, start, end } = await this.noteFilters(query);
+    const seg = new (Intl as any).Segmenter('zh-CN', { granularity: 'word' });
+
+    const agg = new Map<string, { count: number; engagement: number }>();
+    const MODEL_RE = /(cybertruck|model\s?(?:3p|yl|yp|3|y|s|x))/gi;
+    const addToken = (raw: string, engagement: number) => {
+      let w = raw.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!w || w.length < 2) return; // 单字/单字母
+      if (/^[\d\s.]+$/.test(w)) return; // 纯数字
+      if (/^[\p{P}\p{S}\p{Zs}\p{C}]+$/u.test(w)) return; // 标点/符号/emoji
+      if (/^model\s?[a-z0-9]*$/.test(w)) w = w.replace(/\s+/g, ''); // 车型词归一（model 3/model3 → model3）
+      if (NOTES_WC_STOPWORDS.has(w)) return;
+      const cur = agg.get(w) || { count: 0, engagement: 0 };
+      cur.count += 1;
+      cur.engagement += engagement;
+      agg.set(w, cur);
+    };
+    const addText = (text: string, engagement: number) => {
+      if (!text) return;
+      const clean = text.replace(/\[[^\]]{1,8}\]/g, ' '); // 去掉 [偷笑] 等表情名
+      const models = clean.match(MODEL_RE) || [];
+      for (const m of models) addToken(m, engagement);
+      for (const s of seg.segment(clean.replace(MODEL_RE, ' '))) {
+        if (!(s as any).isWordLike) continue;
+        addToken(s.segment, engagement);
+      }
+    };
+
+    let totalTexts = 0;
+    if (source === 'comments') {
+      // 评论词云：来鼓评论（当前仅 brand6 有评论接入）；页面笔记级筛选（车型/作者等）不影响评论维度
+      const rows = await this.prisma.laiguComment.findMany({
+        where: { brandId, createdAt: { gte: start, lte: end } },
+        select: { content: true },
+      });
+      totalTexts = rows.length;
+      for (const r of rows) addText(r.content || '', 1);
+    } else {
+      const rows = await this.prisma.koxNote.findMany({
+        where,
+        select: { title: true, likes: true, collects: true, comments: true, shares: true },
+      });
+      totalTexts = rows.length;
+      for (const n of rows) addText(n.title || '', n.likes + n.collects + n.comments + n.shares);
+    }
+
+    const words = [...agg.entries()]
+      .map(([word, v]) => ({ word, count: v.count, engagement: v.engagement }))
+      .sort((a, b) => b.count - a.count || b.engagement - a.engagement)
+      .slice(0, 120);
+    return { source, start, end, total_texts: totalTexts, words };
   }
 
   /** 聚光笔记报表 per-note 加总（brand6 笔记排行/内容表现/热门内容口径：曝光=Σ展现、阅读=Σ点击、私信三数=Σ） */
