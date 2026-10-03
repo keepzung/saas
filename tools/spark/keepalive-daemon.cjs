@@ -59,15 +59,20 @@ function mergeCookies(cookieStr, setCookieList) {
 }
 
 async function probeUrl(url, cookie) {
-  // 返回 { alive, setCookies, status, finalNote }
-  const res = await fetch(url, {
-    redirect: 'manual',
-    headers: { Cookie: cookie || '', 'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9' },
-  });
-  const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
-  const loc = res.headers.get('location') || '';
-  const dead = res.status >= 300 && res.status < 400 && /login|signin|passport/i.test(loc);
-  return { alive: !dead && res.status >= 200 && res.status < 400, dead, setCookies, status: res.status, loc };
+  // 返回 { alive, setCookies, status, finalNote }；网络错误与真实会话失效分开（netError 不触发重登）
+  try {
+    const res = await fetch(url, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30000),
+      headers: { Cookie: cookie || '', 'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9' },
+    });
+    const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    const loc = res.headers.get('location') || '';
+    const dead = res.status >= 300 && res.status < 400 && /login|signin|passport/i.test(loc);
+    return { alive: !dead && res.status >= 200 && res.status < 400, dead, setCookies, status: res.status, loc };
+  } catch (e) {
+    return { alive: false, dead: false, netError: true, setCookies: [], status: undefined, loc: '', note: `probe network: ${String(e).slice(0, 60)}` };
+  }
 }
 
 async function probePartner(cookie) {
@@ -243,10 +248,10 @@ async function keepBrand(org) {
   }
 
   let status = r.alive ? 'success' : 'failed';
-  let note = r.alive ? `${org.channel} alive` : `${org.channel} session dead`;
+  let note = r.alive ? `${org.channel} alive` : r.netError ? `${org.channel} probe network timeout（不判定会话死亡）` : `${org.channel} session dead`;
 
-  // 失效处理：冷却期内尝试自动重登
-  if (!r.alive) {
+  // 失效处理：仅真实会话死亡（非网络错误）触发自动重登，冷却 30 分钟
+  if (!r.alive && !r.netError) {
     st.consecutiveFails = (st.consecutiveFails || 0) + 1;
     const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
     const canTry = st.consecutiveFails >= 2 && (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs);
@@ -272,7 +277,7 @@ async function keepBrand(org) {
         note = `${org.channel} relogin failed: ${rr.note}`;
       }
     }
-  } else {
+  } else if (r.alive) {
     st.consecutiveFails = 0;
   }
 
