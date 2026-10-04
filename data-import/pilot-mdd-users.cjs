@@ -1,6 +1,7 @@
-// MorganDaDa 21 矩阵账号 → 4级账号开通试点（走 /user/manage/batch API，等价于前端批量导入）
+﻿// MorganDaDa 21 矩阵账号 → 4级账号开通试点（走 /user/manage/batch API，等价于前端批量导入）
 // 手机号=登录账号；密码=Mdd@手机号后4位；组织=门店(L3)；绑定 KosAccount（平台实际昵称）
 // 用法: node pilot-mdd-users.cjs [--api http://localhost:3000/api/agency-api]
+//   生产: PILOT_ADMIN_USER=18510234580 PILOT_ADMIN_PASSWORD=*** node pilot-mdd-users.cjs
 const crypto = require('crypto');
 
 const arg = (k, d) => {
@@ -9,6 +10,8 @@ const arg = (k, d) => {
 };
 const API = arg('--api', 'http://localhost:3000/api/agency-api');
 const BRAND = 5;
+const ADMIN_USER = process.env.PILOT_ADMIN_USER || '18600104701';
+const ADMIN_PASS = process.env.PILOT_ADMIN_PASSWORD || 'yoyo0508';
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
 
 // (手机号, 昵称=KosAccount 当前昵称, 门店)
@@ -48,14 +51,14 @@ const ROWS = [
   let r = await fetch(`${API}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: '18600104701', password: sha1('yoyo0508') }),
+    body: JSON.stringify({ username: ADMIN_USER, password: sha1(ADMIN_PASS) }),
   });
   let j = await r.json();
   if (j.code === 10015) {
     r = await fetch(`${API}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: '18600104701', password: sha1('yoyo0508'), main_company_id: String(BRAND) }),
+      body: JSON.stringify({ username: ADMIN_USER, password: sha1(ADMIN_PASS), main_company_id: String(BRAND) }),
     });
     j = await r.json();
   }
