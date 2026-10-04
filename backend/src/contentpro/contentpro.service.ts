@@ -1158,6 +1158,70 @@ export class ContentproService {
     return { list, total, page, page_size: pageSize };
   }
 
+  /**
+   * H5「我的任务」：KOS 员工视角，按绑定矩阵账号（KosAccount.userId）过滤。
+   * 未绑定账号（管理员/未绑定员工）返回 scoped=false，前端回退全量列表。
+   */
+  async mobileMyTasks(brandId: number, userId: number, query: { page?: string; page_size?: string }) {
+    const kos = await this.prisma.kosAccount.findFirst({
+      where: { brandId, userId },
+      select: { id: true, nickname: true, storeName: true, accountTag: true },
+    });
+    if (!kos) return { scoped: false, my_account: null, list: [], total: 0, page: 1, page_size: 0 };
+
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(50, Number(query.page_size ?? 20) || 20);
+    const targets = await this.prisma.contentTaskTarget.findMany({
+      where: { accountId: kos.id },
+      select: { taskId: true },
+    });
+    const taskIds = [...new Set(targets.map((t) => t.taskId))];
+    const where: Prisma.ContentTaskWhereInput = {
+      brandId,
+      id: { in: taskIds },
+      status: { not: 'voided' },
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.contentTask.count({ where }),
+      this.prisma.contentTask.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const list = await Promise.all(
+      rows.map(async (t) => {
+        const progress = await this.taskProgress(t.id, t.startTime, t.endTime);
+        const myNotes = await this.prisma.koxNote.count({
+          where: { accountId: kos.id, publishTime: { gte: t.startTime, lte: t.endTime } },
+        });
+        return {
+          id: t.id,
+          name: t.name,
+          platform: t.platform,
+          start_time: t.startTime,
+          end_time: t.endTime,
+          instructions: t.instructions,
+          reward: t.reward,
+          status: t.status,
+          effective_status: this.effectiveStatus(t),
+          ...progress,
+          my_finished: myNotes > 0,
+          my_note_count: myNotes,
+        };
+      }),
+    );
+    return {
+      scoped: true,
+      my_account: { id: kos.id, nickname: kos.nickname, storeName: kos.storeName, accountTag: kos.accountTag },
+      list,
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
   /** 完成度：参与账号在任务周期内的 KoxNote 发布数（自动统计口径） */
   private async taskProgress(taskId: number, startTime: Date, endTime: Date) {
     const targets = await this.prisma.contentTaskTarget.findMany({

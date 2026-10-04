@@ -16,6 +16,7 @@ import { LaiguModule } from './laigu/laigu.module';
 import { SparkModule } from './spark/spark.module';
 import { ContentproModule } from './contentpro/contentpro.module';
 import { ProModule } from './pro/pro.module';
+import { OrgModule } from './org/org.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ProModule } from './pro/pro.module';
     SparkModule,
     ContentproModule,
     ProModule,
+    OrgModule,
   ],
 })
 export class AppModule {}

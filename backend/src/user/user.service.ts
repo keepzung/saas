@@ -8,6 +8,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  BatchCreateUsersDto,
   CreateUserDto,
   ResetPasswordDto,
   UpdateUserDto,
@@ -163,16 +164,20 @@ export class UserService {
       select: {
         ...USER_SELECT,
         brandMembers: { select: { brandId: true, roleKey: true } },
+        org: { select: { id: true, name: true, level: true } },
+        kosAccount: { select: { id: true, nickname: true, storeName: true } },
       },
     });
     return {
-      list: users.map(({ brandMembers, ...u }) => ({
+      list: users.map(({ brandMembers, org, kosAccount, ...u }) => ({
         ...u,
         brandIds: brandMembers.map((m) => m.brandId),
         brandRoles: brandMembers.map((m) => ({
           brandId: m.brandId,
           roleKey: m.roleKey,
         })),
+        org: org ?? null,
+        kosAccount: kosAccount ?? null,
       })),
     };
   }
@@ -295,6 +300,158 @@ export class UserService {
       data: { passwordHash: bcrypt.hashSync(this.sha1(dto.password), 10) },
     });
     return { ok: true };
+  }
+
+  /**
+   * 批量开通（4级账号体系）：手机号即登录账号。
+   * 每行独立处理，单行失败不影响其余行；已存在手机号视为更新（昵称/组织/品牌角色/绑定）。
+   * 缺省密码 = passwordPrefix(默认 Mdd@) + 手机号后 4 位。
+   */
+  async createUsersBatch(operatorId: number, dto: BatchCreateUsersDto) {
+    const operatorRole = await this.assertOperator(operatorId);
+    // 非超管：只能在自有品牌范围内分配 + 不能建 ADMIN
+    let allowedBrands: Set<number> | null = null;
+    if (operatorRole !== 'ADMIN') {
+      const mine = await this.prisma.brandMember.findMany({
+        where: { userId: operatorId },
+        select: { brandId: true },
+      });
+      allowedBrands = new Set(mine.map((m) => m.brandId));
+    }
+
+    const prefix = dto.passwordPrefix ?? 'Mdd@';
+    const result = {
+      total: dto.rows.length,
+      added: 0,
+      updated: 0,
+      failed: 0,
+      errors: [] as { phone: string; reason: string }[],
+      credentials: [] as {
+        phone: string;
+        password: string;
+        nickname: string;
+        brandIds: number[];
+        orgName?: string;
+        kosNickname?: string;
+      }[],
+    };
+
+    for (const row of dto.rows) {
+      try {
+        if (operatorRole !== 'ADMIN' && row.role === 'ADMIN') {
+          throw new ForbiddenException('仅超级管理员可创建管理员账号');
+        }
+        const brandRoles = (row.brandRoles ?? []).filter(
+          (r) => !allowedBrands || allowedBrands.has(r.brandId),
+        );
+        const primaryBrand = brandRoles[0]?.brandId ?? null;
+
+        // 组织：优先 orgId，其次按名称 find-or-create（门店层级）
+        let orgId: number | null = row.orgId ?? null;
+        if (!orgId && row.orgName && primaryBrand) {
+          const level = row.orgLevel ?? 3;
+          let org = await this.prisma.brandOrg.findFirst({
+            where: { brandId: primaryBrand, name: row.orgName, level },
+            select: { id: true },
+          });
+          if (!org) {
+            org = await this.prisma.brandOrg.create({
+              data: { brandId: primaryBrand, name: row.orgName, level },
+              select: { id: true },
+            });
+          }
+          orgId = org.id;
+        }
+
+        const exists = await this.prisma.user.findUnique({
+          where: { phone: row.phone },
+          select: { id: true },
+        });
+        const password = row.password ?? `${prefix}${row.phone.slice(-4)}`;
+        let userId: number;
+        if (exists) {
+          await this.prisma.user.update({
+            where: { id: exists.id },
+            data: {
+              ...(row.nickname !== undefined ? { nickname: row.nickname } : {}),
+              ...(row.moduleIds !== undefined ? { moduleIds: row.moduleIds } : {}),
+              ...(orgId ? { orgId } : {}),
+              ...(row.password ? { passwordHash: bcrypt.hashSync(this.sha1(row.password), 10) } : {}),
+            },
+          });
+          userId = exists.id;
+          result.updated += 1;
+        } else {
+          const created = await this.prisma.user.create({
+            data: {
+              phone: row.phone,
+              passwordHash: bcrypt.hashSync(this.sha1(password), 10),
+              nickname: row.nickname || row.phone,
+              role: row.role ?? 'SALES',
+              adminFlag: row.role === 'ADMIN' ? 1 : 0,
+              companyId: 1,
+              moduleIds: row.moduleIds ?? [],
+              createdById: operatorId,
+              ...(orgId ? { orgId } : {}),
+            },
+            select: { id: true },
+          });
+          userId = created.id;
+          result.added += 1;
+        }
+
+        // 品牌角色（幂等 upsert）
+        for (const r of brandRoles) {
+          await this.prisma.brandMember.upsert({
+            where: {
+              brandId_userId_roleKey: {
+                brandId: r.brandId,
+                userId,
+                roleKey: r.roleKey,
+              },
+            },
+            update: {},
+            create: { brandId: r.brandId, userId, roleKey: r.roleKey },
+          });
+        }
+
+        // KOS 矩阵账号绑定（1:1）
+        let kosNickname: string | undefined;
+        if (row.kosNickname && primaryBrand) {
+          const kos = await this.prisma.kosAccount.findFirst({
+            where: { brandId: primaryBrand, nickname: row.kosNickname },
+            select: { id: true, userId: true },
+          });
+          if (!kos) throw new BadRequestException(`矩阵账号不存在: ${row.kosNickname}`);
+          if (kos.userId && kos.userId !== userId) {
+            throw new BadRequestException(`矩阵账号已被其他账号绑定: ${row.kosNickname}`);
+          }
+          await this.prisma.kosAccount.update({
+            where: { id: kos.id },
+            data: { userId },
+          });
+          kosNickname = row.kosNickname;
+        }
+
+        if (!exists || row.password) {
+          result.credentials.push({
+            phone: row.phone,
+            password: exists && !row.password ? '' : password,
+            nickname: row.nickname || row.phone,
+            brandIds: brandRoles.map((r) => r.brandId),
+            orgName: row.orgName,
+            kosNickname,
+          });
+        }
+      } catch (e) {
+        result.failed += 1;
+        result.errors.push({
+          phone: row.phone,
+          reason: e?.message ?? String(e),
+        });
+      }
+    }
+    return result;
   }
 
   async getActionList(userId: number) {

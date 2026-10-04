@@ -71,6 +71,11 @@ const routes = [
         meta: { title: '用户管理' },
       },
       {
+        path: '/system/orgs',
+        component: () => import('../views/system/OrgManageView.vue'),
+        meta: { title: '组织管理' },
+      },
+      {
         path: '/project/manage/list',
         component: () => import('../views/project/ProjectListView.vue'),
         meta: { title: '项目列表' },

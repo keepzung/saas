@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 会话保活守护（48h pilot）：每 KEEPALIVE_INTERVAL_MINUTES 分钟对每个 active 的 sparkOrgConfig 探活
 //   partner (brand6): GET partner watch-dashboard（manual redirect，30x→login = 失效）
-//   mcc (brand2/7/8): GET mcc aurora-data 页面（redirect→login = 失效）
+//   mcc (brand2/5/7/8): GET mcc aurora-data 页面（redirect→login = 失效）
 // 续期：合并响应 Set-Cookie 回写 sparkOrgConfig.cookie（有变化才写）
 // 失效：partner 无头账密自动重登一次（滑块则标记 need_manual_login）；mcc 预留 SPARK_ACCOUNT_B{brandId} 账密重登
 // 记录：每轮每品牌一条 SparkSyncLog(syncType='keepalive') + keepalive-state.json 心跳文件

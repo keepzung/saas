@@ -32,7 +32,10 @@ const collectOrgs = (value, hits, source) => {
 };
 
 (async () => {
-  const browser = await chromium.launch({ headless: process.env.HEADLESS !== '0' });
+  const browser = await chromium.launch({
+    headless: process.env.HEADLESS !== '0',
+    args: process.env.NO_PROXY === '1' ? ['--no-proxy-server'] : [],
+  });
   const ctx = await browser.newContext({
     storageState: fs.existsSync(STATE_FILE) ? STATE_FILE : undefined,
     viewport: { width: 1440, height: 900 },

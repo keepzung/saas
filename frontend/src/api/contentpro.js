@@ -179,3 +179,6 @@ export const getContentTaskDetail = (id, params) =>
 
 export const voidContentTask = (id, params) =>
   request.post(`/content-tasks/${id}/void`, {}, { params });
+
+export const getMyMobileTasks = (params) =>
+  request.get('/content-pro/mobile/my-tasks', { params });

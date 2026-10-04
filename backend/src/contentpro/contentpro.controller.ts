@@ -408,6 +408,18 @@ export class ContentproController {
     return this.service.myClaims(Number(brandId ?? 1), user.id);
   }
 
+  // H5「我的任务」：KOS 员工按绑定矩阵账号过滤（未绑定返回 scoped=false）
+  @Get('content-pro/mobile/my-tasks')
+  mobileMyTasks(
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Query('page') page?: string,
+    @Query('page_size') page_size?: string,
+  ) {
+    const user = req.user as { id: number };
+    return this.service.mobileMyTasks(Number(brandId ?? 1), user.id, { page, page_size });
+  }
+
   // ─── 内容创作任务（任务分发）────────────────────────────────────
   @Get('content-tasks')
   contentTasks(

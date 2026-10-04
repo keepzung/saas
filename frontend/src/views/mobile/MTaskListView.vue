@@ -9,6 +9,10 @@
 
     <!-- 发布任务 -->
     <div v-if="tab === 'task'" class="mt-list">
+      <div v-if="myAccount" class="my-account-chip">
+        <span class="mac-dot" /> 我的矩阵账号：{{ myAccount.nickname }}
+        <span v-if="myAccount.storeName" class="mac-store">{{ myAccount.storeName }}</span>
+      </div>
       <div v-for="t in list" :key="t.id" class="task-card" @click="goCreate(t)">
         <div class="tc-head">
           <span class="tc-name">{{ t.name }}</span>
@@ -22,6 +26,9 @@
         <div class="tc-progress">
           <div class="prog"><div class="prog-in" :style="{ width: `${t.completion_rate}%` }" /></div>
           <div class="prog-sub">已完成 {{ t.completion_rate }}% · {{ t.account_finished }}/{{ t.account_total }} 人有产出</div>
+        </div>
+        <div v-if="myAccount" class="tc-my" :class="{ done: t.my_finished }">
+          {{ t.my_finished ? `已完成（${t.my_note_count} 篇）` : '未完成' }}
         </div>
         <a-button type="primary" block size="small" @click.stop="goCreate(t)">领取任务，去创作</a-button>
       </div>
@@ -85,6 +92,7 @@ import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { useAuthStore } from '../../stores/auth';
 import {
+  getMyMobileTasks,
   getContentTasks,
   getMobilePackages,
   claimMobilePackage,
@@ -98,6 +106,7 @@ const brandId = computed(() => auth.currentBrandId ?? 1);
 const tab = ref('task');
 const list = ref([]);
 const loading = ref(false);
+const myAccount = ref(null); // KOS 绑定的矩阵账号（scoped=true 时有值）
 
 const packages = ref([]);
 const dispatched = ref([]);
@@ -163,8 +172,15 @@ const claimDispatched = async (d) => {
 onMounted(async () => {
   loading.value = true;
   try {
-    const res = await getContentTasks({ brandId: brandId.value, page: 1, page_size: 20 });
-    list.value = (res?.list ?? []).filter((x) => x.effective_status === 'active');
+    // KOS 员工：优先「我的任务」（按绑定矩阵账号过滤）
+    const mine = await getMyMobileTasks({ brandId: brandId.value }).catch(() => null);
+    if (mine?.scoped) {
+      myAccount.value = mine.my_account;
+      list.value = (mine.list ?? []).filter((x) => x.effective_status === 'active');
+    } else {
+      const res = await getContentTasks({ brandId: brandId.value, page: 1, page_size: 20 });
+      list.value = (res?.list ?? []).filter((x) => x.effective_status === 'active');
+    }
   } finally {
     loading.value = false;
   }
@@ -381,5 +397,40 @@ onMounted(async () => {
   text-align: center;
   color: #cbd5e1;
   font-size: 11px;
+}
+
+.my-account-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef4ff;
+  color: #3456e6;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+
+.mac-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a34a;
+  flex-shrink: 0;
+}
+
+.mac-store {
+  color: #64748b;
+  font-size: 11.5px;
+}
+
+.tc-my {
+  font-size: 12px;
+  color: #d97706;
+  margin-bottom: 10px;
+}
+
+.tc-my.done {
+  color: #16a34a;
 }
 </style>

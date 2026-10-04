@@ -84,9 +84,35 @@ model User {
   createdById     Int?
   createdBy       User?         @relation("UserCreator", fields: [createdById], references: [id])
   createdUsers    User[]        @relation("UserCreator")
+  orgId           Int?
+  org             BrandOrg?     @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  kosAccount      KosAccount?
 
   @@index([role])
   @@index([companyId])
+  @@index([orgId])
+}
+
+// 4级账号体系 L2~L3：工作区 → 组织（大区/经销商/门店） → KOS 员工
+model BrandOrg {
+  id         Int        @id @default(autoincrement())
+  brandId    Int
+  name       String
+  level      Int        @default(3) // 1大区 2经销商/品牌总部 3门店
+  parentId   Int?
+  parent     BrandOrg?  @relation("BrandOrgTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children   BrandOrg[] @relation("BrandOrgTree")
+  regionName String?
+  cityName   String?
+  sort       Int        @default(0)
+  status     String     @default("enabled")
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  users User[]
+
+  @@index([brandId])
+  @@index([parentId])
 }
 
 model Brand {
@@ -460,14 +486,17 @@ model KosAccount {
   authorUrl      String?
   status         String   @default("enabled")
   brandId        Int      @default(1)
+  userId         Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  user          User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   taskRecords    KoxTaskAuthor[]
   dailyStats     KoxAccountDailyStat[]
   notes          KoxNote[]
   contentTaskTargets ContentTaskTarget[] @relation("ContentTaskTargetAccount")
 
+  @@unique([userId])
   @@index([platform])
   @@index([accountType])
   @@index([brandId])

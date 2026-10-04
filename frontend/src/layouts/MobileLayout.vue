@@ -41,7 +41,7 @@ const onMenu = ({ key }) => {
   if (key === 'logout') {
     auth.logout();
     message.success('已退出登录');
-    router.push('/login');
+    router.push('/m/login');
   }
 };
 </script>

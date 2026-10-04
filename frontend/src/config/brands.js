@@ -13,6 +13,14 @@ export const BRAND_THEMES = {
   },
   7: { name: '东风奕境项目工作区', logo: '/images/login/dongfeng-logo.png', short: '东风奕境' },
   8: { name: '格力项目工作区', logo: '/images/login/gree-logo.png', short: '格力' },
+  5: {
+    name: 'Morgandada项目工作区',
+    logo: '/images/login/morgandada-logo-wide.png',
+    short: 'Morgandada',
+    logoH: 64, // 欢迎页头部 logo 高度（MorganDaDa 横版 1080×240）
+    logoW: 288,
+    sidebarLogoH: 34, // 侧栏品牌 logo 高度（默认 24 太小）
+  },
 };
 
 export function brandTheme(brandId) {
@@ -37,11 +45,12 @@ export const BRAND_WORKSPACE_TABS = {
 // 投放分析=投流总览/投流项目管理/周期报表；监测管理=监测列表/添加监测/添加记录
 // 线索中心（来鼓私信）仅 Morgandada(5) 可见；周期报表/监测两页/热门内容为特斯拉(6)专属；
 // 7/8 用 内容工厂Pro(顶部Tab) 替代 内容中心Pro，内容创作任务 替代 KOX 任务管理
+// 5（Morgandada）：内容生产模块放开（4级账号体系——KOS 员工登录内容生产模块），仅保留报表/监测类隐藏
 export const BRAND_HIDDEN_MENUS = {
   1: ['线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务'],
   2: ['任务管理', '线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务'],
   4: ['线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务'],
-  5: ['周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务'],
+  5: ['周期报表', '添加监测', '添加记录', '热门内容'],
   6: ['线索中心', '任务管理', '内容工厂Pro', '内容创作任务'],
   7: ['线索中心', '任务管理', '用户反馈分析', '热门内容', '内容中心Pro'],
   8: ['线索中心', '任务管理', '用户反馈分析', '热门内容', '内容中心Pro'],

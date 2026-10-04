@@ -14,6 +14,7 @@ import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UserService } from './user.service';
 import {
+  BatchCreateUsersDto,
   CreateUserDto,
   ResetPasswordDto,
   UpdateUserDto,
@@ -52,6 +53,12 @@ export class UserController {
   manageCreate(@Req() req: Request, @Body() dto: CreateUserDto) {
     const user = req.user as { id: number };
     return this.userService.createUser(user.id, dto);
+  }
+
+  @Post('manage/batch')
+  manageBatchCreate(@Req() req: Request, @Body() dto: BatchCreateUsersDto) {
+    const user = req.user as { id: number };
+    return this.userService.createUsersBatch(user.id, dto);
   }
 
   @Put('manage/:id')
