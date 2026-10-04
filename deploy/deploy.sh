@@ -30,6 +30,7 @@ if [ ! -f .env ]; then
 fi
 
 echo "==> [3/7] 数据库迁移（prisma migrate deploy）"
+npx prisma generate
 npx prisma migrate deploy
 
 echo "==> [4/7] 后端构建"
