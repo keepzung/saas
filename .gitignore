@@ -23,3 +23,7 @@ gree/
 dongfeng/
 tools/crawl-marketine/materials-backup/
 data-import/mdd-credentials.json
+VW/
+data-import/vw-kos-accounts.csv
+vw-handover.tar
+data-import/backup-laigu-brand5-*.json
