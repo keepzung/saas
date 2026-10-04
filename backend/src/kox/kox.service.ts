@@ -348,7 +348,7 @@ export class KoxService {
     const noteViewSum = noteSum((n) => n.views);
     const noteExposureSum = noteSum((n) => n.exposure);
     const noteInteractionSum = noteSum(
-      (n) => n.likes + n.comments + n.shares + n.collects,
+      (n) => n.likes + n.comments + n.shares + n.collects + n.followCount,
     );
     const hasNotes = noteRows.length > 0;
 
@@ -606,11 +606,9 @@ export class KoxService {
       region_kos: [...kosByRegion.entries()]
         .map(([region, cnt]) => ({ region, kos_cnt: cnt }))
         .sort((a, b) => b.kos_cnt - a.kos_cnt),
-      region_content: proContent
-        ? proContent.region_content
-        : [...contentByRegion.entries()]
-            .map(([region, v]) => ({ region, ...v }))
-            .sort((a, b) => b.item_cnt - a.item_cnt),
+      region_content: [...contentByRegion.entries()]
+        .map(([region, v]) => ({ region, ...v }))
+        .sort((a, b) => b.item_cnt - a.item_cnt),
     };
 
     const ad = hasCampaign
@@ -789,37 +787,17 @@ export class KoxService {
           }),
           this.prisma.kosAccount.count({ where: accountWhere }),
         ]);
-        const itemCntN = weeklySnap
-          ? weeklySnap.item_cnt
-          : proContent
-            ? proContent.item_cnt
-            : noteRows.length;
-        const viewN = weeklySnap
-          ? weeklySnap.view_sum
-          : proContent
-            ? proContent.view_sum
-            : jugHit
-              ? jugWin!.click
-              : noteViewSum;
-        const interN = weeklySnap
-          ? weeklySnap.interaction_sum
-          : proContent
-            ? proContent.interaction_sum
-            : jugHit
-              ? jugWin!.inter
-              : noteInteractionSum;
+        // 口径（客户确认）：内容四项 = 商业内容管理同步的笔记窗口数据（发布数=窗口内真实发布篇数；
+        // 曝光/阅读/互动=窗口内发布笔记的累计值，互动含关注）；周度快照仅用于线索口径
+        const itemCntN = noteRows.length;
+        const viewN = noteViewSum;
+        const interN = noteInteractionSum;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: weeklySnap
-            ? weeklySnap.exposure_sum
-            : proContent
-              ? proContent.exposure_sum
-              : jugHit
-                ? jugWin!.imp
-                : noteExposureSum,
+          exposure_sum: noteExposureSum,
           view_sum: viewN,
           interaction_sum: interN,
           // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）
@@ -838,13 +816,7 @@ export class KoxService {
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
-      content_source: weeklySnap
-        ? `weekly_snapshot(${dayKey2(weeklySnap.weekStart)}~${dayKey2(weeklySnap.weekEnd)})`
-        : proContent
-          ? `pro_staff_window(dateType=${proContent.date_type}, statDate=${dayKey08(proContent.stat_date)})`
-          : jugHit
-            ? 'juguang_window'
-            : 'spark_notes',
+      content_source: 'content_manage_notes(商业内容管理窗口笔记)',
       // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
         if (proClueFunnel && (proClueFunnel.enter > 0 || proClueFunnel.leads > 0)) {
