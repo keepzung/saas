@@ -38,9 +38,12 @@
       >
         <template #bodyCell="{ column, record, index }">
           <template v-if="column.key === 'rank'">
-            <span :class="['rank-badge', index < 3 ? `top${index + 1}` : '']">
-              {{ index < 3 ? CROWNS[index] : index + 1 }}
+            <span :class="['rank-badge', typeof record.rank === 'number' && record.rank <= 3 ? `top${record.rank}` : '']">
+              {{ record.rank ?? (index < 3 ? CROWNS[index] : index + 1) }}
             </span>
+          </template>
+          <template v-else-if="isDf && column.key === 'ad_fee'">
+            {{ record.ad_fee == null ? '—' : '¥' + Number(record.ad_fee).toLocaleString() }}
           </template>
         </template>
       </a-table>
@@ -71,7 +74,12 @@
 
     <a-card v-else size="small" :bordered="false">
       <template #title>
-        <div class="sec-head"><span class="bar"></span>区域投放情况</div>
+        <div class="sec-head">
+          <span class="bar"></span>区域投放情况
+          <a-tooltip title="合计=星火聚光投流组织级数据（T+1 自动同步）；星火暂不支持按大区拆分投放，大区维度待开通后展示；一分钟回复率暂无数据通道">
+            <QuestionCircleOutlined class="q-icon" />
+          </a-tooltip>
+        </div>
       </template>
       <a-table
         :columns="adColumns"
@@ -84,10 +92,9 @@
       >
         <template #bodyCell="{ column, record, index }">
           <template v-if="column.key === 'rank'">
-            <span :class="['rank-badge', index < 3 ? `top${index + 1}` : '']">
-              {{ index < 3 ? CROWNS[index] : index + 1 }}
-            </span>
+            <span class="rank-badge">{{ index + 1 }}</span>
           </template>
+          <template v-else-if="record[column.key] == null">—</template>
         </template>
       </a-table>
     </a-card>
@@ -98,6 +105,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
+import { QuestionCircleOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { getKoxRegionAdSnapshot, getKoxRegionAnalysis } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
@@ -122,13 +130,47 @@ const adMetricNote = ref('');
 const r2 = (v) => Math.round(Number(v ?? 0) * 100) / 100;
 
 const dfRegionRows = computed(() => {
-  const feeByRegion = new Map(adRows.value.map((r) => [r.region, r.fee]));
-  return (rows.value.regions ?? []).map((r) => ({
+  const orgFee = adRows.value[0]?.fee ?? null;
+  const base = (rows.value.regions ?? []).map((r) => ({
     ...r,
     avg_view: r.note_cnt ? r2(r.view_sum / r.note_cnt) : 0,
     avg_interaction: r.note_cnt ? r2(r.interaction_sum / r.note_cnt) : 0,
-    ad_fee: feeByRegion.get(r.name) ?? null,
   }));
+  const s = (k) => base.reduce((acc, r) => acc + Number(r[k] ?? 0), 0);
+  const national = base.find((r) => r.name === '全国');
+  const rest = base.filter((r) => r.name !== '全国');
+  const totalRow = national
+    ? {
+        ...national,
+        avg_view: national.note_cnt ? r2(national.view_sum / national.note_cnt) : 0,
+        avg_interaction: national.note_cnt ? r2(national.interaction_sum / national.note_cnt) : 0,
+        rank: '-',
+        is_total: true,
+        ad_fee: orgFee,
+      }
+    : {
+        name: '全国',
+        is_total: true,
+        rank: '-',
+        kos_cnt: s('kos_cnt'),
+        published_cnt: s('published_cnt'),
+        unpublished_cnt: s('unpublished_cnt'),
+        note_cnt: s('note_cnt'),
+        avg_notes: s('kos_cnt') ? r2(s('note_cnt') / s('kos_cnt')) : 0,
+        exposure_sum: s('exposure_sum'),
+        avg_exposure: s('note_cnt') ? r2(s('exposure_sum') / s('note_cnt')) : 0,
+        view_sum: s('view_sum'),
+        avg_view: s('note_cnt') ? r2(s('view_sum') / s('note_cnt')) : 0,
+        interaction_sum: s('interaction_sum'),
+        avg_interaction: s('note_cnt') ? r2(s('interaction_sum') / s('note_cnt')) : 0,
+        ces_sum: s('ces_sum'),
+        avg_ces: s('note_cnt') ? r2(s('ces_sum') / s('note_cnt')) : 0,
+        pm_inquiries: s('pm_inquiries'),
+        pm_openings: s('pm_openings'),
+        pm_leads: s('pm_leads'),
+        ad_fee: orgFee,
+      };
+  return [totalRow, ...rest.map((r, i) => ({ ...r, rank: i + 1, ad_fee: null }))];
 });
 
 const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
@@ -235,7 +277,13 @@ async function reload() {
   try {
     rows.value = await getKoxRegionAnalysis(dateParams());
     if (isDf) {
-      const ad = await getKoxRegionAdSnapshot({ brandId: auth.currentBrandId ?? 7 });
+      const p = dateParams();
+      const ad = await getKoxRegionAdSnapshot({
+        brandId: auth.currentBrandId ?? 7,
+        mode: 'live',
+        start: p.start,
+        end: p.end,
+      });
       adRows.value = ad.list ?? [];
       adMetricNote.value = ad.metric_note ?? '';
     }
@@ -298,7 +346,7 @@ function exportAll() {
             私信进线数: r.pm_inquiries,
             私信开口数: r.pm_openings,
             私信留资数: r.pm_leads,
-            投流消费: r.ad_fee ?? '',
+            投流消费: r.ad_fee == null ? '—' : r.ad_fee,
           })),
         },
         {
@@ -307,17 +355,17 @@ function exportAll() {
             排名: i + 1,
             区域: r.region,
             投流消耗: r.fee,
-            投流账号数量: r.account_cnt,
-            投流笔记数: r.note_cnt,
-            '一分钟回复率': r.reply_rate ?? '',
+            投流账号数量: r.account_cnt ?? '—',
+            投流笔记数: r.note_cnt ?? '—',
+            '一分钟回复率': r.reply_rate ?? '—',
             私信进线数: r.inquiries,
             私信开口数: r.openings,
             私信留资数: r.leads,
-            开口率: r.open_rate ?? '',
-            开口留资率: r.open_lead_rate ?? '',
-            进线成本: r.inquiry_cost ?? '',
-            开口成本: r.open_cost ?? '',
-            留资成本: r.lead_cost ?? '',
+            开口率: r.open_rate ?? '—',
+            开口留资率: r.open_lead_rate ?? '—',
+            进线成本: r.inquiry_cost ?? '—',
+            开口成本: r.open_cost ?? '—',
+            留资成本: r.lead_cost ?? '—',
           })),
         },
       ],
@@ -350,6 +398,12 @@ onMounted(reload);
   border-radius: 2px;
   background: #3456e6;
   display: inline-block;
+}
+
+.q-icon {
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: help;
 }
 
 .rank-badge {

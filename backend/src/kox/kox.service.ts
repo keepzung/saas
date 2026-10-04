@@ -2956,9 +2956,48 @@ export class KoxService {
     };
   }
 
-  /** 东风·区域投放快照（旧系统导出） */
-  async regionAdSnapshot(query: { brandId?: string }) {
-    const brandId = query.brandId ? Number(query.brandId) : 7;
+  /** 东风·区域投放：live=星火组织级真实派生（单行「全国」，大区拆分星火暂不支持）；缺省=旧系统导出快照 */
+  async regionAdSnapshot(query: { brandId?: string; mode?: string; start?: string; end?: string }) {
+    const brandId = Number(query.brandId ?? 7) || 7;
+    if (query.mode === 'live') {
+      const end = query.end
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date();
+      const start = query.start
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(end.getTime() - 29 * 86400000);
+      const g = await this.prisma.koxCampaignDailyStat.aggregate({
+        where: { brandId, statDate: { gte: start, lte: end } },
+        _sum: { fee: true, messageConsult: true, msgChatUserCnt: true, msgLeadsNum: true },
+      });
+      const fee = Number(g._sum.fee ?? 0);
+      const enter = g._sum.messageConsult ?? 0;
+      const open = g._sum.msgChatUserCnt ?? 0;
+      const leads = g._sum.msgLeadsNum ?? 0;
+      const r2v = (v: number) => Math.round(v * 100) / 100;
+      return {
+        mode: 'live',
+        ad_source: 'spark_campaign',
+        metric_note: '合计=星火聚光投流组织级数据（T+1）；星火暂不支持按大区拆分投放，大区维度待开通后展示',
+        list: [
+          {
+            region: '全国',
+            fee,
+            account_cnt: null,
+            note_cnt: null,
+            reply_rate: null,
+            inquiries: enter,
+            openings: open,
+            leads,
+            open_rate: enter ? r2v((open / enter) * 100) : null,
+            open_lead_rate: enter ? r2v((leads / enter) * 100) : null,
+            inquiry_cost: enter ? r2v(fee / enter) : null,
+            open_cost: open ? r2v(fee / open) : null,
+            lead_cost: leads ? r2v(fee / leads) : null,
+          },
+        ],
+      };
+    }
     const rows = await this.prisma.koxRegionAdSnapshot.findMany({
       where: { brandId },
       orderBy: { fee: 'desc' },

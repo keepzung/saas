@@ -141,7 +141,7 @@ export class KoxController {
   }
 
   @Get('kox/region-ad-snapshot')
-  regionAdSnapshot(@Query() query: { brandId?: string }) {
+  regionAdSnapshot(@Query() query: { brandId?: string; mode?: string; start?: string; end?: string }) {
     return this.koxService.regionAdSnapshot(query);
   }
 
