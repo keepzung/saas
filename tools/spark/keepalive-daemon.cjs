@@ -113,20 +113,25 @@ async function reloginPartner(brandId) {
     }
     const page = await ctx.newPage();
     await page.goto('https://partner.xiaohongshu.com/partner/watch-dashboard', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await sleep(6000);
+    await sleep(10000);
     if (!/login|signin/i.test(page.url())) return { ok: true, cookie: cfg?.cookie || '', note: 'cookie 仍有效（无头页面未跳登录）' };
     const ACCOUNT = process.env.PARTNER_LOGIN_USER;
     const PASSWORD = process.env.PARTNER_LOGIN_PASS;
     if (!ACCOUNT || !PASSWORD) return { ok: false, note: '缺 PARTNER_LOGIN_USER/PASS' };
     try {
-      const tab = page.locator('text=/账号登录/').first();
-      if (await tab.isVisible({ timeout: 3000 }).catch(() => false)) { await tab.click(); await sleep(600); }
-      await page.locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="邮箱"]').first().fill(ACCOUNT, { timeout: 8000 });
-      await page.locator('input[type="password"]').first().fill(PASSWORD, { timeout: 8000 });
+      // /login 默认即邮箱+密码表单（placeholder=请输入邮箱/请输入密码）
+      await page.locator('input[placeholder="请输入邮箱"]').first().fill(ACCOUNT, { timeout: 15000 });
+      await page.locator('input[placeholder="请输入密码"]').first().fill(PASSWORD, { timeout: 15000 });
       await sleep(300);
+      // 协议 checkbox：原生 input 隐藏 → 页面内 JS click 切换（不勾则登录按钮无效）
+      await page.evaluate(() => {
+        document.querySelectorAll('input[type="checkbox"]').forEach((cb) => { if (!cb.checked) cb.click(); });
+      });
+      await sleep(400);
       await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click();
     } catch (e) {
-      return { ok: false, note: `自动填充失败（滑块/表单异常）: ${String(e).slice(0, 60)}` };
+      await page.screenshot({ path: path.join(LOG_DIR, `partner-b${brandId}-fillfail.png`).replace(/\\/g, '/'), fullPage: false }).catch(() => {});
+      return { ok: false, note: `自动填充失败: ${String(e).slice(0, 60)}（截图 state/）` };
     }
     for (let i = 0; i < 60; i++) {
       await sleep(3000);
@@ -135,8 +140,18 @@ async function reloginPartner(brandId) {
         const cookieStr = (stateJson.cookies ?? []).filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
         return { ok: !!cookieStr, cookie: cookieStr, note: cookieStr ? '无头重登成功' : '重登成功但未取到 cookie' };
       }
+      const bodyText = await page.locator('body').innerText().catch(() => '');
+      const errHit = bodyText.match(/密码错误|账号或密码|账号不存在|已被冻结|没有权限|权限不足/);
+      if (errHit) return { ok: false, note: `partner 登录被拒: ${errHit[0]}` };
+      if (/拖动滑块|滑块验证|安全验证/.test(bodyText)) {
+        await page.screenshot({ path: path.join(LOG_DIR, `partner-b${brandId}-captcha.png`).replace(/\\/g, '/'), fullPage: false }).catch(() => {});
+        return { ok: false, note: 'partner 登录出现滑块/安全验证 → need_manual_login（截图 state/）' };
+      }
     }
-    return { ok: false, note: '重登等待超时（大概率滑块）→ need_manual_login' };
+    const shot = path.join(LOG_DIR, `partner-b${brandId}-timeout.png`).replace(/\\/g, '/');
+    await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
+    const bodyText2 = await page.locator('body').innerText().catch(() => '');
+    return { ok: false, note: `partner 重登等待超时；页面片段: ${bodyText2.replace(/\s+/g, ' ').slice(0, 120)}（截图 state/）` };
   } finally {
     await browser.close().catch(() => {});
   }

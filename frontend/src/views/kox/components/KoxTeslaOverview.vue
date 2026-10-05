@@ -1,6 +1,16 @@
 <template>
   <PageWrapper title="运营总览" subtitle="特斯拉 KOS 运营数据">
     <div class="tesla-ov">
+      <a-alert
+        v-if="sparkDead"
+        type="error"
+        show-icon
+        style="margin-bottom: 12px"
+      >
+        <template #message>
+          特斯拉数据会话已失效，数据暂停更新（历史完整，重新登录后会自动补回断档）。请进行一次引导登录后刷新本页。
+        </template>
+      </a-alert>
       <a-card size="small" class="filter-card">
         <div class="filter-row">
           <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
@@ -267,10 +277,24 @@ import {
   getKoxNotes,
   getKoxOverview,
 } from '../../../api/kox';
+import { getSparkStatus } from '../../../api/spark';
 import { useAuthStore } from '../../../stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
+
+// 会话失效红条：星火/partner 登录态失效时全页置顶提示（数据停更，重新登录后自动补回）
+const sparkDead = ref(false);
+const sparkErr = ref('');
+async function loadSparkStatus() {
+  try {
+    const res = await getSparkStatus({ brandId: auth.currentBrandId ?? 6 });
+    sparkDead.value = res?.data?.cookie_valid === false;
+    sparkErr.value = res?.data?.error || '';
+  } catch {
+    /* 状态查询失败不提示 */
+  }
+}
 
 const CROWNS = ['👑', '🥈', '🥉'];
 const RANK_METRICS = [
@@ -534,6 +558,7 @@ function onResize() {
 }
 
 onMounted(() => {
+  loadSparkStatus();
   loadFacets();
   reload();
   window.addEventListener('resize', onResize);
