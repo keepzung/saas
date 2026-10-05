@@ -77,7 +77,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     } catch (e) {
       console.log('[login] 自动填充失败（可能滑块）:', String(e).slice(0, 80));
     }
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 200; i++) {
       await sleep(3000);
       if (!/login|signin/i.test(page.url())) {
         fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });

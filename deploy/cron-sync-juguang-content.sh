@@ -15,5 +15,9 @@ if [ "$RC" -ne 0 ]; then
   RC=$?
 fi
 echo "===== $(date '+%F %T') content sync done rc=$RC =====" >> "$LOG"
+# 封面本地化：把近 7 天笔记的外链封面下载到本地（防小红书 CDN 失效/防盗链）
+echo "===== $(date '+%F %T') cover mirror start =====" >> "$LOG"
+flock -xn /tmp/covers-mirror.lock -c "cd /opt/saas/tools/spark && /usr/local/bin/node mirror-covers.cjs --since \$(date -d '7 days ago' '+%F') >> $LOG 2>&1"
+echo "===== $(date '+%F %T') cover mirror done =====" >> "$LOG"
 tail -n 2000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
 exit 0
