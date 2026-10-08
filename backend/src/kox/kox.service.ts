@@ -452,76 +452,7 @@ export class KoxService {
       gNotesP,
     ]);
 
-    // 特斯拉周度快照（客户周度表权威口径）：查询窗口与快照周完全重合时，summary/线索漏斗直接用快照
-    const padDay2 = (n: number) => String(n).padStart(2, '0');
-    const dayKey2 = (d: Date) => `${d.getFullYear()}-${padDay2(d.getMonth() + 1)}-${padDay2(d.getDate())}`;
-    let weeklySnap: {
-      weekStart: Date;
-      weekEnd: Date;
-      item_cnt: number;
-      promoted_cnt: number;
-      spend: number;
-      exposure_sum: number;
-      view_sum: number;
-      interaction_sum: number;
-      inquiries: number;
-      openings: number;
-      total_leads: number;
-      pm_leads: number;
-      service_card_leads: number;
-      wecom_copy_leads: number;
-      account_cnt: number;
-    } | null = null;
-    if (brandId === 6) {
-      const snaps = await this.prisma.koxWeeklySnapshot.findMany({
-        where: {
-          brandId: 6,
-          weekStart: { gte: new Date(`${dayKey2(start)}T00:00:00.000+08:00`) },
-          weekEnd: { lte: new Date(`${dayKey2(end)}T23:59:59.999+08:00`) },
-        },
-      });
-      const hit = snaps.find(
-        (s) => dayKey2(s.weekStart) === dayKey2(start) && dayKey2(s.weekEnd) === dayKey2(end),
-      );
-      if (hit) {
-        let rows = snaps.filter((s) => dayKey2(s.weekStart) === dayKey2(hit.weekStart));
-        // 大区/标签筛选时按账号映射过滤（周快照带 regionName，标签经 KosAccount 映射）
-        if (accountTag || regionName) {
-          const accs = await this.prisma.kosAccount.findMany({
-            where: accountWhere,
-            select: { id: true, nickname: true },
-          });
-          const idSet = new Set(accs.map((a) => a.id));
-          const nickSet = new Set(accs.map((a) => a.nickname));
-          rows = rows.filter(
-            (r) =>
-              (r.accountId != null && idSet.has(r.accountId)) ||
-              (!!r.accountName && nickSet.has(r.accountName)),
-          );
-        }
-        const nSum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
-        const dSum = (f: (r: (typeof rows)[number]) => number) =>
-          Math.round(rows.reduce((acc, r) => acc + f(r), 0) * 100) / 100;
-        weeklySnap = {
-          weekStart: hit.weekStart,
-          weekEnd: hit.weekEnd,
-          item_cnt: nSum((r) => r.publishNotes),
-          promoted_cnt: nSum((r) => r.promotedNotes),
-          spend: dSum((r) => Number(r.spend)),
-          exposure_sum: nSum((r) => r.exposure),
-          view_sum: nSum((r) => r.clicks),
-          interaction_sum: nSum((r) => r.interaction),
-          inquiries: nSum((r) => r.inquiries),
-          openings: nSum((r) => r.openings),
-          total_leads: nSum((r) => r.totalLeads),
-          pm_leads: nSum((r) => r.pmLeads),
-          service_card_leads: nSum((r) => r.serviceCardLeads),
-          wecom_copy_leads: nSum((r) => r.wecomCopyLeads),
-          account_cnt: rows.length,
-        };
-      }
-    }
-
+    // 客户周度表快照（KoxWeeklySnapshot）已停用：brand6 线索漏斗不再使用该数据（2026-10-08 客户确认）
     // 特斯拉：内容指标唯一口径 = 专业号员工矩阵窗口快照（发布/曝光/阅读/互动，支持大区/标签过滤）
     // 无匹配分区（未同步的历史/未来窗口）→ 内容指标 0，不再回退 KoxNote（星火 partner 通道停更已弃用）
     let proContent: {
@@ -866,53 +797,39 @@ export class KoxService {
             source: 'pro_clue',
           };
         }
-        if (weeklySnap) {
-          const { inquiries, openings } = weeklySnap;
-          return {
-            pm_inquiries: inquiries,
-            pm_openings: openings,
-            pm_leads: weeklySnap.pm_leads,
-            total_leads: weeklySnap.total_leads,
-            service_card_leads: weeklySnap.service_card_leads,
-            wecom_copy_leads: weeklySnap.wecom_copy_leads,
-            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
-            lead_rate: inquiries ? r2((weeklySnap.pm_leads / inquiries) * 100) : 0,
-            campaign: { enter: 0, open: 0, leads: 0 },
-            organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: `周度快照（客户口径）：总留资=私信留资+服务卡留资+个微复制留资${accountTag || regionName ? '；已按大区/标签筛选' : ''}`,
-            source: 'weekly_snapshot',
-          };
-        }
-        // G2：线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信，按所选区间真实聚合（随区间变化）
-        let funnelCampaign = { enter: 0, open: 0, leads: 0 };
-        const campNickSet = filteredAccounts ? new Set(filteredAccounts.map((a) => a.nickname)) : null;
-        for (const r of campaignRows) {
-          if (campNickSet && !(r.brandUserName && campNickSet.has(r.brandUserName))) continue;
-          funnelCampaign.enter += r.messageConsult;
-          funnelCampaign.open += r.msgChatUserCnt;
-          funnelCampaign.leads += r.msgLeadsNum;
-        }
-        let organic = { inquiries: 0, openings: 0, leads: 0 };
-        for (const n of noteRows) {
-          if (n.isRtbAdver === true) continue;
-          organic.inquiries += n.pmInquiries;
-          organic.openings += n.pmOpenings;
-          organic.leads += n.pmLeads;
-        }
-        if (campaignRows.length > 0 || organic.inquiries > 0 || organic.leads > 0) {
-          const inquiries = funnelCampaign.enter + organic.inquiries;
-          const openings = funnelCampaign.open + organic.openings;
-          const leads = funnelCampaign.leads + organic.leads;
-          return {
-            pm_inquiries: inquiries,
-            pm_openings: openings,
-            pm_leads: leads,
-            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
-            lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
-            campaign: funnelCampaign,
-            organic,
-            scope_note: `线索=星火聚光投放逐日 T+1 + 自然笔记私信，随区间与大区/标签筛选变化`,
-          };
+        // 客户周度表快照分支已移除（KoxWeeklySnapshot 停用，2026-10-08 客户确认）
+        if (brandId !== 6) {
+          // G2（非专业号口径，仅非 brand6 品牌）：线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信
+          let funnelCampaign = { enter: 0, open: 0, leads: 0 };
+          const campNickSet = filteredAccounts ? new Set(filteredAccounts.map((a) => a.nickname)) : null;
+          for (const r of campaignRows) {
+            if (campNickSet && !(r.brandUserName && campNickSet.has(r.brandUserName))) continue;
+            funnelCampaign.enter += r.messageConsult;
+            funnelCampaign.open += r.msgChatUserCnt;
+            funnelCampaign.leads += r.msgLeadsNum;
+          }
+          let organic = { inquiries: 0, openings: 0, leads: 0 };
+          for (const n of noteRows) {
+            if (n.isRtbAdver === true) continue;
+            organic.inquiries += n.pmInquiries;
+            organic.openings += n.pmOpenings;
+            organic.leads += n.pmLeads;
+          }
+          if (campaignRows.length > 0 || organic.inquiries > 0 || organic.leads > 0) {
+            const inquiries = funnelCampaign.enter + organic.inquiries;
+            const openings = funnelCampaign.open + organic.openings;
+            const leads = funnelCampaign.leads + organic.leads;
+            return {
+              pm_inquiries: inquiries,
+              pm_openings: openings,
+              pm_leads: leads,
+              open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+              lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
+              campaign: funnelCampaign,
+              organic,
+              scope_note: `线索=星火聚光投放逐日 T+1 + 自然笔记私信，随区间与大区/标签筛选变化`,
+            };
+          }
         }
         // 兜底：无逐日投放数据时用专业号三档快照（不随自定义区间变化）
         if (proLeads) {
@@ -3224,37 +3141,32 @@ export class KoxService {
         });
       }
     }
-    // 进线/开口/留资：专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
-    const clueRowsPro = await this.prisma.proClueToolStatDaily.findMany({
-      where: { brandId: 6, day: { gte: start, lte: end }, belongUserId: { not: '' } },
-      select: {
-        belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
-        serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
-        landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
-        otherLeadsUserCnt: true,
-      },
-    });
+    // 进线/开口/留资：专业号「线索经营→客户视图」客户行为三分类（进线/开口/留资下拉口径）
+    // 按客户去重（COUNT DISTINCT customerUserId）、剔除官号「特斯拉」、归属账号=belongUserId
+    const clueRowsPro = await this.prisma.$queryRaw<{
+      belong: string;
+      enter: number;
+      open: number;
+      leads: number;
+    }[]>`
+      SELECT "belongUserId" AS belong,
+        COUNT(DISTINCT "customerUserId") FILTER (WHERE entered)::int AS enter,
+        COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
+        COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
+      FROM "ProClueUserDay"
+      WHERE "brandId" = ${brandId} AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
+        AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
+      GROUP BY "belongUserId"`;
     const authorToIdPro = new Map(
       accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
     );
-    const toolAggPro = new Map<string, { enter: number; open: number; leads: number }>();
     for (const r of clueRowsPro) {
-      const cur = toolAggPro.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
-      cur.enter += r.consultUserCnt;
-      cur.open += r.msgChatUserCnt;
-      cur.leads +=
-        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
-      toolAggPro.set(r.belongUserId, cur);
-    }
-    for (const [belong, v] of toolAggPro) {
-      const accId = authorToIdPro.get(belong);
+      const accId = authorToIdPro.get(r.belong);
       if (accId == null) continue;
       bump(accId, (a) => {
-        a.pm_inquiries = v.enter;
-        a.pm_openings = v.open;
-        a.pm_leads = v.leads;
+        a.pm_inquiries = Number(r.enter);
+        a.pm_openings = Number(r.open);
+        a.pm_leads = Number(r.leads);
       });
     }
 
