@@ -2553,6 +2553,52 @@ export class KoxService {
         });
       }
       if (clueHit) metric_source += '+pro_clue_account';
+
+      // 点赞/收藏/评论/分享/CES：聚光「商业内容管理」按笔记累计口径（KoxNote 行由
+      // tools/spark/sync-juguang-content.cjs 经 partner→聚光 链路覆盖式维护，不随日期窗口变化）
+      const cumNotes = await this.prisma.koxNote.findMany({
+        where: { brandId: 6 },
+        select: {
+          accountId: true,
+          authorName: true,
+          likes: true,
+          collects: true,
+          comments: true,
+          shares: true,
+          followCount: true,
+        },
+      });
+      const cumAgg = new Map<
+        number,
+        { likes: number; collects: number; comments: number; shares: number; ces: number }
+      >();
+      for (const n of cumNotes) {
+        const accId =
+          n.accountId != null && idSet.has(n.accountId)
+            ? n.accountId
+            : n.authorName
+              ? nameToId.get(n.authorName) ?? null
+              : null;
+        if (accId == null) continue;
+        const cur = cumAgg.get(accId) ?? { likes: 0, collects: 0, comments: 0, shares: 0, ces: 0 };
+        cur.likes += n.likes;
+        cur.collects += n.collects;
+        cur.comments += n.comments;
+        cur.shares += n.shares;
+        cur.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
+        cumAgg.set(accId, cur);
+      }
+      for (const [accId, v] of cumAgg) {
+        if (!idSet.has(accId)) continue;
+        bump(accId, (a) => {
+          a.likes = v.likes;
+          a.collects = v.collects;
+          a.comments = v.comments;
+          a.shares = v.shares;
+          a.ces = v.ces;
+        });
+      }
+      if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {
@@ -2674,7 +2720,7 @@ export class KoxService {
         : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
             : metric_source.startsWith('pro_staff')
-              ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=线索经营按归属账号去重；赞/藏/评/CES 暂无平台口径为 0；分层=周度留资折算`
+              ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=线索经营按归属账号去重；赞/藏/评/CES=聚光「商业内容管理」按笔记累计口径；分层=周度留资折算`
             : '留资=笔记私信留资（含投流）；分层=S级头部按月度留资>200（任意周期归一月度）；其余头部/高潜/腰部/尾部按周度留资折算',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };

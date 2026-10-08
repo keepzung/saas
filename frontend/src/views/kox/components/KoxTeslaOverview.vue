@@ -302,7 +302,8 @@ const RANK_METRICS = [
   { key: 'exposure_sum', label: '曝光数', field: 'exposure_sum' },
   { key: 'view_sum', label: '阅读数', field: 'view_sum' },
   { key: 'interaction_sum', label: '互动数', field: 'interaction_sum' },
-  // CES 已下线：专业号矩阵口径无赞藏评拆分（KoxNote 存量弃用）
+  // CES=聚光「商业内容管理」按笔记累计口径（赞1+藏1+评4+享4+关注8）
+  { key: 'ces', label: 'CES', field: 'ces' },
   { key: 'item_cnt', label: '内容发布数', field: 'item_cnt' },
 ];
 
