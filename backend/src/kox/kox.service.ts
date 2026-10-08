@@ -710,22 +710,29 @@ export class KoxService {
       });
       const clueUids = clueAccs.map((a) => a.authorId).filter(Boolean);
       if (clueUids.length) {
-        const r = await this.prisma.$queryRaw<{ enter: number; open: number; leads: number }[]>`
-          SELECT COALESCE(SUM(t.enter), 0)::int AS enter,
-                 COALESCE(SUM(t.open), 0)::int AS open,
-                 COALESCE(SUM(t.leads), 0)::int AS leads
-          FROM (
-            SELECT "belongUserId",
-              COUNT(DISTINCT "customerUserId") FILTER (WHERE entered) AS enter,
-              COUNT(DISTINCT "customerUserId") FILTER (WHERE opened) AS open,
-              COUNT(DISTINCT "customerUserId") FILTER (WHERE leads) AS leads
-            FROM "ProClueUserDay"
-            WHERE "brandId" = 6 AND ("day" AT TIME ZONE 'UTC') >= ${start} AND ("day" AT TIME ZONE 'UTC') <= ${end}
-              AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
-              AND "belongUserId" IN (${Prisma.join(clueUids)})
-            GROUP BY "belongUserId"
-          ) t`;
-        proClueFunnel = r[0] ?? null;
+        // 进线/开口/留资 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
+        const s = await this.prisma.proClueToolStatDaily.aggregate({
+          where: {
+            brandId: 6,
+            day: { gte: start, lte: end },
+            belongUserId: { in: clueUids as string[] },
+          },
+          _sum: {
+            consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+            serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+            landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+            otherLeadsUserCnt: true,
+          },
+        });
+        const g = (k: keyof typeof s._sum) => Number(s._sum[k] ?? 0);
+        proClueFunnel = {
+          enter: g('consultUserCnt'),
+          open: g('msgChatUserCnt'),
+          leads:
+            g('msgLeadsUserCnt') + g('serviceCardLeadsUserCnt') + g('qwAddLeadsUserCnt') +
+            g('bookCompLeadsUserCnt') + g('landingPageLeadsUserCnt') + g('wechatLeadsUserCnt') +
+            g('appCardLeadsUserCnt') + g('otherLeadsUserCnt'),
+        };
       }
     }
 
@@ -855,7 +862,7 @@ export class KoxService {
             lead_rate: enter ? r2((leads / enter) * 100) : 0,
             campaign: { enter: 0, open: 0, leads: 0 },
             organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: '线索=小红书专业号·线索经营（KOS 口径，剔除官号「特斯拉」；按账号去重加总，与 KOS 数据进度一致；行为时间落窗口内）',
+            scope_note: '线索=小红书专业号·客户管理（旧版）获客工具统计（KOS 口径，剔除官号「特斯拉」；按日×归属账号求和，与账号表现分析一致；行为时间落窗口内）',
             source: 'pro_clue',
           };
         }
@@ -2159,6 +2166,7 @@ export class KoxService {
         accountTag: true,
         regionName: true,
         storeName: true,
+        authorId: true,
       },
     });
     const notes = brandId === 6
@@ -2257,31 +2265,37 @@ export class KoxService {
           }
         }
       }
-      // 私信进线/开口/留资 = 线索经营按归属账号（KOS-only、按客户去重；与 KOS 数据进度一致）
-      const clueR = await this.prisma.$queryRaw<{
-        acc: bigint;
-        enter: number;
-        open: number;
-        leads: number;
-      }[]>`
-        SELECT a.id AS acc,
-          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.entered)::int AS enter,
-          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.opened)::int AS open,
-          COUNT(DISTINCT c."customerUserId") FILTER (WHERE c.leads)::int AS leads
-        FROM "ProClueUserDay" c
-        JOIN "KosAccount" a ON a."authorId" = c."belongUserId" AND a."brandId" = 6 AND a.status = 'enabled'
-        WHERE c."brandId" = 6 AND (c."day" AT TIME ZONE 'UTC') >= ${start} AND (c."day" AT TIME ZONE 'UTC') <= ${end}
-          AND NOT c."isOfficial" AND c."belongUserId" IS NOT NULL
-        GROUP BY a.id`;
-      for (const r of clueR) {
-        const acc = r.acc != null ? idToAcc.get(Number(r.acc)) : undefined;
+      // 私信进线/开口/留资 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
+      const toolRows = await this.prisma.proClueToolStatDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end }, belongUserId: { not: '' } },
+        select: {
+          belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+          serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+          landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+          otherLeadsUserCnt: true,
+        },
+      });
+      const accByAuthor = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId, a]));
+      const toolAgg = new Map<string, { enter: number; open: number; leads: number }>();
+      for (const r of toolRows) {
+        const cur = toolAgg.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+        cur.enter += r.consultUserCnt;
+        cur.open += r.msgChatUserCnt;
+        cur.leads +=
+          r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+          r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+          r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+        toolAgg.set(r.belongUserId, cur);
+      }
+      for (const [belong, v] of toolAgg) {
+        const acc = accByAuthor.get(belong);
         if (!acc) continue;
         const g = bucketOf(groups, regionOf(acc));
         const tg = bucketOf(tagGroups, tagOf(acc));
         for (const b of [g, tg]) {
-          b.pm_inquiries += Number(r.enter);
-          b.pm_openings += Number(r.open);
-          b.pm_leads += Number(r.leads);
+          b.pm_inquiries += v.enter;
+          b.pm_openings += v.open;
+          b.pm_leads += v.leads;
         }
       }
     } else {
@@ -2344,7 +2358,7 @@ export class KoxService {
       days,
       metric_note:
         brandId === 6
-          ? '内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；私信进线/开口/留资=线索经营按归属账号去重；CES/自然留资暂无口径为 0'
+          ? '内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；私信进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；CES/自然留资暂无口径为 0'
           : '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
@@ -2522,37 +2536,44 @@ export class KoxService {
       });
     }
 
-    // 私信进线/开口/留资：brand6 = 专业号「线索经营」按归属账号聚合（KOS-only、按客户去重）；其他品牌走乐允投放报表
+    // 私信进线/开口/留资：brand6 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（客户指定口径，2026-10-08 起）
+    // 留资 = 私信留资+服务卡+企微+预约组件+落地页+个微复制+交易卡+其他；官方账号自然排除（仅基线账号有行）；其他品牌走乐允投放报表
     if (brandId === 6) {
-      const clueRows = await this.prisma.$queryRaw<{
-        belong: string;
-        enter: number;
-        open: number;
-        leads: number;
-      }[]>`
-        SELECT "belongUserId" AS belong,
-          COUNT(DISTINCT "customerUserId") FILTER (WHERE entered)::int AS enter,
-          COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
-          COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
-        FROM "ProClueUserDay"
-        WHERE "brandId" = 6 AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
-          AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
-        GROUP BY "belongUserId"`;
-      const authorToId = new Map(
-        accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
-      );
-      let clueHit = 0;
-      for (const r of clueRows) {
-        const accId = authorToId.get(r.belong);
-        if (accId == null || !idSet.has(accId)) continue;
-        clueHit += 1;
-        bump(accId, (a) => {
-          a.pm_inquiries = Number(r.enter);
-          a.pm_openings = Number(r.open);
-          a.pm_leads = Number(r.leads);
+        const toolRows = await this.prisma.proClueToolStatDaily.findMany({
+          where: { brandId: 6, day: { gte: start, lte: end }, belongUserId: { not: '' } },
+          select: {
+            belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+            serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+            landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+            otherLeadsUserCnt: true,
+          },
         });
-      }
-      if (clueHit) metric_source += '+pro_clue_account';
+        const authorToId = new Map(
+          accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
+        );
+        const toolAgg = new Map<string, { enter: number; open: number; leads: number }>();
+        for (const r of toolRows) {
+          const cur = toolAgg.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+          cur.enter += r.consultUserCnt;
+          cur.open += r.msgChatUserCnt;
+          cur.leads +=
+            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+            r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+            r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+          toolAgg.set(r.belongUserId, cur);
+        }
+        let clueHit = 0;
+        for (const [belong, v] of toolAgg) {
+          const accId = authorToId.get(belong);
+          if (accId == null || !idSet.has(accId)) continue;
+          clueHit += 1;
+          bump(accId, (a) => {
+            a.pm_inquiries = v.enter;
+            a.pm_openings = v.open;
+            a.pm_leads = v.leads;
+          });
+        }
+        if (clueHit) metric_source += '+pro_clue_tool_stat';
 
       // 点赞/收藏/评论/分享/CES：聚光「商业内容管理」按笔记累计口径（KoxNote 行由
       // tools/spark/sync-juguang-content.cjs 经 partner→聚光 链路覆盖式维护，不随日期窗口变化）
@@ -2720,7 +2741,7 @@ export class KoxService {
         : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
             : metric_source.startsWith('pro_staff')
-              ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=线索经营按归属账号去重；赞/藏/评/CES=聚光「商业内容管理」按笔记累计口径；分层=周度留资折算`
+              ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；赞/藏/评/CES=聚光「商业内容管理」按笔记累计口径；分层=周度留资折算`
             : '留资=笔记私信留资（含投流）；分层=S级头部按月度留资>200（任意周期归一月度）；其余头部/高潜/腰部/尾部按周度留资折算',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
@@ -3203,31 +3224,37 @@ export class KoxService {
         });
       }
     }
-    // 进线/开口/留资：专业号「线索经营」按归属账号聚合（KOS-only、按客户去重；替代乐允投放报表逐日）
-    const clueRowsPro = await this.prisma.$queryRaw<{
-      belong: string;
-      enter: number;
-      open: number;
-      leads: number;
-    }[]>`
-      SELECT "belongUserId" AS belong,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE entered)::int AS enter,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
-      FROM "ProClueUserDay"
-      WHERE "brandId" = ${brandId} AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
-        AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
-      GROUP BY "belongUserId"`;
+    // 进线/开口/留资：专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
+    const clueRowsPro = await this.prisma.proClueToolStatDaily.findMany({
+      where: { brandId: 6, day: { gte: start, lte: end }, belongUserId: { not: '' } },
+      select: {
+        belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+        serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+        landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+        otherLeadsUserCnt: true,
+      },
+    });
     const authorToIdPro = new Map(
       accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
     );
+    const toolAggPro = new Map<string, { enter: number; open: number; leads: number }>();
     for (const r of clueRowsPro) {
-      const accId = authorToIdPro.get(r.belong);
+      const cur = toolAggPro.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+      cur.enter += r.consultUserCnt;
+      cur.open += r.msgChatUserCnt;
+      cur.leads +=
+        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+      toolAggPro.set(r.belongUserId, cur);
+    }
+    for (const [belong, v] of toolAggPro) {
+      const accId = authorToIdPro.get(belong);
       if (accId == null) continue;
       bump(accId, (a) => {
-        a.pm_inquiries = Number(r.enter);
-        a.pm_openings = Number(r.open);
-        a.pm_leads = Number(r.leads);
+        a.pm_inquiries = v.enter;
+        a.pm_openings = v.open;
+        a.pm_leads = v.leads;
       });
     }
 

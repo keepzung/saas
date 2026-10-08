@@ -1285,6 +1285,30 @@ model ProClueDaily {
   @@index([brandId, day])
 }
 
+// 专业号「线索经营→客户管理（旧版）获客工具统计」按日×归属账号（客户要求的新留资口径）
+// belongUserId='' 为全局行（含官号，供与平台页面对账）；账号行按 KosAccount.authorId 匹配
+// 数据源: POST /api/edith/ads/pro/clue_manager/statistical/list（sync-pro-clues.cjs 维护）
+model ProClueToolStatDaily {
+  id                      Int      @id @default(autoincrement())
+  brandId                 Int      @default(6)
+  day                     DateTime
+  belongUserId            String   @default("")
+  consultUserCnt          Int      @default(0)
+  msgChatUserCnt          Int      @default(0)
+  msgLeadsUserCnt         Int      @default(0)
+  serviceCardLeadsUserCnt Int      @default(0)
+  qwAddLeadsUserCnt       Int      @default(0)
+  bookCompLeadsUserCnt    Int      @default(0)
+  landingPageLeadsUserCnt Int      @default(0)
+  wechatLeadsUserCnt      Int      @default(0)
+  appCardLeadsUserCnt     Int      @default(0)
+  otherLeadsUserCnt       Int      @default(0)
+  fetchedAt               DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, day, belongUserId])
+  @@index([brandId, day])
+}
+
 // 专业号「线索经营」客户×日明细（三行为标记；任意窗口按客户去重聚合的数据源）
 model ProClueUserDay {
   id             Int      @id @default(autoincrement())

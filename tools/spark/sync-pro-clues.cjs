@@ -153,6 +153,36 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
   }
   console.log('[login] OK');
 
+  // ── 获客工具统计（客户管理旧版，客户指定留资口径 2026-10-08）──
+  // 基线账号（enabled 且有 authorId）逐账号拉取；全局行 belongUserId='' 含官号供对账
+  const toolAccounts = await prisma.kosAccount.findMany({
+    where: { brandId: BRAND_ID, status: 'enabled' },
+    select: { authorId: true },
+  });
+  const TOOL_IDS = [...new Set(toolAccounts.map((a) => a.authorId).filter(Boolean))];
+  console.log(`[tool-stat] 基线账号 ${TOOL_IDS.length} 个`);
+  const fetchToolStatDay = async (day, ids) => {
+    return page.evaluate(async ({ day, ids }) => {
+      const post = async (belongUserId) => {
+        const r = await fetch('https://pro.xiaohongshu.com/api/edith/ads/pro/clue_manager/statistical/list', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ startTime: day + ' 00:00:00', endTime: day + ' 23:59:59', belongUserId, pageNum: 1, pageSize: 10 }),
+        });
+        return r.json().catch(() => null);
+      };
+      const out = [];
+      for (const id of ids) {
+        const j = await post(id);
+        if (!j || j.code !== 0) return { err: `statistical ${id || 'ALL'} 失败: ${String(j?.msg ?? '').slice(0, 60)}` };
+        const dKey = day.replace(/-/g, '');
+        const row = (j?.data?.userStatisticalDatas ?? []).find((x) => String(x.dtm) === dKey) ?? null;
+        out.push({ belongUserId: id, row });
+        await new Promise((r2) => setTimeout(r2, 120));
+      }
+      return { rows: out };
+    }, { day, ids });
+  };
+
   // ── 区间 ──
   const end = endIdx > -1 ? argv[endIdx + 1] : yesterdayCN();
   let start;
@@ -163,7 +193,11 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
   }
   const days = [];
   for (let d = start, g = 0; d <= end && g++ < 1500; d = dayAdd(d, 1)) days.push(d);
-  console.log(`[1] 同步区间: ${start} ~ ${end}（${days.length} 天，${FULL ? '全量' : '增量'}）${DRY ? '（dry-run）' : ''}`);
+  // 获客工具统计回填起点（TOOL_START 可独立于线索增量区间，避免长区间全量时逐账号拉取过久）
+  const toolStart = process.env.TOOL_START && /^\d{4}-\d{2}-\d{2}$/.test(process.env.TOOL_START)
+    ? (process.env.TOOL_START > start ? process.env.TOOL_START : start)
+    : start;
+  console.log(`[1] 同步区间: ${start} ~ ${end}（${days.length} 天，${FULL ? '全量' : '增量'}）${DRY ? '（dry-run）' : ''}；获客工具统计自 ${toolStart}`);
 
   // ── 页面上下文 fetch ──
   const fetchDay = async (day) => {
@@ -265,6 +299,30 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
       }
     }
     done++;
+    // ── 获客工具统计落库（全局 + 逐基线账号）──
+    if (day >= toolStart && !DRY) {
+      const t = await fetchToolStatDay(day, ['', ...TOOL_IDS]).catch((e) => ({ err: String(e).slice(0, 120) }));
+      if (t.err) { console.log(`[${day}] tool-stat 失败: ${t.err}`); }
+      else {
+        const F = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+        for (const r of t.rows) {
+          const d = r.row ?? {};
+          const data = {
+            consultUserCnt: F(d.consultUserCnt), msgChatUserCnt: F(d.msgChatUserCnt), msgLeadsUserCnt: F(d.msgLeadsUserCnt),
+            serviceCardLeadsUserCnt: F(d.serviceCardLeadsUserCnt), qwAddLeadsUserCnt: F(d.qwAddLeadsUserCnt),
+            bookCompLeadsUserCnt: F(d.bookCompLeadsUserCnt), landingPageLeadsUserCnt: F(d.landingPageLeadsUserCnt),
+            wechatLeadsUserCnt: F(d.wechatLeadsUserCnt), appCardLeadsUserCnt: F(d.appCardLeadsUserCnt),
+            otherLeadsUserCnt: F(d.otherLeadsUserCnt),
+          };
+          await prisma.proClueToolStatDaily.upsert({
+            where: { brandId_day_belongUserId: { brandId: BRAND_ID, day: dayDate, belongUserId: r.belongUserId } },
+            update: data,
+            create: { brandId: BRAND_ID, day: dayDate, belongUserId: r.belongUserId, ...data },
+          });
+        }
+        console.log(`[${day}] tool-stat 落库 ${t.rows.length} 行（含全局行）`);
+      }
+    }
     if (done % 10 === 0 || done === days.length) {
       console.log(`[${day}] enter ${totals.enterKos}/${totals.enterAll} open ${totals.openKos}/${totals.openAll} leads ${totals.leadsKos}/${totals.leadsAll} 用户日 ${users.length}（${done}/${days.length}）`);
     }
