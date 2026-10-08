@@ -131,9 +131,18 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
       await sleep(8000);
     }
     if (/login|passport/i.test(page.url())) {
-      console.error('pro 登录失败（HEADLESS=0 人工处理）');
-      await browser.close();
-      process.exit(1);
+      // HEADLESS=0 时等待人工完成登录（扫码/滑块），最多 5 分钟
+      console.log('[login] 等待人工完成登录（最多 5 分钟），请在浏览器窗口中操作 ...');
+      let manualOk = false;
+      for (let i = 0; i < 60; i++) {
+        await sleep(5000);
+        if (!/login|passport/i.test(page.url())) { manualOk = true; break; }
+      }
+      if (!manualOk) {
+        console.error('pro 登录失败（等待人工登录超时）');
+        await browser.close();
+        process.exit(1);
+      }
     }
   }
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });

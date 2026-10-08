@@ -186,13 +186,9 @@ const columns = computed(() => {
     ncol('内容发布数', 'item_cnt'),
     ncol('内容曝光数', 'exposure_sum', 110),
     ncol('内容阅读数', 'view_sum', 110),
-    // 特斯拉：赞/藏/评为账号累计口径（乐允存量，聚光/专业号无日拆分），不随日期窗口变化
+    // 特斯拉：赞/藏/评无专业号平台口径（KoxNote 存量已弃用），不展示
     ...(isTesla.value
-      ? [
-          ncol('内容点赞数（累计）', 'likes_sum', 130),
-          ncol('内容收藏数（累计）', 'collects_sum', 130),
-          ncol('内容评论数（累计）', 'comments_sum', 130),
-        ]
+      ? []
       : [
           ncol('内容点赞数', 'likes_sum', 110),
           ncol('内容收藏数', 'collects_sum', 110),

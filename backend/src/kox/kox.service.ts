@@ -286,6 +286,42 @@ export class KoxService {
         ],
       };
     }
+    const noteRowsP: Promise<{
+      authorName: string | null;
+      views: number;
+      exposure: number;
+      likes: number;
+      comments: number;
+      shares: number;
+      collects: number;
+      followCount: number;
+      pmInquiries: number;
+      pmOpenings: number;
+      pmLeads: number;
+      isRtbAdver: boolean | null;
+      publishTime: Date | null;
+    }[]> =
+      // 特斯拉不再使用 KoxNote（星火 partner 通道停更已弃用），内容指标走专业号员工矩阵
+      brandId === 6
+        ? Promise.resolve([])
+        : this.prisma.koxNote.findMany({
+            where: noteWhere,
+            select: {
+              authorName: true,
+              views: true,
+              exposure: true,
+              likes: true,
+              comments: true,
+              shares: true,
+              collects: true,
+              followCount: true,
+              pmInquiries: true,
+              pmOpenings: true,
+              pmLeads: true,
+              isRtbAdver: true,
+              publishTime: true,
+            },
+          });
     const [rows, accountAgg, campaignRows, noteRows] = await Promise.all([
       this.prisma.koxDailyStat.findMany({ where, orderBy: { statDate: 'asc' } }),
       this.prisma.kosAccount.groupBy({
@@ -297,24 +333,7 @@ export class KoxService {
         where: campaignWhere,
         orderBy: { statDate: 'asc' },
       }),
-      this.prisma.koxNote.findMany({
-        where: noteWhere,
-        select: {
-          authorName: true,
-          views: true,
-          exposure: true,
-          likes: true,
-          comments: true,
-          shares: true,
-          collects: true,
-          followCount: true,
-          pmInquiries: true,
-          pmOpenings: true,
-          pmLeads: true,
-          isRtbAdver: true,
-          publishTime: true,
-        },
-      }),
+      noteRowsP,
     ]);
 
     const sum = (f: (r: (typeof rows)[number]) => number) =>
@@ -339,7 +358,7 @@ export class KoxService {
 
     const r2 = (v: number) => Math.round(v * 100) / 100;
 
-    // 发布区块：星火笔记明细（KoxNote）优先，无数据时回退 KoxDailyStat
+    // 发布区块：其他品牌星火笔记明细优先，无数据时回退 KoxDailyStat；特斯拉在矩阵快照就绪后覆盖
     const noteAuthors = new Set(
       noteRows.map((n) => n.authorName).filter((a): a is string => !!a),
     );
@@ -352,7 +371,7 @@ export class KoxService {
     );
     const hasNotes = noteRows.length > 0;
 
-    const publish = hasNotes
+    let publish = hasNotes
       ? {
           author_num: noteAuthors.size,
           item_cnt: noteRows.length,
@@ -398,25 +417,39 @@ export class KoxService {
           : {}),
       status: 'enabled',
     };
+    const gNotesP: Promise<{
+      accountId: number | null;
+      authorName: string | null;
+      exposure: number;
+      views: number;
+      likes: number;
+      comments: number;
+      shares: number;
+      collects: number;
+      pmLeads: number;
+    }[]> =
+      brandId === 6
+        ? Promise.resolve([])
+        : this.prisma.koxNote.findMany({
+            where: noteWhere,
+            select: {
+              accountId: true,
+              authorName: true,
+              exposure: true,
+              views: true,
+              likes: true,
+              comments: true,
+              shares: true,
+              collects: true,
+              pmLeads: true,
+            },
+          });
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
         where: globalAccountWhere,
         select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true, accountTag: true },
       }),
-      this.prisma.koxNote.findMany({
-        where: noteWhere,
-        select: {
-          accountId: true,
-          authorName: true,
-          exposure: true,
-          views: true,
-          likes: true,
-          comments: true,
-          shares: true,
-          collects: true,
-          pmLeads: true,
-        },
-      }),
+      gNotesP,
     ]);
 
     // 特斯拉周度快照（客户周度表权威口径）：查询窗口与快照周完全重合时，summary/线索漏斗直接用快照
@@ -489,39 +522,25 @@ export class KoxService {
       }
     }
 
-    // 特斯拉：快捷 7/30 天窗口内容指标改用专业号真实窗口数据（员工矩阵汇总，支持大区/标签过滤）
-    // 守卫：快照窗口必须与查询窗口大致重合（快捷档），历史自定义区间不套用
+    // 特斯拉：内容指标唯一口径 = 专业号员工矩阵窗口快照（发布/曝光/阅读/互动，支持大区/标签过滤）
+    // 无匹配分区（未同步的历史/未来窗口）→ 内容指标 0，不再回退 KoxNote（星火 partner 通道停更已弃用）
     let proContent: {
       item_cnt: number;
       exposure_sum: number;
       view_sum: number;
       interaction_sum: number;
+      author_num: number;
       date_type: number;
       stat_date: Date;
       region_content: { region: string; item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }[];
     } | null = null;
     if (brandId === 6 && windowDays <= 31) {
-      const proOv = await this.prisma.proKosOverview.findFirst({
-        where: { brandId: 6, dateType: proDateType, statDate: { lte: end } },
-        orderBy: { statDate: 'desc' },
-      });
-      const dayMs = 86400000;
-      if (
-        proOv &&
-        proOv.startDate &&
-        proOv.endDate &&
-        proOv.startDate.getTime() <= start.getTime() + dayMs &&
-        proOv.endDate.getTime() >= end.getTime() - 2 * dayMs &&
-        proOv.endDate.getTime() <= end.getTime() + dayMs
-      ) {
-        const staffRowsPro = await this.prisma.proKosStaff.findMany({
-          where: { brandId: 6, statDate: proOv.statDate, dateType: proOv.dateType },
-          take: 1000,
-        });
+      const proMatrix = await this.proMatrixStaff(windowDays, start, end);
+      if (proMatrix) {
         const accByNick = new Map(gAccs.map((a) => [a.nickname, a]));
-        let staffUse = staffRowsPro;
+        let staffUse = proMatrix.rows;
         if (accountTag || regionName) {
-          staffUse = staffRowsPro.filter((s) => {
+          staffUse = proMatrix.rows.filter((s) => {
             const a = accByNick.get(s.nickName);
             return (
               !!a &&
@@ -555,13 +574,36 @@ export class KoxService {
           exposure_sum: sSum((s) => s.socImpCnt),
           view_sum: sSum((s) => s.socClickCnt),
           interaction_sum: sSum((s) => s.socEnageCnt),
-          date_type: proOv.dateType,
-          stat_date: proOv.statDate,
+          author_num: new Set(
+            staffUse.filter((s) => s.createNoteNum > 0).map((s) => s.nickName),
+          ).size,
+          date_type: proMatrix.dateType,
+          stat_date: proMatrix.statDate,
           region_content: [...regionAgg.entries()]
             .map(([region, v]) => ({ region, ...v }))
             .sort((a, b) => b.item_cnt - a.item_cnt),
         };
       }
+    }
+    // 发布区块（特斯拉）：员工矩阵快照覆盖（发布/曝光/阅读/互动；赞藏评/CES 平台无口径为 0）
+    if (brandId === 6) {
+      publish = {
+        author_num: proContent?.author_num ?? 0,
+        item_cnt: proContent?.item_cnt ?? 0,
+        crazy_item_cnt: 0,
+        item_author_ratio:
+          proContent && proContent.author_num
+            ? r2(proContent.item_cnt / proContent.author_num)
+            : 0,
+        follow_count_sum: 0,
+        exposure_sum: proContent?.exposure_sum ?? 0,
+        view_sum: proContent?.view_sum ?? 0,
+        interaction_sum: proContent?.interaction_sum ?? 0,
+        interaction_rate: proContent?.view_sum
+          ? r2((proContent.interaction_sum / proContent.view_sum) * 100)
+          : 0,
+        tool_item_cnt_sum: 0,
+      };
     }
     const regionOfId = new Map<number, string>();
     const regionOfName = new Map<string, string>();
@@ -606,9 +648,12 @@ export class KoxService {
       region_kos: [...kosByRegion.entries()]
         .map(([region, cnt]) => ({ region, kos_cnt: cnt }))
         .sort((a, b) => b.kos_cnt - a.kos_cnt),
-      region_content: [...contentByRegion.entries()]
-        .map(([region, v]) => ({ region, ...v }))
-        .sort((a, b) => b.item_cnt - a.item_cnt),
+      region_content:
+        brandId === 6
+          ? (proContent?.region_content ?? [])
+          : [...contentByRegion.entries()]
+              .map(([region, v]) => ({ region, ...v }))
+              .sort((a, b) => b.item_cnt - a.item_cnt),
     };
 
     const ad = hasCampaign
@@ -702,36 +747,6 @@ export class KoxService {
           })
         : null;
 
-    // 特斯拉：聚光笔记报表窗口聚合（字段2 回落：专业号快照未覆盖的窗口，曝光/阅读/互动随窗口与区域/标签筛选真实变化）
-    // 有区域/标签筛选时 JOIN KoxNote 限定筛选账号的笔记
-    let jugWin: { imp: number; click: number; inter: number } | null = null;
-    if (brandId === 6 && !weeklySnap && !proContent) {
-      if (filteredAccounts && filteredAccounts.length) {
-        const ids = Prisma.join(filteredAccounts.map((a) => a.id));
-        const names = Prisma.join(filteredAccounts.map((a) => a.nickname));
-        const r = await this.prisma.$queryRaw<{ imp: number; click: number; inter: number }[]>`
-          SELECT COALESCE(SUM(j.impression), 0)::bigint AS imp,
-                 COALESCE(SUM(j.click), 0)::bigint AS click,
-                 COALESCE(SUM(j.interaction), 0)::bigint AS inter
-          FROM "KoxJuguangNoteDaily" j
-          WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
-            AND EXISTS (
-              SELECT 1 FROM "KoxNote" n
-              WHERE n."noteId" = j."noteId" AND n."brandId" = 6
-                AND (n."accountId" IN (${ids}) OR n."authorName" IN (${names}))
-            )`;
-        const v = r[0];
-        jugWin = v ? { imp: Number(v.imp), click: Number(v.click), inter: Number(v.inter) } : null;
-      } else {
-        const a = await this.prisma.koxJuguangNoteDaily.aggregate({
-          where: { brandId: 6, day: { gte: start, lte: end } },
-          _sum: { impression: true, click: true, interaction: true },
-        });
-        jugWin = { imp: Number(a._sum.impression ?? 0), click: Number(a._sum.click ?? 0), inter: Number(a._sum.interaction ?? 0) };
-      }
-    }
-    const jugHit = !!jugWin && jugWin.imp > 0;
-
     return {
       global: globalBlock,
       store_num: await this.prisma.kosAccount.groupBy({
@@ -742,7 +757,13 @@ export class KoxService {
       kob_num: typeCount('KOB'),
       koc_num: typeCount('KOC'),
       publish,
-      publish_source: hasNotes ? 'spark_notes' : 'kox_daily_stat',
+      publish_source: brandId === 6
+        ? proContent
+          ? 'pro_staff_matrix'
+          : 'pro_staff_no_partition'
+        : hasNotes
+          ? 'spark_notes'
+          : 'kox_daily_stat',
       lead: {
         total_pm_inquiries_sum: sum((r) => r.totalPmInquiries),
         total_pm_openings_sum: sum((r) => r.totalPmOpenings),
@@ -776,8 +797,8 @@ export class KoxService {
       },
       ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
       // 特斯拉版汇总条（账号标签/大区筛选联动）：KOS数/门店数/粉丝覆盖/内容四指标/账均发布
-      // 特斯拉快捷 7/30 天窗口：内容四指标来自专业号真实窗口数据（员工矩阵汇总）；
-      // 快照未覆盖的窗口（自定义区间等）：曝光/阅读/互动回落聚光笔记报表窗口聚合，发布数=窗口内真实发布笔记数
+      // 特斯拉：内容四指标唯一口径=专业号员工矩阵窗口快照（无匹配分区时为 0，不再回退 KoxNote）；
+      // 其他品牌=商业内容管理同步的笔记窗口数据
       summary: await (async () => {
         const [fansAgg, storeGroups, accountTotal] = await Promise.all([
           this.prisma.kosAccount.aggregate({ where: accountWhere, _sum: { fans: true } }),
@@ -789,15 +810,15 @@ export class KoxService {
         ]);
         // 口径（客户确认）：内容四项 = 商业内容管理同步的笔记窗口数据（发布数=窗口内真实发布篇数；
         // 曝光/阅读/互动=窗口内发布笔记的累计值，互动含关注）；周度快照仅用于线索口径
-        const itemCntN = noteRows.length;
-        const viewN = noteViewSum;
-        const interN = noteInteractionSum;
+        const itemCntN = brandId === 6 ? proContent?.item_cnt ?? 0 : noteRows.length;
+        const viewN = brandId === 6 ? proContent?.view_sum ?? 0 : noteViewSum;
+        const interN = brandId === 6 ? proContent?.interaction_sum ?? 0 : noteInteractionSum;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: noteExposureSum,
+          exposure_sum: brandId === 6 ? proContent?.exposure_sum ?? 0 : noteExposureSum,
           view_sum: viewN,
           interaction_sum: interN,
           // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）
@@ -816,7 +837,11 @@ export class KoxService {
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
-      content_source: 'content_manage_notes(商业内容管理窗口笔记)',
+      content_source: brandId === 6
+        ? `pro_staff_matrix(专业号员工矩阵窗口快照${proContent ? `，快照 ${dayKey08(proContent.stat_date)}` : '，无匹配分区'})`
+        : 'content_manage_notes(商业内容管理窗口笔记)',
+      // 调试用：特斯拉内容指标矩阵快照明细
+      pro_content: proContent,
       // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
         if (proClueFunnel && (proClueFunnel.enter > 0 || proClueFunnel.leads > 0)) {
@@ -2136,32 +2161,34 @@ export class KoxService {
         storeName: true,
       },
     });
-    const notes = await this.prisma.koxNote.findMany({
-      where: {
-        publishTime: { gte: start, lte: end },
-        ...(brandId ? { brandId } : {}),
-        // 仅统计基线账号（enabled）的笔记：非基线作者（对照表外新账号/官号）不进区域与标签聚合
-        OR: [
-          { accountId: { in: accounts.map((a) => a.id) } },
-          { authorName: { in: accounts.map((a) => a.nickname) } },
-        ],
-      },
-      select: {
-        accountId: true,
-        authorName: true,
-        exposure: true,
-        views: true,
-        likes: true,
-        collects: true,
-        comments: true,
-        shares: true,
-        followCount: true,
-        pmInquiries: true,
-        pmOpenings: true,
-        pmLeads: true,
-        isRtbAdver: true,
-      },
-    });
+    const notes = brandId === 6
+      ? []
+      : await this.prisma.koxNote.findMany({
+          where: {
+            publishTime: { gte: start, lte: end },
+            ...(brandId ? { brandId } : {}),
+            // 仅统计基线账号（enabled）的笔记：非基线作者（对照表外新账号/官号）不进区域与标签聚合
+            OR: [
+              { accountId: { in: accounts.map((a) => a.id) } },
+              { authorName: { in: accounts.map((a) => a.nickname) } },
+            ],
+          },
+          select: {
+            accountId: true,
+            authorName: true,
+            exposure: true,
+            views: true,
+            likes: true,
+            collects: true,
+            comments: true,
+            shares: true,
+            followCount: true,
+            pmInquiries: true,
+            pmOpenings: true,
+            pmLeads: true,
+            isRtbAdver: true,
+          },
+        });
 
     // 笔记 → 账号键（accountId 优先，authorName 兜底）
     const idToAcc = new Map(accounts.map((a) => [a.id, a]));
@@ -2211,61 +2238,26 @@ export class KoxService {
       bucketOf(tagGroups, tagOf(a)).kos.add(a.id);
     }
     const r2 = (v: number) => Math.round(v * 100) / 100;
-    for (const n of notes) {
-      const acc = n.accountId != null ? idToAcc.get(n.accountId) : undefined;
-      const byName = acc ?? (n.authorName ? nameToAcc.get(n.authorName) : undefined);
-      const rKey = byName ? regionOf(byName) : '未匹配账号';
-      const tKey = byName ? tagOf(byName) : '未标签';
-      const g = bucketOf(groups, rKey);
-      const tg = bucketOf(tagGroups, tKey);
-      for (const bucket of [g, tg]) {
-        if (byName) bucket.published.add(byName.id);
-        bucket.note_cnt += 1;
-        bucket.exposure += n.exposure;
-        bucket.view += n.views;
-        bucket.interaction += n.likes + n.comments + n.shares + n.collects;
-        bucket.ces += calcCes(
-          n.likes,
-          n.collects,
-          n.comments,
-          n.shares,
-          n.followCount,
-        );
-        bucket.pm_inquiries += n.pmInquiries;
-        bucket.pm_openings += n.pmOpenings;
-        bucket.pm_leads += n.pmLeads;
-        if (n.isRtbAdver !== true) bucket.organic_leads += n.pmLeads;
-      }
-    }
-
-    // 特斯拉：曝光/阅读/互动 = 聚光笔记报表按账号窗口聚合（投流口径；乐允/ranf 存量无窗口值）
-    // 私信进线/开口/留资 = 线索经营按归属账号（KOS-only、按客户去重；与 KOS 数据进度一致）
     if (brandId === 6) {
-      // 清零通用聚合（KoxNote 累计口径）的对应字段，避免窗口值叠加双算；CES/自然留资仍用笔记累计口径
-      for (const b of [...groups.values(), ...tagGroups.values()]) {
-        b.exposure = 0;
-        b.view = 0;
-        b.interaction = 0;
-        b.pm_inquiries = 0;
-        b.pm_openings = 0;
-        b.pm_leads = 0;
+      // 特斯拉：内容指标=专业号员工矩阵窗口快照（笔记数量/有发布/曝光/阅读/互动）
+      // KoxNote 笔记口径与聚光投流口径弃用（星火 partner 通道停更）；CES/自然留资暂无口径为 0
+      const proMatrix = await this.proMatrixStaff(days, start, end);
+      if (proMatrix) {
+        for (const s of proMatrix.rows) {
+          const acc = s.nickName ? nameToAcc.get(s.nickName) : undefined;
+          if (!acc) continue;
+          const g = bucketOf(groups, regionOf(acc));
+          const tg = bucketOf(tagGroups, tagOf(acc));
+          for (const bucket of [g, tg]) {
+            bucket.published.add(acc.id);
+            bucket.note_cnt += s.createNoteNum;
+            bucket.exposure += s.socImpCnt;
+            bucket.view += s.socClickCnt;
+            bucket.interaction += s.socEnageCnt;
+          }
+        }
       }
-      const jugR = await this.prisma.$queryRaw<{
-        acc: bigint;
-        imp: bigint;
-        click: bigint;
-        inter: bigint;
-      }[]>`
-        SELECT COALESCE(a.id, a2.id) AS acc,
-          COALESCE(SUM(j.impression), 0) AS imp,
-          COALESCE(SUM(j.click), 0) AS click,
-          COALESCE(SUM(j.interaction), 0) AS inter
-        FROM "KoxJuguangNoteDaily" j
-        LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
-        LEFT JOIN "KosAccount" a ON a.id = n."accountId"
-        LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
-        WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
-        GROUP BY 1`;
+      // 私信进线/开口/留资 = 线索经营按归属账号（KOS-only、按客户去重；与 KOS 数据进度一致）
       const clueR = await this.prisma.$queryRaw<{
         acc: bigint;
         enter: number;
@@ -2281,18 +2273,6 @@ export class KoxService {
         WHERE c."brandId" = 6 AND (c."day" AT TIME ZONE 'UTC') >= ${start} AND (c."day" AT TIME ZONE 'UTC') <= ${end}
           AND NOT c."isOfficial" AND c."belongUserId" IS NOT NULL
         GROUP BY a.id`;
-      for (const r of jugR) {
-        const acc = r.acc != null ? idToAcc.get(Number(r.acc)) : undefined;
-        if (!acc) continue;
-        const g = bucketOf(groups, regionOf(acc));
-        const tg = bucketOf(tagGroups, tagOf(acc));
-        for (const b of [g, tg]) {
-          // 区域/标签桶是多账号聚合，必须累加（覆盖会只留最后一个账号的值）
-          b.exposure += Number(r.imp);
-          b.view += Number(r.click);
-          b.interaction += Number(r.inter);
-        }
-      }
       for (const r of clueR) {
         const acc = r.acc != null ? idToAcc.get(Number(r.acc)) : undefined;
         if (!acc) continue;
@@ -2302,6 +2282,33 @@ export class KoxService {
           b.pm_inquiries += Number(r.enter);
           b.pm_openings += Number(r.open);
           b.pm_leads += Number(r.leads);
+        }
+      }
+    } else {
+      for (const n of notes) {
+        const acc = n.accountId != null ? idToAcc.get(n.accountId) : undefined;
+        const byName = acc ?? (n.authorName ? nameToAcc.get(n.authorName) : undefined);
+        const rKey = byName ? regionOf(byName) : '未匹配账号';
+        const tKey = byName ? tagOf(byName) : '未标签';
+        const g = bucketOf(groups, rKey);
+        const tg = bucketOf(tagGroups, tKey);
+        for (const bucket of [g, tg]) {
+          if (byName) bucket.published.add(byName.id);
+          bucket.note_cnt += 1;
+          bucket.exposure += n.exposure;
+          bucket.view += n.views;
+          bucket.interaction += n.likes + n.comments + n.shares + n.collects;
+          bucket.ces += calcCes(
+            n.likes,
+            n.collects,
+            n.comments,
+            n.shares,
+            n.followCount,
+          );
+          bucket.pm_inquiries += n.pmInquiries;
+          bucket.pm_openings += n.pmOpenings;
+          bucket.pm_leads += n.pmLeads;
+          if (n.isRtbAdver !== true) bucket.organic_leads += n.pmLeads;
         }
       }
     }
@@ -2336,7 +2343,9 @@ export class KoxService {
       end,
       days,
       metric_note:
-        '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
+        brandId === 6
+          ? '内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；私信进线/开口/留资=线索经营按归属账号去重；CES/自然留资暂无口径为 0'
+          : '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
       tier_meta: KOS_TIERS.map((t) => ({
@@ -2406,14 +2415,12 @@ export class KoxService {
       },
     });
 
-    // 账号表现分析口径（brand6）：≤7 天内容指标=专业号员工矩阵；进线/开口/留资=专业号「线索经营」按归属账号聚合（KOS-only 按客户去重）
-    // 客户线下周度表不再引用
-    let metric_source = 'spark_notes';
-    const padDayA = (n: number) => String(n).padStart(2, '0');
-    const dayKeyA = (d: Date) => `${d.getFullYear()}-${padDayA(d.getMonth() + 1)}-${padDayA(d.getDate())}`;
-    const useProStaff = brandId === 6 && days <= 7;
-    // 窗口内发布笔记：非员工矩阵档用于全指标；员工矩阵档仅取赞/藏/评/CES（平台无赞藏评拆分，用真实发布笔记聚合）
-    const notes = await this.prisma.koxNote.findMany({
+    // 账号表现分析口径（brand6）：内容指标=专业号员工矩阵窗口快照；进线/开口/留资=专业号「线索经营」按归属账号聚合（KOS-only 按客户去重）
+    // KoxNote 笔记口径弃用（星火 partner 通道停更）；其他品牌维持星火笔记 + 乐允投放报表口径
+    let metric_source = brandId === 6 ? 'pro_staff' : 'spark_notes';
+    const notes = brandId === 6
+      ? []
+      : await this.prisma.koxNote.findMany({
       where: {
         publishTime: { gte: start, lte: end },
         ...(brandId ? { brandId } : {}),
@@ -2474,40 +2481,12 @@ export class KoxService {
     };
     // 员工矩阵/笔记聚合前的公共映射
     const nameToId = new Map(accounts.map((a) => [a.nickname, a.id]));
-    // 员工矩阵是否可用：≤7 天且窗口内（或含今天的昨日回退）存在快照分区。
-    // 无分区（如未同步的历史单日、未来日期）→ 回退笔记口径（发布数=窗口内实际发布；曝光/阅读=笔记累计值）
-    let matrixApplied = false;
-    if (useProStaff) {
-      const proDateType = days <= 1 ? 1 : 2;
-      // 员工矩阵快照按「数据日」分区：只取落在查询窗口内的最新分区，避免选历史/未来日期时
-      // 仍然显示最新快照（此前选未来日期内容发布/曝光仍非 0 的根因）。
-      // 窗口含「今天」时允许回退昨天的分区（当日快照次日才产出）。
-      const winStartDay = dayKey08(start);
-      const winEndDay = dayKey08(end);
-      const todayDay = dayKey08(new Date());
-      const yesterdayDay = dayKey08(new Date(Date.now() - 86400000));
-      const partDays = await this.prisma.proKosStaff.findMany({
-        where: { brandId: 6, dateType: proDateType },
-        orderBy: { statDate: 'desc' },
-        distinct: ['statDate'],
-        select: { statDate: true },
-        take: 30,
-      });
-      const chosen =
-        partDays.find((r) => {
-          const d = dayKey08(r.statDate);
-          return d >= winStartDay && d <= winEndDay;
-        }) ??
-        (winEndDay === todayDay || winStartDay === todayDay
-          ? partDays.find((r) => dayKey08(r.statDate) === yesterdayDay)
-          : undefined);
-      if (chosen) {
-        matrixApplied = true;
-        const staffRowsPro = await this.prisma.proKosStaff.findMany({
-          where: { brandId: 6, statDate: chosen.statDate, dateType: proDateType },
-          take: 1000,
-        });
-        for (const s of staffRowsPro) {
+    // 员工矩阵：brand6 一律走专业号窗口快照（近1/7/30日三档）。
+    // 无匹配分区（未同步的历史/未来窗口）→ 内容指标 0，不再回退笔记口径。
+    if (brandId === 6) {
+      const proMatrix = await this.proMatrixStaff(days, start, end);
+      if (proMatrix) {
+        for (const s of proMatrix.rows) {
           const accId = s.nickName ? nameToId.get(s.nickName) : null;
           if (accId == null) continue;
           bump(accId, (a) => {
@@ -2517,9 +2496,9 @@ export class KoxService {
             a.interaction += s.socEnageCnt;
           });
         }
-        metric_source = `pro_staff_window(dateType=${proDateType}, statDate=${dayKey08(chosen.statDate)})`;
+        metric_source = `pro_staff_window(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)})`;
       } else {
-        metric_source = 'spark_notes(no_pro_staff_partition)';
+        metric_source = 'pro_staff(no_partition)';
       }
     }
     for (const n of notes) {
@@ -2528,17 +2507,13 @@ export class KoxService {
       else if (n.authorName) accId = nameToId.get(n.authorName) ?? null;
       if (accId == null) continue;
       bump(accId, (a) => {
-        // 员工矩阵档：发布/曝光/阅读/互动/私信来自平台矩阵与线索经营，笔记行仅补赞/藏/评/分享/CES；
-        // 矩阵无分区时回退笔记口径（发布数精确、曝光/阅读为笔记累计值）
-        if (!matrixApplied) {
-          a.item_cnt += 1;
-          a.exposure += n.exposure;
-          a.view += n.views;
-          a.interaction += n.likes + n.comments + n.shares + n.collects;
-          a.pm_inquiries += n.pmInquiries;
-          a.pm_openings += n.pmOpenings;
-          a.pm_leads += n.pmLeads;
-        }
+        a.item_cnt += 1;
+        a.exposure += n.exposure;
+        a.view += n.views;
+        a.interaction += n.likes + n.comments + n.shares + n.collects;
+        a.pm_inquiries += n.pmInquiries;
+        a.pm_openings += n.pmOpenings;
+        a.pm_leads += n.pmLeads;
         a.likes += n.likes;
         a.collects += n.collects;
         a.comments += n.comments;
@@ -2578,52 +2553,6 @@ export class KoxService {
         });
       }
       if (clueHit) metric_source += '+pro_clue_account';
-
-      // 点赞/收藏/评论/分享/CES：账号累计口径（选项1）——汇总账号全部笔记的赞藏评，与热门内容卡片同源
-      // （乐允 09-24 导出存量；聚光/专业号均无赞藏评日拆分，故不随日期窗口变化）
-      const cumNotes = await this.prisma.koxNote.findMany({
-        where: { brandId: 6 },
-        select: {
-          accountId: true,
-          authorName: true,
-          likes: true,
-          collects: true,
-          comments: true,
-          shares: true,
-          followCount: true,
-        },
-      });
-      const cumAgg = new Map<
-        number,
-        { likes: number; collects: number; comments: number; shares: number; ces: number }
-      >();
-      for (const n of cumNotes) {
-        const accId =
-          n.accountId != null && idSet.has(n.accountId)
-            ? n.accountId
-            : n.authorName
-              ? nameToId.get(n.authorName) ?? null
-              : null;
-        if (accId == null) continue;
-        const cur = cumAgg.get(accId) ?? { likes: 0, collects: 0, comments: 0, shares: 0, ces: 0 };
-        cur.likes += n.likes;
-        cur.collects += n.collects;
-        cur.comments += n.comments;
-        cur.shares += n.shares;
-        cur.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
-        cumAgg.set(accId, cur);
-      }
-      for (const [accId, v] of cumAgg) {
-        if (!idSet.has(accId)) continue;
-        bump(accId, (a) => {
-          a.likes = v.likes;
-          a.collects = v.collects;
-          a.comments = v.comments;
-          a.shares = v.shares;
-          a.ces = v.ces;
-        });
-      }
-      if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {
@@ -2706,11 +2635,11 @@ export class KoxService {
     const metric = (METRICS as readonly string[]).includes(query.metric ?? '')
       ? (query.metric as (typeof METRICS)[number])
       : 'pm_leads';
-    rows.sort(
-      (a, b) =>
-        a.tier_rank - b.tier_rank ||
-        b[metric] - a[metric] ||
-        b.pm_leads - a.pm_leads,
+    // 排序：默认留资数 tab 保留「分层(周度留资)优先」；其余指标按所选指标降序（分层仅作同分兜底）
+    rows.sort((a, b) =>
+      metric === 'pm_leads'
+        ? a.tier_rank - b.tier_rank || b.pm_leads - a.pm_leads
+        : b[metric] - a[metric] || b.pm_leads - a.pm_leads,
     );
 
     const tierStat = KOS_TIERS.map((t) => ({
@@ -2744,8 +2673,8 @@ export class KoxService {
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
         : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
-          : metric_source.startsWith('pro_staff')
-            ? `近7天数据来自专业号员工矩阵真实窗口（进线/开口/留资/发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] ?? ''}，每日自动同步）；CES 与赞藏评分项无平台拆分暂为 0；分层=周度留资折算`
+            : metric_source.startsWith('pro_staff')
+              ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=线索经营按归属账号去重；赞/藏/评/CES 暂无平台口径为 0；分层=周度留资折算`
             : '留资=笔记私信留资（含投流）；分层=S级头部按月度留资>200（任意周期归一月度）；其余头部/高潜/腰部/尾部按周度留资折算',
       list: rows.slice((page - 1) * pageSize, page * pageSize),
     };
@@ -3107,6 +3036,40 @@ export class KoxService {
   }
 
   /**
+   * 特斯拉专业号员工矩阵窗口快照（近1日/近7日/近30日三档，dateType 1/2/3）。
+   * 按查询窗口选最新分区（statDate=数据日；窗口含「今天」时回退昨日分区，当日快照次日才产出）。
+   * 无匹配分区返回 null（未同步的历史/未来窗口），调用方按内容指标 0 处理，不再回退 KoxNote。
+   */
+  private async proMatrixStaff(days: number, start: Date, end: Date) {
+    const dateType = days <= 1 ? 1 : days <= 7 ? 2 : 3;
+    const winStartDay = dayKey08(start);
+    const winEndDay = dayKey08(end);
+    const todayDay = dayKey08(new Date());
+    const yesterdayDay = dayKey08(new Date(Date.now() - 86400000));
+    const partDays = await this.prisma.proKosStaff.findMany({
+      where: { brandId: 6, dateType },
+      orderBy: { statDate: 'desc' },
+      distinct: ['statDate'],
+      select: { statDate: true },
+      take: 60,
+    });
+    const chosen =
+      partDays.find((r) => {
+        const d = dayKey08(r.statDate);
+        return d >= winStartDay && d <= winEndDay;
+      }) ??
+      (winEndDay === todayDay || winStartDay === todayDay
+        ? partDays.find((r) => dayKey08(r.statDate) === yesterdayDay)
+        : undefined);
+    if (!chosen) return null;
+    const rows = await this.prisma.proKosStaff.findMany({
+      where: { brandId: 6, statDate: chosen.statDate, dateType },
+      take: 2000,
+    });
+    return { rows, statDate: chosen.statDate, dateType };
+  }
+
+  /**
    * KOS 运营进度总览（特斯拉，按账号拆分）：专业号员工快照 × 账号归属
    * 内容完成度 = 周度篇数/3；进线完成度 = 周度进线/5；综合得分 = 内容40% + 留资60%
    */
@@ -3133,7 +3096,8 @@ export class KoxService {
     const pct = (v: number, target: number) =>
       target > 0 ? Math.min(100, Math.round((v / target) * 100)) : 0;
 
-    // 口径（2026-10 起）：整行指标 = 所选窗口内发布笔记的真实聚合（KoxNote）+ 线索经营按归属账号三数
+    // 口径：整行内容指标 = 专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；线索经营按归属账号三数
+    // KoxNote 笔记口径弃用（星火 partner 通道停更，仅保留笔记级明细用途）
     // 账号基线=大区刷新对照表（192 户，与运营总览一致）
     const accountWhere: Prisma.KosAccountWhereInput = {
       ...(brandId ? { brandId } : {}),
@@ -3157,14 +3121,12 @@ export class KoxService {
       },
     });
     const nameToAcc = new Map(accounts.map((a) => [a.nickname, a]));
-    const idSet = new Set(accounts.map((a) => a.id));
 
     interface ProAgg {
       item_cnt: number;
       exposure_sum: number;
       click_sum: number;
       interaction_sum: number;
-      follow_sum: number;
       pm_inquiries: number;
       pm_openings: number;
       pm_leads: number;
@@ -3172,7 +3134,7 @@ export class KoxService {
     }
     const blank = (): ProAgg => ({
       item_cnt: 0, exposure_sum: 0, click_sum: 0, interaction_sum: 0,
-      follow_sum: 0, pm_inquiries: 0, pm_openings: 0, pm_leads: 0, fee: 0,
+      pm_inquiries: 0, pm_openings: 0, pm_leads: 0, fee: 0,
     });
     const agg = new Map<number, ProAgg>();
     const bump = (accId: number, fn: (a: ProAgg) => void) => {
@@ -3181,36 +3143,19 @@ export class KoxService {
       fn(cur);
     };
 
-    // 窗口内发布笔记的真实聚合（发布数/曝光/阅读/互动/涨粉 + 笔记私信三数）
-    const noteRowsPro = await this.prisma.koxNote.findMany({
-      where: {
-        publishTime: { gte: start, lte: end },
-        ...(brandId ? { brandId } : {}),
-      },
-      select: {
-        accountId: true, authorName: true, views: true, exposure: true,
-        likes: true, comments: true, shares: true, collects: true, followCount: true,
-        pmInquiries: true, pmOpenings: true, pmLeads: true,
-      },
-    });
-    for (const n of noteRowsPro) {
-      const accId =
-        n.accountId != null && idSet.has(n.accountId)
-          ? n.accountId
-          : n.authorName
-            ? nameToAcc.get(n.authorName)?.id ?? null
-            : null;
-      if (accId == null) continue;
-      bump(accId, (a) => {
-        a.item_cnt += 1;
-        a.exposure_sum += n.exposure;
-        a.click_sum += n.views;
-        a.interaction_sum += n.likes + n.comments + n.shares + n.collects;
-        a.follow_sum += n.followCount;
-        a.pm_inquiries += n.pmInquiries;
-        a.pm_openings += n.pmOpenings;
-        a.pm_leads += n.pmLeads;
-      });
+    // 内容指标：专业号员工矩阵窗口快照（发布=createNoteNum、曝光/阅读/互动=soc 三项）
+    const proMatrix = await this.proMatrixStaff(days, start, end);
+    if (proMatrix) {
+      for (const s of proMatrix.rows) {
+        const accId = s.nickName ? nameToAcc.get(s.nickName)?.id ?? null : null;
+        if (accId == null) continue;
+        bump(accId, (a) => {
+          a.item_cnt += s.createNoteNum;
+          a.exposure_sum += s.socImpCnt;
+          a.click_sum += s.socClickCnt;
+          a.interaction_sum += s.socEnageCnt;
+        });
+      }
     }
     // 进线/开口/留资：专业号「线索经营」按归属账号聚合（KOS-only、按客户去重；替代乐允投放报表逐日）
     const clueRowsPro = await this.prisma.$queryRaw<{
@@ -3238,36 +3183,6 @@ export class KoxService {
         a.pm_openings = Number(r.open);
         a.pm_leads = Number(r.leads);
       });
-    }
-
-    // 曝光/点击/互动：brand6 = 聚光笔记报表（投流口径）按账号窗口聚合
-    // （窗口内发布笔记的乐允/ranf 存量无窗口曝光值，此前恒 0）
-    if (brandId === 6) {
-      const jugRowsPro = await this.prisma.$queryRaw<{
-        acc: bigint;
-        imp: bigint;
-        click: bigint;
-        inter: bigint;
-      }[]>`
-        SELECT COALESCE(a.id, a2.id) AS acc,
-          COALESCE(SUM(j.impression), 0) AS imp,
-          COALESCE(SUM(j.click), 0) AS click,
-          COALESCE(SUM(j.interaction), 0) AS inter
-        FROM "KoxJuguangNoteDaily" j
-        LEFT JOIN "KoxNote" n ON n."noteId" = j."noteId" AND n."brandId" = 6
-        LEFT JOIN "KosAccount" a ON a.id = n."accountId"
-        LEFT JOIN "KosAccount" a2 ON a2."brandId" = 6 AND a2.status = 'enabled' AND a2.nickname = n."authorName"
-        WHERE j."brandId" = 6 AND (j."day" AT TIME ZONE 'UTC') >= ${start} AND (j."day" AT TIME ZONE 'UTC') <= ${end}
-        GROUP BY 1`;
-      for (const r of jugRowsPro) {
-        const accId = r.acc != null ? Number(r.acc) : null;
-        if (accId == null || !idSet.has(accId)) continue;
-        bump(accId, (a) => {
-          a.exposure_sum = Number(r.imp);
-          a.click_sum = Number(r.click);
-          a.interaction_sum = Number(r.inter);
-        });
-      }
     }
 
     // 投流消耗（rtb_income）仍取乐允投放报表逐日（partner 通道口径）
@@ -3331,9 +3246,9 @@ export class KoxService {
     }));
     return {
       days,
-      date_type: null,
-      stat_date: null,
-      caliber: 'leyoon_daily+notes',
+      date_type: proMatrix?.dateType ?? null,
+      stat_date: proMatrix?.statDate ?? null,
+      caliber: 'pro_staff_matrix+pro_clue',
       weekly_notes_target: weeklyNotesTarget,
       weekly_enter_target: weeklyEnterTarget,
       total: rows.length,

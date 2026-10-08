@@ -254,6 +254,29 @@ function monthSegments(start, end) {
       await rowJump.click({ timeout: 8000 }).catch(() => {});
       await sleep(3500);
       let popup = await popupPromise;
+      // 兜底：平台改版后跳转可能不弹新窗、在当前页直接进入聚光——
+      // 检测 listPage 已到聚光域时，按落地 URL 新开页复用会话，并立即恢复子账户列表页
+      if (!popup) {
+        for (let i = 0; i < 8; i++) {
+          if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) break;
+          await sleep(1500);
+        }
+        if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) {
+          const landed = listPage.url();
+          const p2 = await ctx.newPage();
+          await p2.goto(landed, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+          await sleep(6000);
+          listPage
+            .goto('https://partner.xiaohongshu.com/partner/subAccount-list', {
+              waitUntil: 'domcontentloaded',
+              timeout: 45000,
+            })
+            .catch(() => {});
+          await sleep(9000);
+          await cleanListPage();
+          return p2;
+        }
+      }
       if (!popup) {
         await rowJump.hover({ timeout: 4000 }).catch(() => {});
         await sleep(1200);

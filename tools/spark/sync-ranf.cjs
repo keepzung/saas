@@ -15,6 +15,12 @@ const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
 
+// ── 已弃用（2026-10-08 客户确认）：ranf 平台数据不再使用，KoxNote 主字段不得再由 ranf 叠加 ──
+// 直接退出，防止 pm2 定时任务继续写入 KoxRanfDaily / KoxNote；
+// 如需恢复，删除下面这段退出守卫即可。
+console.log('[sync-ranf] ranf 数据源已弃用，脚本不再执行（KoxNote 不来自 ranf）。');
+process.exit(0);
+
 const ROOT = path.resolve(__dirname, '../..');
 const backendRequire = createRequire(path.join(ROOT, 'backend', 'noop.js'));
 const { PrismaClient } = backendRequire('@prisma/client');

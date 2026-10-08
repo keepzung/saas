@@ -117,6 +117,7 @@ const props = defineProps({
 
 const auth = useAuthStore();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
+const isTesla = Number(auth.currentBrandId) === 6;
 const CROWNS = ['👑', '🥈', '🥉'];
 const pageTitle = computed(() => props.embeddedTitle || '区域数据分析');
 
@@ -233,13 +234,15 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   col('曝光', 'exposure_sum', 104),
   col('阅读', 'view_sum', 104),
   col('互动', 'interaction_sum', 96),
-  col('CES', 'ces_sum', 96),
+  // 特斯拉：CES/自然留资无专业号平台口径（KoxNote 存量弃用），不展示
+  ...(isTesla
+    ? []
+    : [col('CES', 'ces_sum', 96), col('自然留资', 'organic_leads', 96)]),
   col('账号平均笔记', 'avg_notes', 116),
   col('笔记平均曝光', 'avg_exposure', 120),
-  col('笔记平均CES', 'avg_ces', 112),
+  ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
-  col('自然留资', 'organic_leads', 96),
   col('私信留资', 'pm_leads', 96),
 ]));
 
@@ -317,7 +320,6 @@ const toRows = (list, nameKey) =>
     笔记平均CES: r.avg_ces,
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
-    ...(nameKey === '区域' ? { 自然留资: r.organic_leads } : {}),
     私信留资: r.pm_leads,
   }));
 
