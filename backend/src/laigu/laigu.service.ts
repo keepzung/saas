@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { extractKeywords } from '../common/text-keywords';
 import { LaiguApiClient, LaiguSession } from './laigu-api.client';
@@ -48,12 +50,20 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async safeSync() {
-    // 评论同步（网关 token 通道）——反馈分析页数据源
+    // 评论同步（网关 token 通道）——反馈分析页数据源；token 过期时账密自动重登一次再重试
     try {
       const cfg = await this.prisma.laiguOrgConfig.findUnique({ where: { brandId: 6 } });
       if (cfg?.gatewayToken && cfg.active) {
-        const r = await this.syncComments(6);
-        if (r.upserted > 0) this.logger.log(`来鼓评论同步完成：upsert ${r.upserted}`);
+        try {
+          const r = await this.syncComments(6);
+          if (r.upserted > 0) this.logger.log(`来鼓评论同步完成：upsert ${r.upserted}`);
+        } catch (error) {
+          this.logger.warn(`来鼓评论同步失败，尝试账密自动重登: ${(error as Error).message}`);
+          const token = await this.laiguAutoRelogin();
+          if (!token) throw error;
+          const r = await this.syncComments(6);
+          this.logger.log(`来鼓评论同步完成（自动重登后）：upsert ${r.upserted}`);
+        }
       }
     } catch (error) {
       this.logger.warn(`来鼓评论同步失败: ${(error as Error).message}`);
@@ -64,6 +74,87 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`来鼓增量同步完成：拉取 ${result.fetched} 条`);
     } catch (error) {
       this.logger.warn(`来鼓定时同步失败: ${(error as Error).message}`);
+    }
+  }
+
+  /** 来鼓网关 token 过期时：账密自动登录 pro.laigu.com 换新（凭据 LAIGU_LOGIN_USER/LAIGU_LOGIN_PASSWORD，未配置则维持人工路径） */
+  private async laiguAutoRelogin(): Promise<string | null> {
+    const user = this.configService.get<string>('LAIGU_LOGIN_USER') ?? '';
+    const pass = this.configService.get<string>('LAIGU_LOGIN_PASSWORD') ?? '';
+    if (!user || !pass) {
+      this.logger.warn('来鼓 token 过期，且未配置 LAIGU_LOGIN_USER/LAIGU_LOGIN_PASSWORD，无法自动重登');
+      return null;
+    }
+    const { chromium } = require('playwright-core') as typeof import('playwright-core');
+    const exe = (() => {
+      try {
+        const p = chromium.executablePath();
+        if (p && fs.existsSync(p)) return p;
+      } catch { /* fallthrough */ }
+      const base = process.env.LOCALAPPDATA
+        ? path.join(process.env.LOCALAPPDATA, 'ms-playwright')
+        : path.join(process.env.HOME ?? '', '.cache', 'ms-playwright');
+      try {
+        const dirs = fs
+          .readdirSync(base)
+          .filter((d) => d.startsWith('chromium-'))
+          .sort()
+          .reverse();
+        for (const d of dirs) {
+          for (const sub of ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-win/chrome.exe', 'chrome-win64/chrome.exe']) {
+            const fp = path.join(base, d, sub);
+            if (fs.existsSync(fp)) return fp;
+          }
+        }
+      } catch { /* ignore */ }
+      return null;
+    })();
+    const browser = await chromium.launch({
+      executablePath: exe || undefined,
+      headless: true,
+      args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'],
+    });
+    try {
+      const ctx = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        locale: 'zh-CN',
+        viewport: { width: 1600, height: 1000 },
+      });
+      const page = await ctx.newPage();
+      await page
+        .goto('https://pro.laigu.com/dashboard', { waitUntil: 'domcontentloaded', timeout: 45000 })
+        .catch(() => {});
+      await page.waitForTimeout(5000);
+      if (/login|passport/i.test(page.url()) || (await page.locator('input[type="password"]').count())) {
+        const u = page
+          .locator('input[type="text"], input[placeholder*="手机"], input[placeholder*="账号"]')
+          .locator('visible=true')
+          .first();
+        const pw = page.locator('input[type="password"]').locator('visible=true').first();
+        await u.fill(user, { timeout: 15000 });
+        await pw.fill(pass, { timeout: 15000 });
+        const agree = page.locator('text=同意').first();
+        if (await agree.count()) {
+          const box = await agree.boundingBox({ timeout: 2000 }).catch(() => null);
+          if (box) await page.mouse.click(box.x - 18, box.y + box.height / 2).catch(() => {});
+        }
+        const btn = page.locator('button:has-text("登")').first();
+        if (await btn.count()) await btn.click({ timeout: 8000 }).catch(() => {});
+        else await page.keyboard.press('Enter');
+        await page.waitForTimeout(8000);
+      }
+      if (/login|passport/i.test(page.url())) {
+        throw new Error('来鼓自动登录未成功（可能触发滑块/验证码，请人工登录后推送 token）');
+      }
+      const token = await page.evaluate(() => localStorage.getItem('token') || '');
+      const agentId = await page.evaluate(() => localStorage.getItem('agentId') || '');
+      if (token.length < 32) throw new Error('来鼓自动登录 token 异常');
+      await this.saveGatewayToken(6, token, agentId || undefined);
+      this.logger.log(`来鼓自动重登成功，token 已热更+落库（agentId=${agentId || '-'}）`);
+      return token;
+    } finally {
+      await browser.close();
     }
   }
 
