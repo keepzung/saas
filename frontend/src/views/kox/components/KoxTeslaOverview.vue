@@ -271,7 +271,6 @@ import { useAuthStore } from '../../../stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
-}
 
 const CROWNS = ['👑', '🥈', '🥉'];
 const RANK_METRICS = [

@@ -10,7 +10,7 @@
     </template>
 
     <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实项目数据。</NoticeBar>
-    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书星火平台（聚光投放），每日 T+1 更新；项目消耗按「项目周期 × 关联账户」自动聚合。</NoticeBar>
+    <NoticeBar v-else-if="mode === 'real'">数据来源：小红书聚光平台（聚光投放），每日 T+1 更新；项目消耗按「项目周期 × 关联账户」自动聚合。</NoticeBar>
 
     <div class="stat-grid">
       <div class="stat-card">

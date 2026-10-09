@@ -1,7 +1,7 @@
 <template>
   <PageWrapper :title="title" subtitle="功能建设中，敬请期待">
     <a-card :bordered="false">
-      <a-empty :description="`${title}模块将于下一版本上线（星火数据采集授权接入后开放）`">
+      <a-empty :description="`${title}模块将于下一版本上线（聚光数据采集授权接入后开放）`">
         <template #image>
           <ClockCircleOutlined style="font-size: 48px; color: #94a3b8" />
         </template>

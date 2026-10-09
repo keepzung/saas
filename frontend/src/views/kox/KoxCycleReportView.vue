@@ -46,7 +46,7 @@
           :scroll="{ x: 1080 }"
         >
           <template #emptyText>
-            <a-empty description="所选周期内暂无投放数据（星火 T+1 回流后自动出数）" />
+            <a-empty description="所选周期内暂无投放数据（聚光 T+1 回流后自动出数）" />
           </template>
         </a-table>
       </div>

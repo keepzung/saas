@@ -1,6 +1,6 @@
 <template>
-  <PageWrapper title="新增项目" subtitle="创建投放项目并关联星火投放账户">
-    <NoticeBar>项目创建后，报表页将按「项目周期 × 关联账户」自动聚合星火聚光投放数据（T+1）。</NoticeBar>
+  <PageWrapper title="新增项目" subtitle="创建投放项目并关联聚光投放账户">
+    <NoticeBar>项目创建后，报表页将按「项目周期 × 关联账户」自动聚合聚光聚光投放数据（T+1）。</NoticeBar>
 
     <div class="add-layout">
       <a-card :bordered="false" size="small" title="项目信息" class="form-card">
@@ -49,7 +49,7 @@
       <a-card :bordered="false" size="small" class="account-card">
         <template #title>
           关联投放账户
-          <span class="muted small" style="font-weight: 400">（来自星火平台，T+1 同步）</span>
+          <span class="muted small" style="font-weight: 400">（来自聚光平台，T+1 同步）</span>
         </template>
         <template #extra>
           <a-input-search
