@@ -171,53 +171,81 @@ await backToList();
     const upserts = [];
     let okAcc = 0;
     for (const acc of accounts.filter((a) => a.status === 'active')) {
-      let rowIdx = -1;
-      for (let pg2 = 0; pg2 < 6 && rowIdx < 0; pg2++) {
-        const rc = await rowsLoc.count();
-        for (let i = 0; i < rc; i++) {
-          if ((await rowsLoc.nth(i).innerText().catch(() => '')).includes(acc.id)) { rowIdx = i; break; }
-        }
-        if (rowIdx < 0) {
-          const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
-          const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
-          if (disabled || !(await nextBtn.count())) break;
-          await nextBtn.click({ timeout: 5000 }).catch(() => {});
-          await sleep(5000);
-        }
-      }
-      if (rowIdx < 0) { console.log(`[${acc.name}] 列表中未找到，跳过`); continue; }
-
+      // 跳转子账户聚光（与 sync-juguang.cjs ensureJump 同款：popup → 同页兜底 → hover「聚光平台」菜单兜底）
       let popup2 = null;
       for (let attempt = 1; attempt <= 3 && !popup2; attempt++) {
-        const pp = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
-        await rowsLoc.nth(rowIdx).locator('text=跳转').first().click({ timeout: 8000 }).catch(() => {});
-        await sleep(3500);
-        popup2 = await pp;
-        if (popup2) {
-          for (let i = 0; i < 24; i++) {
-            if (/vSellerId=[0-9a-f]/.test(popup2.url())) break;
-            await sleep(1500);
-            if (i === 10) await popup2.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        let rowIdx = -1;
+        for (let pg2 = 0; pg2 < 6 && rowIdx < 0; pg2++) {
+          const rc = await rowsLoc.count();
+          for (let i = 0; i < rc; i++) {
+            if ((await rowsLoc.nth(i).innerText().catch(() => '')).includes(acc.id)) { rowIdx = i; break; }
           }
-          if (/vSellerId=[0-9a-f]/.test(popup2.url())) break;
-          console.log(`[${acc.name}] popup 落地异常: ${popup2.url().slice(0, 80)}`);
+          if (rowIdx < 0) {
+            const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
+            const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
+            if (disabled || !(await nextBtn.count())) break;
+            await nextBtn.click({ timeout: 5000 }).catch(() => {});
+            await sleep(5000);
+          }
+        }
+        if (rowIdx < 0) { console.log(`[${acc.name}] 列表中未找到，跳过`); break; }
+        const rowJump = rowsLoc.nth(rowIdx).locator('text=跳转').first();
+        const popupPromise = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
+        await rowJump.click({ timeout: 8000 }).catch(() => {});
+        await sleep(3500);
+        popup2 = await popupPromise;
+        // 同页兜底：跳转不弹新窗、当前页直接进聚光——新开页复用会话并立即恢复子账户列表
+        if (!popup2) {
+          for (let i = 0; i < 8; i++) {
+            if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) break;
+            await sleep(1500);
+          }
+          if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) {
+            const landed = listPage.url();
+            popup2 = await ctx.newPage();
+            await popup2.goto(landed, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+            await sleep(6000);
+            listPage
+              .goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 })
+              .catch(() => {});
+            await sleep(9000);
+            await listPage.evaluate(() => document.querySelectorAll('.dm-tour-guide-mark, [class*=tour-guide], [class*=tour-mask], [class*=notice-bar]').forEach((e) => e.remove())).catch(() => {});
+          }
+        }
+        // hover 兜底：行内悬浮「聚光平台」菜单项
+        if (!popup2) {
+          await rowJump.hover({ timeout: 4000 }).catch(() => {});
+          await sleep(1200);
+          const picks = listPage.locator('text="聚光平台"');
+          for (let i = 0; i < (await picks.count()); i++) {
+            if (await picks.nth(i).isVisible().catch(() => false)) {
+              const pp2 = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
+              await picks.nth(i).click({ timeout: 6000 }).catch(() => {});
+              popup2 = await pp2;
+              break;
+            }
+          }
+        }
+        if (popup2) {
+          // 等 SSO 链路完成：URL 到聚光域且加载稳定（中断会丢账户会话）
+          for (let i = 0; i < 12; i++) {
+            if (/vSellerId=|ad\.xiaohongshu\.com/.test(popup2.url())) break;
+            await sleep(1500);
+          }
+          if (/vSellerId=|ad\.xiaohongshu\.com/.test(popup2.url())) {
+            await popup2.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+            await sleep(6000);
+            break;
+          }
+          console.log(`[${acc.name}] popup 落地异常: ${popup2.url().slice(0, 90)}`);
           await popup2.close().catch(() => {});
           popup2 = null;
         }
-        // 人工接力：跳转点击无反应/被拦时，等 2 分钟请手动点击「跳转」
-        console.log(`[assist] 若浏览器停在列表页，请手动点击「${acc.name}」行的「跳转」（等待最多 2 分钟）...`);
-        for (let i = 0; i < 80; i++) {
-          if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) break;
-          await sleep(1500);
+        if (attempt < 3) {
+          console.log(`[${acc.name}] 第 ${attempt} 次跳转失败，20s 后重试 ...`);
+          await sleep(20000);
+          await backToList();
         }
-        if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) {
-          const landed = listPage.url();
-          popup2 = await ctx.newPage();
-          await popup2.goto(landed, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-          await sleep(6000);
-          break;
-        }
-        if (attempt < 3) await backToList();
       }
       if (!popup2) { console.log(`[${acc.name}] 未进入聚光，跳过`); await backToList(); continue; }
       const vseller = (popup2.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] || acc.id;
