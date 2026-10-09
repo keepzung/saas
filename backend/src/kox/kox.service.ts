@@ -517,25 +517,48 @@ export class KoxService {
       }
     }
     // 发布区块（特斯拉）：员工矩阵快照覆盖（发布/曝光/阅读/互动；赞藏评/CES 平台无口径为 0）
+    // ???????????????????????????=????????????????????
+    const noteMetaRows = brandId === 6
+      ? await this.prisma.koxNote.findMany({
+          where: { brandId: 6, publishTime: { gte: start, lte: end } },
+          select: { publishTime: true, authorName: true, accountId: true },
+        })
+      : [];
+    const csSum = brandId === 6
+      ? await this.prisma.koxContentStatDaily.aggregate({
+          where: { brandId: 6, day: { gte: start, lte: end } },
+          _sum: { impNum: true, readFeedNum: true, engageCnt: true, followCnt: true, noteNum: true },
+        })
+      : null;
+    const csSumG = (k: "impNum" | "readFeedNum" | "engageCnt" | "followCnt" | "noteNum") => Number(csSum?._sum[k] ?? 0);
+    const csDaily = brandId === 6
+      ? await this.prisma.koxContentStatDaily.groupBy({
+          by: ["day"],
+          where: { brandId: 6, day: { gte: start, lte: end } },
+          _sum: { impNum: true, readFeedNum: true, engageCnt: true },
+          orderBy: { day: "asc" },
+        })
+      : [];
     if (brandId === 6) {
+      const authorKeys = new Set(
+        noteMetaRows.map((n) => (n.accountId != null ? `a${n.accountId}` : `n${n.authorName ?? ""}`)).filter((k) => k !== "n"),
+      );
       publish = {
-        author_num: proContent?.author_num ?? 0,
-        item_cnt: proContent?.item_cnt ?? 0,
+        author_num: authorKeys.size,
+        item_cnt: noteMetaRows.length,
         crazy_item_cnt: 0,
-        item_author_ratio:
-          proContent && proContent.author_num
-            ? r2(proContent.item_cnt / proContent.author_num)
-            : 0,
-        follow_count_sum: 0,
-        exposure_sum: proContent?.exposure_sum ?? 0,
-        view_sum: proContent?.view_sum ?? 0,
-        interaction_sum: proContent?.interaction_sum ?? 0,
-        interaction_rate: proContent?.view_sum
-          ? r2((proContent.interaction_sum / proContent.view_sum) * 100)
+        item_author_ratio: authorKeys.size ? r2(noteMetaRows.length / authorKeys.size) : 0,
+        follow_count_sum: csSumG("followCnt"),
+        exposure_sum: csSumG("impNum"),
+        view_sum: csSumG("readFeedNum"),
+        interaction_sum: csSumG("engageCnt"),
+        interaction_rate: csSumG("readFeedNum")
+          ? r2((csSumG("engageCnt") / csSumG("readFeedNum")) * 100)
           : 0,
         tool_item_cnt_sum: 0,
       };
     }
+
     const regionOfId = new Map<number, string>();
     const regionOfName = new Map<string, string>();
     for (const a of gAccs) {
@@ -696,9 +719,9 @@ export class KoxService {
       koc_num: typeCount('KOC'),
       publish,
       publish_source: brandId === 6
-        ? proContent
-          ? 'pro_staff_matrix'
-          : 'pro_staff_no_partition'
+        ? noteMetaRows.length
+          ? 'content_manage_notes'
+          : 'content_manage_no_data'
         : hasNotes
           ? 'spark_notes'
           : 'kox_daily_stat',
@@ -748,15 +771,15 @@ export class KoxService {
         ]);
         // 口径（客户确认）：内容四项 = 商业内容管理同步的笔记窗口数据（发布数=窗口内真实发布篇数；
         // 曝光/阅读/互动=窗口内发布笔记的累计值，互动含关注）；周度快照仅用于线索口径
-        const itemCntN = brandId === 6 ? proContent?.item_cnt ?? 0 : noteRows.length;
-        const viewN = brandId === 6 ? proContent?.view_sum ?? 0 : noteViewSum;
-        const interN = brandId === 6 ? proContent?.interaction_sum ?? 0 : noteInteractionSum;
+        const itemCntN = brandId === 6 ? noteMetaRows.length : noteRows.length;
+        const viewN = brandId === 6 ? csSumG("readFeedNum") : noteViewSum;
+        const interN = brandId === 6 ? csSumG("engageCnt") : noteInteractionSum;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: brandId === 6 ? proContent?.exposure_sum ?? 0 : noteExposureSum,
+          exposure_sum: brandId === 6 ? csSumG("impNum") : noteExposureSum,
           view_sum: viewN,
           interaction_sum: interN,
           // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）
@@ -764,8 +787,9 @@ export class KoxService {
             ? r2((interN / viewN) * 100)
             : 0,
           // 字段6：新增粉丝数 = 聚光笔记报表「新增种草人群」窗口加总（12 子账户）
-          follow_count_sum:
-            jugAgg && Number(jugAgg._sum.grassUser ?? 0) > 0
+          follow_count_sum: brandId === 6
+            ? csSumG("followCnt")
+            : jugAgg && Number(jugAgg._sum.grassUser ?? 0) > 0
               ? Number(jugAgg._sum.grassUser)
               : noteRows.reduce((acc, n) => acc + n.followCount, 0),
           // 字段7：点击率 = 聚光笔记报表 Σ点击/Σ展现（仅投流口径）
@@ -776,9 +800,9 @@ export class KoxService {
         };
       })(),
       content_source: brandId === 6
-        ? `pro_staff_matrix(专业号员工矩阵窗口快照${proContent ? `，快照 ${dayKey08(proContent.stat_date)}` : '，无匹配分区'})`
-        : 'content_manage_notes(商业内容管理窗口笔记)',
-      // 调试用：特斯拉内容指标矩阵快照明细
+        ? `content_manage_daily(???????????????${csSum ? "??? " + dayKey08(start) + "~" + dayKey08(end) : "????"})`
+        : 'content_manage_notes(??????????)',
+      // ??????????????????????
       pro_content: proContent,
       // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
@@ -1058,6 +1082,24 @@ export class KoxService {
           }
         }
         // 字段9：投放趋势进线/开口/留资 = 专业号·线索经营 KOS-only 逐日（剔官号「特斯拉」）
+        // ???????????????????????????????????
+        if (brandId === 6 && csDaily.length) {
+          const pubDayCnt = new Map<string, number>();
+          for (const n of noteMetaRows) {
+            if (!n.publishTime) continue;
+            const k = dayKey08(n.publishTime);
+            pubDayCnt.set(k, (pubDayCnt.get(k) ?? 0) + 1);
+          }
+          for (const d of csDaily) {
+            const key = dayKey08(d.day);
+            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+            cur.item_cnt = pubDayCnt.get(key) ?? 0;
+            cur.exposure_sum = Number(d._sum.impNum ?? 0);
+            cur.view_sum = Number(d._sum.readFeedNum ?? 0);
+            cur.interaction_sum = Number(d._sum.engageCnt ?? 0);
+            byDate.set(key, cur);
+          }
+        }
         if (brandId === 6) {
           const clueDaily = await this.prisma.proClueDaily.findMany({
             where: { brandId: 6, day: { gte: start, lte: end } },

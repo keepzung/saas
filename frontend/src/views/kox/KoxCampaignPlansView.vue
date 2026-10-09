@@ -18,8 +18,8 @@
       type="error"
       show-icon
       style="margin-bottom: 12px"
-      message="星火登录态已失效，投放数据暂停更新"
-      description="数据断档期间星火侧历史完整，重新登录换新后可补回任意断档日期。请联系管理员处理。"
+      message="投放数据拉取异常，投放数据暂停更新"
+      description="数据断档期间历史数据仍可筛选，数据补齐后自动恢复实时展示。请联系管理员处理。"
     />
 
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
@@ -51,7 +51,7 @@
         <div class="metric-card">
           <div class="metric-label">
             投流内容数
-            <a-tooltip title="全部历史被投流推广的笔记数（数据来源：星火笔记推广状态，T+1）">
+            <a-tooltip title="全部历史被投流推广的笔记数（数据来源：聚光笔记推广状态，T+1）">
               <InfoCircleOutlined class="metric-tip" />
             </a-tooltip>
           </div>
@@ -168,7 +168,7 @@
           allow-clear
           @search="loadNoteTab"
         />
-        <span class="muted small">口径：星火笔记效果数据（近30天累计快照），非投放消耗拆分</span>
+        <span class="muted small">口径：聚光笔记效果数据（近30天累计快照），非投放消耗拆分</span>
       </div>
       <div v-if="detailTab === 'region'" class="note-filter-row">
         <a-radio-group v-model:value="regionGroupby" size="small" @change="loadRegionTab">
@@ -263,7 +263,7 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion, getSparkStatus } from '../../api/spark';
+import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion } from '../../api/spark';
 import { getKoxNotes } from '../../api/kox';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
@@ -397,12 +397,9 @@ function applyData(sumRes, listRes) {
 async function probeAndLoad() {
   loading.value = true;
   try {
-    getSparkStatus({ brandId: auth.currentBrandId ?? undefined })
-      .then((s) => {
-        cookieValid.value = s.cookie_valid;
-      })
-      .catch(() => {});
     const probe = await getSparkCampaignSummary(realParams());
+    // 横幅只看投数数据是否真的断更（聚光数据正常即视为有效，不再探测登录态）
+    cookieValid.value = (probe.total ?? 0) > 0;
     if ((probe.total ?? 0) > 0) {
       mode.value = 'real';
       const listRes = await getSparkCampaignAccounts(

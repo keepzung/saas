@@ -102,6 +102,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   if (!lp.ok) { console.error('partner 会话不可用：HEADLESS=0 人工登录一次后重跑'); await browser.close(); process.exit(1); }
   const listPage = lp.page;
+  // 平台跳转可能弹 confirm（Playwright 默认 dismiss 会取消跳转）：所有页面统一自动接受
+  const dialogAccept = (pg) => pg.on('dialog', (d) => d.accept().catch(() => {}));
+  dialogAccept(listPage);
+  ctx.on('page', (pg) => dialogAccept(pg));
   await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 });
   await sleep(10000);
   await listPage.evaluate(() => document.querySelectorAll('.dm-tour-guide-mark, [class*=tour-guide], [class*=tour-mask], [class*=notice-bar]').forEach((e) => e.remove())).catch(() => {});
@@ -111,6 +115,175 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   await sleep(500);
   const rowsLoc = listPage.locator('tbody tr');
+
+  // ── stat-daily 模式：12 子账户×逐日「商业内容管理」合计行（运营总览内容指标权威口径）──
+  if (process.argv.includes('--stat-daily')) {
+    const sIdx = process.argv.indexOf('--start');
+    const eIdx = process.argv.indexOf('--end');
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const sEnd = eIdx > -1 ? process.argv[eIdx + 1] : new Date(new Date(`${today}T00:00:00Z`).getTime() - 86400000 + 8 * 3600000).toISOString().slice(0, 10);
+    const sStart = sIdx > -1 ? process.argv[sIdx + 1] : new Date(new Date(`${sEnd}T00:00:00Z`).getTime() - 29 * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
+    const statDays = [];
+    for (let d = sStart, g = 0; d <= sEnd && g++ < 200; d = new Date(new Date(`${d}T00:00:00Z`).getTime() + 86400000 + 8 * 3600000).toISOString().slice(0, 10)) statDays.push(d);
+    console.log(`[stat-daily] 区间 ${sStart} ~ ${sEnd}（${statDays.length} 天）`);
+    const F = (x) => { const n = Number(x); return Number.isFinite(n) ? Math.round(n) : 0; };
+
+    const enumerateAll = async () => {
+      const out = [];
+      for (let pg2 = 0; pg2 < 6; pg2++) {
+        const rc = await rowsLoc.count();
+        for (let i = 0; i < rc; i++) {
+          const txt = (await rowsLoc.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ');
+          const idm = txt.match(/([0-9a-f]{24})/);
+          if (idm && /特斯拉/.test(txt) && !/官号/.test(txt)) out.push({ name: txt.split(' ')[0].slice(0, 30), id: idm[1], status: /冻结/.test(txt) ? 'frozen' : 'active' });
+        }
+        const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
+        if (!(await nextBtn.count())) break;
+        const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
+        if (disabled) break;
+        await nextBtn.click({ timeout: 5000 }).catch(() => {});
+        await sleep(5000);
+      }
+      const seen = new Set();
+      return out.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+    };
+    const backToList = async () => {
+      await listPage.goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await sleep(9000);
+      await listPage.evaluate(() => document.querySelectorAll('.dm-tour-guide-mark, [class*=tour-guide], [class*=tour-mask], [class*=notice-bar]').forEach((e) => e.remove())).catch(() => {});
+    };
+
+    const accounts = await enumerateAll();
+await backToList();
+    console.log(`[stat-daily] 子账户 ${accounts.length} 个（active ${accounts.filter((a) => a.status === 'active').length}）`);
+    const upserts = [];
+    let okAcc = 0;
+    for (const acc of accounts.filter((a) => a.status === 'active')) {
+      let rowIdx = -1;
+      for (let pg2 = 0; pg2 < 6 && rowIdx < 0; pg2++) {
+        const rc = await rowsLoc.count();
+        for (let i = 0; i < rc; i++) {
+          if ((await rowsLoc.nth(i).innerText().catch(() => '')).includes(acc.id)) { rowIdx = i; break; }
+        }
+        if (rowIdx < 0) {
+          const nextBtn = listPage.locator('[class*=pagination] [class*=next], li[class*=next], button[class*=next]').locator('visible=true').first();
+          const disabled = await nextBtn.evaluate((el) => el.className.includes('disabled') || el.getAttribute('disabled') !== null).catch(() => true);
+          if (disabled || !(await nextBtn.count())) break;
+          await nextBtn.click({ timeout: 5000 }).catch(() => {});
+          await sleep(5000);
+        }
+      }
+      if (rowIdx < 0) { console.log(`[${acc.name}] 列表中未找到，跳过`); continue; }
+
+      let popup2 = null;
+      for (let attempt = 1; attempt <= 3 && !popup2; attempt++) {
+        const pp = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
+        await rowsLoc.nth(rowIdx).locator('text=跳转').first().click({ timeout: 8000 }).catch(() => {});
+        await sleep(3500);
+        popup2 = await pp;
+        if (popup2) {
+          for (let i = 0; i < 24; i++) {
+            if (/vSellerId=[0-9a-f]/.test(popup2.url())) break;
+            await sleep(1500);
+            if (i === 10) await popup2.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+          }
+          if (/vSellerId=[0-9a-f]/.test(popup2.url())) break;
+          console.log(`[${acc.name}] popup 落地异常: ${popup2.url().slice(0, 80)}`);
+          await popup2.close().catch(() => {});
+          popup2 = null;
+        }
+        // 人工接力：跳转点击无反应/被拦时，等 2 分钟请手动点击「跳转」
+        console.log(`[assist] 若浏览器停在列表页，请手动点击「${acc.name}」行的「跳转」（等待最多 2 分钟）...`);
+        for (let i = 0; i < 80; i++) {
+          if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) break;
+          await sleep(1500);
+        }
+        if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) {
+          const landed = listPage.url();
+          popup2 = await ctx.newPage();
+          await popup2.goto(landed, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+          await sleep(6000);
+          break;
+        }
+        if (attempt < 3) await backToList();
+      }
+      if (!popup2) { console.log(`[${acc.name}] 未进入聚光，跳过`); await backToList(); continue; }
+      const vseller = (popup2.url().match(/vSellerId=([0-9a-f]+)/) || [])[1] || acc.id;
+
+      let onManage = false;
+      for (let mg = 1; mg <= 2 && !onManage; mg++) {
+        await popup2.goto(`https://ad.xiaohongshu.com/microapp/creativity/inspire?vSellerId=${vseller}`, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(7000);
+        await popup2.locator('text=创意管理').first().click({ timeout: 6000 }).catch(() => {});
+        await sleep(2000);
+        await popup2.locator('text=商业内容管理').first().click({ timeout: 6000 }).catch(() => {});
+        await sleep(8000);
+        onManage = await popup2.evaluate(() => /商业内容管理/.test(document.body.innerText || '')).catch(() => false);
+      }
+      if (!onManage) { console.log(`[${acc.name}] 未进入商业内容管理，跳过`); await popup2.close().catch(() => {}); await backToList(); continue; }
+
+      const statCall = async (day) =>
+        popup2.evaluate(async ({ vseller, day }) => {
+          const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              brandUserId: vseller,
+              reportBrandUserId: vseller,
+              noteContentTypeList: [], noteType: 0, spuIdList: [], tagIdList: [], recIdList: [],
+              noteDataStartTime: day, noteDataEndTime: day,
+              notePublishTimeStart: '', notePublishTimeEnd: '',
+              fansNumAccumLower: null, fansNumAccumUpper: null, ownOrderNote: false,
+              staffLabelList: [], staffCountry: [], staffProvince: [], staffCity: [],
+              pageNum: 1, pageSize: 1, sortDirect: '', sortColumn: '', noteCustomType: 0,
+            }),
+          });
+          const j = await res.json().catch(() => null);
+          return j?.data?.noteStatData ?? null;
+        }, { vseller, day }).catch(() => null);
+
+      for (const day of statDays) {
+        const nd = await statCall(day);
+        if (!nd) { console.log(`[${acc.name} ${day}] 无合计行`); continue; }
+        upserts.push({
+          brandId: 6,
+          day: new Date(`${day}T00:00:00+08:00`),
+          vSellerId: vseller,
+          vSellerName: acc.name,
+          impNum: F(nd.impNum), readFeedNum: F(nd.readFeedNum), engageCnt: F(nd.engageCnt),
+          followCnt: F(nd.followCnt), noteNum: F(nd.noteNum),
+          ziranImpCnt: F(nd.ziranImpCnt), ziranReadCnt: F(nd.ziranReadCnt),
+          tuiguangImpCnt: F(nd.tuiguangImpCnt), tuiguangReadCnt: F(nd.tuiguangReadCnt),
+        });
+      }
+      okAcc += 1;
+      // 逐账户即时落库（部分失败不丢已采集数据）
+      for (let i = 0; i < upserts.length; i += 200) {
+        const chunk = upserts.slice(i, i + 200);
+        for (const r of chunk) {
+          await prisma.koxContentStatDaily.upsert({
+            where: { brandId_day_vSellerId: { brandId: r.brandId, day: r.day, vSellerId: r.vSellerId } },
+            update: { impNum: r.impNum, readFeedNum: r.readFeedNum, engageCnt: r.engageCnt, followCnt: r.followCnt, noteNum: r.noteNum, ziranImpCnt: r.ziranImpCnt, ziranReadCnt: r.ziranReadCnt, tuiguangImpCnt: r.tuiguangImpCnt, tuiguangReadCnt: r.tuiguangReadCnt, vSellerName: r.vSellerName },
+            create: r,
+          });
+        }
+      }
+      upserts.length = 0;
+      console.log(`[${acc.name}] ${statDays.length} 天合计行已落库（${okAcc}/${accounts.filter((a) => a.status === 'active').length}）`);
+      await popup2.close().catch(() => {});
+      await backToList();
+    }
+    await prisma.sparkSyncLog.create({
+      data: { brandId: 6, syncType: 'content_stat_daily', statDate: sEnd, fetched: upserts.length, upserted: upserts.length, message: `accounts ok ${okAcc}, days ${statDays.length}, rows ${upserts.length}` },
+    });
+    console.log(`[stat-daily] 完成：${okAcc} 账号 × ${statDays.length} 天，落库 ${upserts.length} 行`);
+    await browser.close();
+    await prisma.$disconnect();
+    process.exit(0);
+  }
+  // ── stat-daily 模式结束 ──
+
   let idx = -1;
   for (let i = 0; i < (await rowsLoc.count()); i++) {
     if ((await rowsLoc.nth(i).innerText().catch(() => '')).includes(TARGET)) { idx = i; break; }
@@ -147,6 +320,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       console.log(`[${attempt}] popup 落地异常: ${popup.url().slice(0, 80)}`);
       await popup.close().catch(() => {});
       popup = null;
+    }
+    // 兜底：平台改版后跳转可能不弹新窗、在当前页直接进入聚光——
+    // 检测列表页已到聚光域时，按落地 URL 新开页复用会话，并立即恢复子账户列表页
+    if (!popup) {
+      // 人工接力窗口：跳转点击无反应时，最多等 2 分钟，请在浏览器里手动点击目标行的「跳转」
+      console.log(`[assist] 若浏览器停在子账户列表页，请手动点击「${TARGET}」行的「跳转」按钮（等待最多 2 分钟）...`);
+      for (let i = 0; i < 80; i++) {
+        if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) break;
+        await sleep(1500);
+      }
+      if (/vSellerId=|ad\.xiaohongshu\.com/.test(listPage.url())) {
+        const landed = listPage.url();
+        popup = await ctx.newPage();
+        await popup.goto(landed, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(6000);
+        listPage
+          .goto('https://partner.xiaohongshu.com/partner/subAccount-list', { waitUntil: 'domcontentloaded', timeout: 45000 })
+          .catch(() => {});
+        await sleep(9000);
+        idx = -1;
+        for (let i = 0; i < (await rowsLoc.count()); i++) {
+          if ((await rowsLoc.nth(i).innerText().catch(() => '')).includes(TARGET)) { idx = i; break; }
+        }
+      }
     }
     if (attempt < 3) {
       console.log(`[${attempt}] 跳转失败，冷却 20s 重试`);
@@ -187,6 +384,59 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     process.exit(1);
   }
   console.log('[2] 商业内容管理页 OK');
+
+  // PROBE_WINDOW=1：验证 noteData 窗口语义（窗口值 vs 累计值），输出结论后退出
+  if (process.env.PROBE_WINDOW === '1') {
+    const probeCall = async (ds, de) =>
+      popup.evaluate(async ({ vseller, ds, de }) => {
+        const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            brandUserId: vseller,
+            reportBrandUserId: vseller,
+            noteContentTypeList: [],
+            noteType: 0,
+            spuIdList: [],
+            tagIdList: [],
+            recIdList: [],
+            noteDataStartTime: ds,
+            noteDataEndTime: de,
+            notePublishTimeStart: '',
+            notePublishTimeEnd: '',
+            fansNumAccumLower: null,
+            fansNumAccumUpper: null,
+            ownOrderNote: false,
+            staffLabelList: [],
+            staffCountry: [],
+            staffProvince: [],
+            staffCity: [],
+            pageNum: 1,
+            pageSize: 5,
+            sortDirect: '',
+            sortColumn: '',
+            noteCustomType: 0,
+          }),
+        });
+        const j = await res.json().catch(() => null);
+        const d = j?.data ?? {};
+        const keys = Object.keys(d).filter((k) => k !== 'noteList');
+        const sample = {};
+        for (const k of keys) sample[k] = d[k];
+        return { keys, sample, row0: (d.noteList ?? [])[0]?.noteData ?? null, rowCount: (d.noteList ?? []).length };
+      }, { vseller, ds, de }).catch((e) => ({ err: String(e).slice(0, 120) }));
+    for (const [label, ds, de] of [['no-window', '', ''], ['w2', '2026-10-05', '2026-10-07']]) {
+      const r = await probeCall(ds, de);
+      console.log(`=== [${label}] ds=${ds} de=${de} rows=${r.rowCount ?? '-'}`);
+      console.log('data keys:', JSON.stringify(r.keys ?? r));
+      console.log('non-list fields:', JSON.stringify(r.sample ?? {}).slice(0, 800));
+      console.log('row0 noteData:', JSON.stringify(r.row0));
+    }
+    await browser.close();
+    await prisma.$disconnect();
+    process.exit(0);
+  }
 
   // 分页拉取（--days N = 增量：只拉近 N 天发布的笔记；缺省全量）
   const DRYP = process.argv.includes('--dry-run');

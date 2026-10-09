@@ -1309,6 +1309,29 @@ model ProClueToolStatDaily {
   @@index([brandId, day])
 }
 
+// 聚光「商业内容管理」按日×子账户合计（特斯拉运营总览内容指标权威口径，窗口感知）
+// 数据源: POST /api/leona/creative_center/noteList 的 noteStatData（sync-juguang-content.cjs --stat-daily 维护）
+model KoxContentStatDaily {
+  id            Int      @id @default(autoincrement())
+  brandId       Int      @default(6)
+  day           DateTime
+  vSellerId     String
+  vSellerName   String?
+  impNum        Int      @default(0)
+  readFeedNum   Int      @default(0)
+  engageCnt     Int      @default(0)
+  followCnt     Int      @default(0)
+  noteNum       Int      @default(0)
+  ziranImpCnt   Int      @default(0)
+  ziranReadCnt  Int      @default(0)
+  tuiguangImpCnt Int     @default(0)
+  tuiguangReadCnt Int    @default(0)
+  fetchedAt     DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, day, vSellerId])
+  @@index([brandId, day])
+}
+
 // 专业号「线索经营」客户×日明细（三行为标记；任意窗口按客户去重聚合的数据源）
 model ProClueUserDay {
   id             Int      @id @default(autoincrement())
