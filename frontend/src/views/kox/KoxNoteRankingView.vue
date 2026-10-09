@@ -48,7 +48,8 @@
       </div>
     </div>
 
-    <a-card v-if="mode === 'real'" :bordered="false" size="small" class="wordcloud-card">
+    <div class="wc-model-row">
+      <a-card v-if="mode === 'real'" :bordered="false" size="small" class="wordcloud-card">
       <template #title>
         <div class="card-header">
           <span class="bar"></span>
@@ -74,7 +75,12 @@
         <div v-if="!wcWords.length" class="muted mini">暂无数据</div>
       </div>
       <div v-if="wcMode === 'cloud' && !wcWords.length" class="muted mini" style="padding: 20px">暂无数据</div>
-    </a-card>
+      </a-card>
+
+      <a-card v-if="!isDf" :bordered="false" size="small" title="提及车型分布" class="mention-model-card">
+        <div ref="modelPieEl" class="mention-model-chart" />
+      </a-card>
+    </div>
 
     <a-card v-if="isDf" :bordered="false" size="small" class="ces-top-card">
       <template #title>
@@ -106,10 +112,6 @@
         <div ref="typeEffEl" class="type-efficiency-chart" />
       </a-card>
     </div>
-
-    <a-card v-if="!isDf" :bordered="false" size="small" title="提及车型分布">
-      <div ref="modelPieEl" class="mention-model-chart" />
-    </a-card>
 
     <a-card :bordered="false" size="small">
       <template #title>
@@ -1147,8 +1149,8 @@ onBeforeUnmount(() => {
 
 .mention-model-chart {
   width: 100%;
-  height: 360px;
-  margin-top: 16px;
+  height: 420px;
+  margin-top: 4px;
 }
 
 .summary-row {
@@ -1339,8 +1341,25 @@ onBeforeUnmount(() => {
   }
 }
 
-.wordcloud-card {
+/* 词云 + 提及车型 同行各半（词云更高更大；单卡存在时自动占满整行） */
+.wc-model-row {
+  display: flex;
+  gap: 12px;
   margin-bottom: 12px;
+  align-items: stretch;
+}
+.wc-model-row > .ant-card {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .wc-model-row {
+    flex-direction: column;
+  }
+}
+
+.wordcloud-card {
+  margin-bottom: 0;
 }
 .wordcloud-card .card-header {
   display: flex;
@@ -1349,11 +1368,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .wordcloud-chart {
-  height: 320px;
+  height: 460px;
 }
 /* 特斯拉：客户批注「词云可以做大点」 */
 .wordcloud-chart.tall {
-  height: 480px;
+  height: 580px;
 }
 .wc-tabs {
   margin-left: 12px;
