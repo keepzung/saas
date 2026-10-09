@@ -476,15 +476,14 @@ export class KoxService {
     const pubWinEnd = dayKey08(end);
     const pubAuthorOf = new Map<string, string | null>();
     const pubNoteIds = new Set<string>();
-    const pubDayNotes = new Map<string, Set<string>>();
+    const pubDayOf = new Map<string, string>();
     for (const c of contentPubRows) {
       if (!pubAuthorOf.has(c.noteId)) pubAuthorOf.set(c.noteId, c.authorName);
       if (!c.notePublishTime) continue;
       const pd = dayKey08(c.notePublishTime);
       if (pd < pubWinStart || pd > pubWinEnd) continue;
       pubNoteIds.add(c.noteId);
-      if (!pubDayNotes.has(pd)) pubDayNotes.set(pd, new Set());
-      pubDayNotes.get(pd)!.add(c.noteId);
+      pubDayOf.set(c.noteId, pd);
     }
     // noteId→KoxNote.accountId 映射（accountId 优先、作者名兜底归属基线账号）
     const pubAccId = new Map<string, number | null>();
@@ -499,7 +498,10 @@ export class KoxService {
     }
     const gAccById = new Map(gAccs.map((a) => [a.id, a]));
     const gAccByNick = new Map(gAccs.map((a) => [a.nickname, a]));
+    // 内容发布数统一口径（2026-10 客户确认）：仅统计匹配 210 基线账号的笔记——
+    // 与 KOS数据进度/账号表现分析/区域数据完全一致（未匹配作者名/官号不入统计）
     const pubCntByAcc = new Map<number, number>();
+    const pubDayMatched = new Map<string, number>();
     for (const noteId of pubNoteIds) {
       const accId = pubAccId.get(noteId);
       const acc =
@@ -507,18 +509,11 @@ export class KoxService {
         gAccByNick.get(pubAuthorOf.get(noteId) ?? '');
       if (!acc) continue; // 未匹配基线账号（含官号）不入统计
       pubCntByAcc.set(acc.id, (pubCntByAcc.get(acc.id) ?? 0) + 1);
+      const pd = pubDayOf.get(noteId);
+      if (pd) pubDayMatched.set(pd, (pubDayMatched.get(pd) ?? 0) + 1);
     }
-    const pubAuthorKeys = new Set<string>();
-    for (const noteId of pubNoteIds) {
-      const accId = pubAccId.get(noteId);
-      if (accId != null) pubAuthorKeys.add(`a${accId}`);
-      else {
-        const nm = pubAuthorOf.get(noteId) ?? '';
-        if (nm) pubAuthorKeys.add(`n${nm}`);
-      }
-    }
-    const pubItemCnt = pubNoteIds.size;
-    const pubAuthorNum = pubAuthorKeys.size;
+    const pubItemCnt = [...pubCntByAcc.values()].reduce((a, b) => a + b, 0);
+    const pubAuthorNum = pubCntByAcc.size;
 
     // —— E：员工矩阵（曝光/阅读/互动；发布数不用矩阵，保持 A 口径）——
     let staffUse: ProMatrixResult['rows'] = [];
@@ -1029,9 +1024,9 @@ export class KoxService {
         // 曝光/阅读/互动线 = E 员工数据日档（dateType=4）逐日求和；窗口无日档分区 → 回退 A 逐日；
         // 投放三线（进线/开口/留资）= C 聚光标准投笔记报表逐日（与周期报表同口径）
         if (brandId === 6) {
-          for (const [key, ids] of pubDayNotes) {
+          for (const [key, cnt] of pubDayMatched) {
             const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
-            cur.item_cnt = ids.size;
+            cur.item_cnt = cnt;
             byDate.set(key, cur);
           }
           const eDayRows = await this.prisma.proKosStaff.findMany({
@@ -1814,47 +1809,71 @@ export class KoxService {
     return { source, start, end, total_texts: totalTexts, words };
   }
 
-  /** 笔记级指标加总（brand6 笔记排行/内容表现/热门内容口径）：
-   *  曝光=ΣimpNum、阅读=ΣreadFeedNum、互动=ΣengageCnt ← 聚光「商业内容管理」逐笔记（A，全量笔记覆盖）；
-   *  私信三数 ← 聚光「标准投笔记报表」（C，投流口径） */
+  /** 笔记级内容指标（brand6 笔记排行/内容表现/热门内容口径）：
+   *  曝光=ΣimpNum、阅读=ΣreadFeedNum ← 聚光「商业内容管理」逐笔记（A，全量笔记覆盖）；
+   *  私信三数已改由获客工具统计 G 按作者账号归属（见 clueToolByAccount），不再取聚光笔记报表 */
   private async juguangNoteMap(brandId: number) {
-    const empty = new Map<string, { imp: number; click: number; inter: number; inq: number; open: number; leads: number }>();
+    const empty = new Map<string, { imp: number; click: number; inter: number }>();
     if (brandId !== 6) return empty;
-    const [contentRows, jugRows] = await Promise.all([
-      this.prisma.koxContentNoteDaily.groupBy({
-        by: ['noteId'],
-        where: { brandId: 6 },
-        _sum: { impNum: true, readFeedNum: true, engageCnt: true },
-      }),
-      this.prisma.koxJuguangNoteDaily.groupBy({
-        by: ['noteId'],
-        where: { brandId: 6 },
-        _sum: {
-          msgInquiries: true,
-          msgOpenings: true,
-          msgLeads: true,
-        },
-      }),
-    ]);
-    const map = new Map<string, { imp: number; click: number; inter: number; inq: number; open: number; leads: number }>();
+    const contentRows = await this.prisma.koxContentNoteDaily.groupBy({
+      by: ['noteId'],
+      where: { brandId: 6 },
+      _sum: { impNum: true, readFeedNum: true, engageCnt: true },
+    });
+    const map = new Map<string, { imp: number; click: number; inter: number }>();
     for (const r of contentRows) {
       map.set(r.noteId, {
         imp: Number(r._sum.impNum ?? 0),
         click: Number(r._sum.readFeedNum ?? 0),
         inter: Number(r._sum.engageCnt ?? 0),
-        inq: 0,
-        open: 0,
-        leads: 0,
       });
     }
-    for (const r of jugRows) {
-      const cur = map.get(r.noteId) ?? { imp: 0, click: 0, inter: 0, inq: 0, open: 0, leads: 0 };
-      cur.inq = Number(r._sum.msgInquiries ?? 0);
-      cur.open = Number(r._sum.msgOpenings ?? 0);
-      cur.leads = Number(r._sum.msgLeads ?? 0);
-      map.set(r.noteId, cur);
-    }
     return map;
+  }
+
+  /** G 账号级私信三数（brand6）：窗口 × 基线账号（belongUserId=authorId 归属，与账号表现分析同口径）。
+   *  供笔记排行汇总卡（全量合计）与列表行（按作者账号归属）使用——与是否投流无关（2026-10 客户确认） */
+  private async clueToolByAccount(start: Date, end: Date) {
+    const byAcc = new Map<number, { enter: number; open: number; leads: number }>();
+    const byNick = new Map<string, { enter: number; open: number; leads: number }>();
+    const totals = { enter: 0, open: 0, leads: 0 };
+    const toolRows = await this.prisma.proClueToolStatDaily.findMany({
+      where: { brandId: 6, day: { gte: start, lte: end }, belongUserId: { not: '' } },
+      select: {
+        belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+        serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+        landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+        otherLeadsUserCnt: true,
+      },
+    });
+    if (!toolRows.length) return { byAcc, byNick, totals };
+    const kos = await this.prisma.kosAccount.findMany({
+      where: { brandId: 6, status: 'enabled' },
+      select: { id: true, authorId: true, nickname: true },
+    });
+    const accByUid = new Map(kos.filter((k) => k.authorId).map((k) => [k.authorId as string, k]));
+    for (const r of toolRows) {
+      const acc = accByUid.get(r.belongUserId);
+      if (!acc) continue;
+      const cur = byAcc.get(acc.id) ?? { enter: 0, open: 0, leads: 0 };
+      cur.enter += r.consultUserCnt;
+      cur.open += r.msgChatUserCnt;
+      cur.leads +=
+        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+      byAcc.set(acc.id, cur);
+    }
+    for (const k of kos) {
+      const v = byAcc.get(k.id);
+      if (v && k.nickname) byNick.set(k.nickname, v);
+    }
+    for (const v of byAcc.values()) {
+      totals.enter += v.enter;
+      totals.open += v.open;
+      totals.leads += v.leads;
+    }
+    return { byAcc, byNick, totals };
   }
 
   async notes(query: {
@@ -1873,7 +1892,7 @@ export class KoxService {
     page?: string;
     page_size?: string;
   }) {
-    const { where, base } = await this.noteFilters(query);
+    const { where, base, start: nfStart, end: nfEnd } = await this.noteFilters(query);
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(500, Math.max(1, Number(query.page_size ?? 20) || 20));
     const brandId = query.brandId ? Number(query.brandId) : undefined;
@@ -1898,7 +1917,9 @@ export class KoxService {
     };
     // brand6：剔除官号（特斯拉）笔记
     if (brandId === 6) where.authorName = { not: '特斯拉' };
-    // brand6：曝光/阅读/互动以商业内容管理逐笔记加总为准（A）、私信三数以聚光笔记报表为准（C）
+    // brand6：曝光/阅读以商业内容管理逐笔记加总为准（A）；
+    // 私信三数 = 获客工具统计 G 按作者账号归属（与投流无关，2026-10 客户确认）
+    const gNote = brandId === 6 ? await this.clueToolByAccount(nfStart, nfEnd) : null;
     const jug = await this.juguangNoteMap(brandId ?? 0);
     let rows;
     let total;
@@ -1908,15 +1929,17 @@ export class KoxService {
       const field = (query.metric ?? 'views') as string;
       const eff = (n: (typeof all)[number]) => {
         const jv = jug.get(n.noteId);
-        if (!jv) return n;
-        return {
-          ...n,
-          exposure: jv.imp,
-          views: jv.click,
-          pmInquiries: jv.inq,
-          pmOpenings: jv.open,
-          pmLeads: jv.leads,
-        };
+        let pm = { enter: 0, open: 0, leads: 0 };
+        if (gNote) {
+          pm =
+            (n.accountId != null ? gNote.byAcc.get(n.accountId) : undefined) ??
+            ((n.account?.nickname ?? n.authorName) ? gNote.byNick.get((n.account?.nickname ?? n.authorName) as string) : undefined) ??
+            { enter: 0, open: 0, leads: 0 };
+        }
+        const base2 = jv
+          ? { ...n, exposure: jv.imp, views: jv.click }
+          : n;
+        return { ...base2, pmInquiries: pm.enter, pmOpenings: pm.open, pmLeads: pm.leads };
       };
       rows = all
         .map(eff)
@@ -1997,7 +2020,8 @@ export class KoxService {
     accountTag?: string;
     regionName?: string;
   }) {
-    const { where } = await this.noteFilters(query);
+    const { where, start, end } = await this.noteFilters(query);
+    const brandId6 = (query.brandId ? Number(query.brandId) : 0) === 6;
     const rowsQ = await this.prisma.koxNote.findMany({
       where,
       select: {
@@ -2015,16 +2039,30 @@ export class KoxService {
         category: true,
         modelTag: true,
         keyword: true,
+        accountId: true,
+        authorName: true,
       },
     });
-    // brand6：曝光/阅读/互动以商业内容管理逐笔记加总为准（A）、私信三数以聚光笔记报表为准（C）
+    // brand6：曝光/阅读以商业内容管理逐笔记加总为准（A）；
+    // 私信三数 = 获客工具统计 G 按作者账号归属（2026-10 客户确认：笔记排行私信与投流无关，统一 G 口径）
     const jug = await this.juguangNoteMap(query.brandId ? Number(query.brandId) : 0);
-    const rows = jug.size
+    const g = brandId6 ? await this.clueToolByAccount(start, end) : null;
+    const gOf = (n: { accountId: number | null; authorName: string | null }) =>
+      (n.accountId != null ? g?.byAcc.get(n.accountId) : undefined) ??
+      (n.authorName ? g?.byNick.get(n.authorName) : undefined) ??
+      { enter: 0, open: 0, leads: 0 };
+    const rows = brandId6
       ? rowsQ.map((n) => {
           const jv = jug.get(n.noteId);
-          return jv
-            ? { ...n, exposure: jv.imp, views: jv.click, pmInquiries: jv.inq, pmOpenings: jv.open, pmLeads: jv.leads }
-            : n;
+          const g2 = gOf(n);
+          return {
+            ...n,
+            exposure: jv ? jv.imp : n.exposure,
+            views: jv ? jv.click : n.views,
+            pmInquiries: g2.enter,
+            pmOpenings: g2.open,
+            pmLeads: g2.leads,
+          };
         })
       : rowsQ;
 
@@ -2050,6 +2088,12 @@ export class KoxService {
         pm_leads_sum: 0,
       },
     );
+    // 汇总卡私信三数 = G 全量合计（窗口 × 全部基线账号，与账号表现分析同源同值）
+    if (g) {
+      totals.pm_inquiries_sum = g.totals.enter;
+      totals.pm_openings_sum = g.totals.open;
+      totals.pm_leads_sum = g.totals.leads;
+    }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
     const byModel = new Map<string, number>();

@@ -591,9 +591,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
     const since = new Date(Date.now() - days * 86400000);
 
-    // 特斯拉（brand6）：来鼓坐席为组名（非个人账号），按组名含「特斯拉」过滤，
-    // 剔除「上汽大众区域号（全天）」「超级管理员」等其他品牌/管理坐席的会话；
-    // 会话表为单网关存储（brandId 固定为 LAIGU_BRAND_ID=5），brand6 查询不按 brandId 过滤
+    // 特斯拉（brand6）：固定使用来鼓评论口径（专业号 KOS 评论流，2026-10 客户确认回退；
+    // 私信会话口径代码保留但不再触发）。评论按红框标准过滤：210 基线账号 + 官号「特斯拉」
     // Morgandada（brand5）：只显示 isMdd 会话（投放账户/账号id/客服昵称三判据并集）
     const sessionWhere: Prisma.LaiguLeadWhereInput = {
       ...(brandId === 6 ? {} : { brandId }),
@@ -601,9 +600,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     };
     if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') sessionWhere.isMdd = true;
     if (brandId === 6) sessionWhere.staffName = { contains: '特斯拉' };
-
-    // 来鼓评论口径（专业号 KOS 评论流）：会话为空但有评论时启用
-    const leadCount = await this.prisma.laiguLead.count({ where: sessionWhere });
+    const leadCount = brandId === 6 ? 0 : await this.prisma.laiguLead.count({ where: sessionWhere });
     const commentCount = await this.prisma.laiguComment.count({ where: { brandId } });
     if (leadCount === 0 && commentCount > 0) {
       return this.commentFeedback(brandId, days, since);
@@ -718,10 +715,21 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** 评论口径的用户反馈分析（与私信口径同形返回） */
+  /** 评论口径的用户反馈分析（与私信口径同形返回）。
+   *  特斯拉（brand6）按红框标准过滤：评论所属账号（entOpenName）∈ 210 基线账号昵称 + 官号「特斯拉」，
+   *  剔除上汽大众等其他品牌账号的评论（2026-10 客户确认） */
   private async commentFeedback(brandId: number, days: number, since: Date) {
+    const whereC: Prisma.LaiguCommentWhereInput = { brandId, createdAt: { gte: since } };
+    if (brandId === 6) {
+      const baseline = await this.prisma.kosAccount.findMany({
+        where: { brandId: 6, status: 'enabled' },
+        select: { nickname: true },
+      });
+      const allowed = [...new Set([...baseline.map((a) => a.nickname).filter(Boolean), '特斯拉'])];
+      whereC.entOpenName = { in: allowed };
+    }
     const rows = await this.prisma.laiguComment.findMany({
-      where: { brandId, createdAt: { gte: since } },
+      where: whereC,
       orderBy: { createdAt: 'desc' },
       take: 5000,
     });
@@ -840,7 +848,9 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       topics: extractKeywords(contents, 30),
       source: 'laigu_comments',
       scope_note:
-        '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论）；统计为所选周期全量，明细展示最近 500 条；分类/情感为关键词规则引擎判定',
+        brandId === 6
+          ? '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论），仅统计 210 基线账号及官号「特斯拉」的评论；统计为所选周期全量，明细展示最近 500 条；分类/情感为关键词规则引擎判定'
+          : '数据源=来鼓评论管理（专业号 KOS 笔记的用户评论）；统计为所选周期全量，明细展示最近 500 条；分类/情感为关键词规则引擎判定',
     };
   }
 

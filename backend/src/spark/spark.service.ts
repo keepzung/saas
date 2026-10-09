@@ -1125,6 +1125,31 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           }
         : null;
 
+    // 特斯拉：投流账号数 = 窗口内被投流的 KOS 基线账号数（聚光笔记报表笔记 → KoxNote → 基线账号去重；
+    // 非 D 的项目级子账户数——客户 2026-10 指定「被投流的 KOS 实时账号数」）
+    let kosAccountNum: number | null = null;
+    if (brandId === 6) {
+      const { noteAuthor } = await this.teslaNoteAccountMaps();
+      const kosRows = await this.prisma.kosAccount.findMany({
+        where: { brandId: 6 },
+        select: { id: true, nickname: true },
+      });
+      const kosIdSet = new Set(kosRows.map((k) => k.id));
+      const kosNickSet = new Set(kosRows.map((k) => k.nickname));
+      const cNotes = await this.prisma.koxJuguangNoteDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end } },
+        select: { noteId: true },
+        distinct: ['noteId'],
+      });
+      const accKeys = new Set<string>();
+      for (const cn of cNotes) {
+        const meta = noteAuthor.get(cn.noteId);
+        if (meta?.accountId != null && kosIdSet.has(meta.accountId)) accKeys.add('a' + meta.accountId);
+        else if (meta?.authorName && kosNickSet.has(meta.authorName.trim())) accKeys.add('n' + meta.authorName.trim());
+      }
+      kosAccountNum = accKeys.size;
+    }
+
     return {
       start: dayKey08(start),
       end: dayKey08(end),
@@ -1142,7 +1167,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,
-        account_num: new Set(rows.map((r) => r.virtualSellerId)).size,
+        account_num: kosAccountNum ?? new Set(rows.map((r) => r.virtualSellerId)).size,
         fee: r2v(totalFee),
         impression: totalImpression,
         click: totalClick,

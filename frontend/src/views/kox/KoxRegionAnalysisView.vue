@@ -171,7 +171,9 @@ const dfRegionRows = computed(() => {
         pm_leads: s('pm_leads'),
         ad_fee: orgFee,
       };
-  return [totalRow, ...rest.map((r, i) => ({ ...r, rank: i + 1, ad_fee: null }))];
+  const ranked = rest.map((r, i) => ({ ...r, rank: i + 1, ad_fee: null }));
+  // 特斯拉：全国行置底（客户 2026-10 指定，14 西二区之下）；东风保持全国总行在顶部
+  return isTesla ? [...ranked, { ...totalRow, rank: '-' }] : [totalRow, ...ranked];
 });
 
 const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
