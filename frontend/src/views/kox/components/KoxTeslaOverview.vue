@@ -145,8 +145,6 @@
               <div class="kv"><span>留资率（留资/进线）</span><b class="c-green">{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
               <template v-if="ov.lead_funnel?.total_leads != null">
                 <div class="kv"><span>总留资（未去重）</span><b class="c-green">{{ fmt(ov.lead_funnel?.total_leads) }}</b></div>
-                <div class="kv"><span>服务卡留资</span><b>{{ fmt(ov.lead_funnel?.service_card_leads) }}</b></div>
-                <div class="kv"><span>个微复制留资</span><b>{{ fmt(ov.lead_funnel?.wecom_copy_leads) }}</b></div>
               </template>
             </div>
           </a-tab-pane>

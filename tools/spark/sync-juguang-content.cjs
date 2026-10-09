@@ -126,12 +126,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const statDays = [];
     for (let d = sStart, g = 0; d <= sEnd && g++ < 200; d = new Date(new Date(`${d}T00:00:00Z`).getTime() + 86400000 + 8 * 3600000).toISOString().slice(0, 10)) statDays.push(d);
     // 发布窗口：只采集「窗口内发布的员工笔记」的逐日表现（区域数据分析时段发布口径）
-    // 回填显式传 --pub-start/--pub-end；缺省=滚动近 PUB_WINDOW_DAYS 天（每日 cron 用）
+    // 平台 notePublishTimeEnd 为截断语义（不含当日）——缺省 End=今天，保证数据日当天发布的笔记可采
+    // 回填显式传 --pub-start/--pub-end；缺省 Start=滚动近 PUB_WINDOW_DAYS 天（每日 cron 用）
     const pubStartIdx = process.argv.indexOf('--pub-start');
     const pubEndIdx = process.argv.indexOf('--pub-end');
     const PUB_DAYS = Number(process.env.PUB_WINDOW_DAYS || 35);
-    const pubStart = pubStartIdx > -1 ? process.argv[pubStartIdx + 1] : new Date(new Date(`${sEnd}T00:00:00Z`).getTime() - (PUB_DAYS - 1) * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
-    const pubEnd = pubEndIdx > -1 ? process.argv[pubEndIdx + 1] : sEnd;
+    const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const pubStart = pubStartIdx > -1 ? process.argv[pubStartIdx + 1] : new Date(new Date(`${todayStr}T00:00:00Z`).getTime() - PUB_DAYS * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
+    const pubEnd = pubEndIdx > -1 ? process.argv[pubEndIdx + 1] : todayStr;
     console.log(`[stat-daily] 区间 ${sStart} ~ ${sEnd}（${statDays.length} 天）；发布窗口 ${pubStart} ~ ${pubEnd}`);
     const F = (x) => { const n = Number(x); return Number.isFinite(n) ? Math.round(n) : 0; };
     const parsePubS = (s) => {
