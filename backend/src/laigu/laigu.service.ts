@@ -591,21 +591,15 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
     const since = new Date(Date.now() - days * 86400000);
 
-    // 特斯拉（brand6）：只显示归属员工 ∈ 210 基线账号的私信会话（来鼓网关多品牌共用，剔除其他品牌员工会话）
+    // 特斯拉（brand6）：来鼓坐席为组名（非个人账号），按组名含「特斯拉」过滤，
+    // 剔除「上汽大众区域号（全天）」「超级管理员」等其他品牌/管理坐席的会话
     // Morgandada（brand5）：只显示 isMdd 会话（投放账户/账号id/客服昵称三判据并集）
     const sessionWhere: Prisma.LaiguLeadWhereInput = {
       brandId,
       OR: [{ lastMessageAt: { gte: since } }, { sessionCreatedAt: { gte: since } }],
     };
     if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') sessionWhere.isMdd = true;
-    if (brandId === 6) {
-      const baseline = await this.prisma.kosAccount.findMany({
-        where: { brandId: 6, status: 'enabled' },
-        select: { nickname: true },
-      });
-      const nicknames = baseline.map((a) => a.nickname).filter(Boolean);
-      if (nicknames.length) sessionWhere.staffName = { in: nicknames };
-    }
+    if (brandId === 6) sessionWhere.staffName = { contains: '特斯拉' };
 
     // 来鼓评论口径（专业号 KOS 评论流）：会话为空但有评论时启用
     const leadCount = await this.prisma.laiguLead.count({ where: sessionWhere });
@@ -716,7 +710,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       topics: extractKeywords(contents, 30),
       scope_note:
         brandId === 6
-          ? '数据源=来鼓私信会话（用户最后一条消息），仅显示归属员工为特斯拉基线账号（210 户）的会话；分类/情感为关键词规则引擎判定'
+          ? '数据源=来鼓私信会话（用户最后一条消息），仅统计特斯拉坐席组（剔除上汽大众等其他品牌坐席）；分类/情感为关键词规则引擎判定'
           : brandId === 5
             ? '数据源=来鼓私信会话（用户最后一条消息），仅显示 Morgandada 投放账户/门店账号的会话；分类/情感为关键词规则引擎判定'
             : '数据源=来鼓私信会话（用户最后一条消息），非小红书笔记评论；分类/情感为关键词规则引擎判定',
