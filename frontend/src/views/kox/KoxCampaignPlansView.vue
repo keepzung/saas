@@ -150,6 +150,7 @@
 
       <div v-if="detailTab === 'note'" class="note-filter-row">
         <a-select
+          v-if="!isTesla"
           v-model:value="noteRtbFilter"
           size="small"
           style="width: 130px"
@@ -168,7 +169,8 @@
           allow-clear
           @search="loadNoteTab"
         />
-        <span class="muted small">口径：聚光笔记效果数据（近30天累计快照），非投放消耗拆分</span>
+        <span v-if="isTesla" class="muted small">仅展示投放笔记 · 口径：聚光笔记报表按笔记ID去重求和（窗口内逐日聚合）</span>
+        <span v-else class="muted small">口径：聚光笔记效果数据（近30天累计快照），非投放消耗拆分</span>
       </div>
       <div v-if="detailTab === 'region'" class="note-filter-row">
         <a-radio-group v-model:value="regionGroupby" size="small" @change="loadRegionTab">
@@ -229,6 +231,15 @@
           <template v-else-if="column.key === 'rtb'">
             <a-tag :color="record.is_rtb ? 'green' : 'default'">{{ record.is_rtb ? '已推广' : '未推广' }}</a-tag>
           </template>
+          <template v-else-if="column.key === 'fee'">
+            <span class="fee-num">¥{{ fmtNum(record.fee) }}</span>
+          </template>
+          <template v-else-if="column.key === 'ctr'">
+            {{ record.ctr != null ? `${record.ctr}%` : '-' }}
+          </template>
+          <template v-else-if="column.key === 'msg_lead_cost'">
+            {{ record.msg_leads ? `¥${record.msg_lead_cost}` : '-' }}
+          </template>
         </template>
       </a-table>
 
@@ -263,7 +274,7 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignRegion } from '../../api/spark';
+import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignNotes, getSparkCampaignRegion } from '../../api/spark';
 import { getKoxNotes } from '../../api/kox';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
@@ -491,6 +502,39 @@ function onResize() {
 
 /* ---------- Excel 导出 ---------- */
 async function fetchAllNoteRows() {
+  if (isTesla.value) {
+    // 特斯拉：投放笔记明细（聚光笔记报表口径）全量分页
+    const all = [];
+    let p = 1;
+    for (;;) {
+      const res = await getSparkCampaignNotes(noteParams({ page: p, page_size: 200 }));
+      all.push(...(res.list ?? []));
+      if (!res.list?.length || all.length >= (res.total ?? 0)) break;
+      p += 1;
+    }
+    return all.map((n) => ({
+      _tesla: true,
+      title: n.title,
+      author_name: n.author_name,
+      publish_time: n.publish_time,
+      note_url: n.note_url,
+      exposure: n.exposure,
+      views: n.views,
+      likes: n.likes,
+      comments: n.comments,
+      collects: n.collects,
+      shares: n.shares,
+      follow: n.follow,
+      fee: n.fee,
+      click: n.click,
+      ctr: n.ctr,
+      interaction: n.interaction,
+      msg_inquiries: n.msg_inquiries,
+      msg_openings: n.msg_openings,
+      msg_leads: n.msg_leads,
+      msg_lead_cost: n.msg_lead_cost,
+    }));
+  }
   const all = [];
   let p = 1;
   for (;;) {
@@ -562,24 +606,51 @@ async function exportAll() {
 
     if (mode.value === 'real' && detailTab.value === 'note') {
       const noteRowsRaw = await fetchAllNoteRows();
-      sheets.push({
-        name: '笔记明细',
-        rows: noteRowsRaw.map((n) => ({
-          笔记标题: n.title,
-          作者: n.author_name ?? '',
-          专业号主体: n.brand_user_name ?? '',
-          发布时间: n.publish_time ?? '',
-          推广状态: n.is_rtb_adver === true ? '已推广' : n.is_rtb_adver === false ? '未推广' : '',
-          曝光: n.exposure,
-          阅读: n.views,
-          点赞: n.likes,
-          评论: n.comments,
-          收藏: n.collects,
-          分享: n.shares,
-          涨粉: n.follow_count,
-          链接: n.note_url ?? '',
-        })),
-      });
+      if (noteRowsRaw[0]?._tesla) {
+        sheets.push({
+          name: '投放笔记明细',
+          rows: noteRowsRaw.map((n) => ({
+            笔记标题: n.title,
+            作者: n.author_name ?? '',
+            发布时间: n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
+            消耗: n.fee,
+            曝光: n.exposure,
+            点击: n.click,
+            点击率: `${n.ctr ?? 0}%`,
+            互动: n.interaction,
+            私信进线: n.msg_inquiries,
+            私信开口: n.msg_openings,
+            私信留资: n.msg_leads,
+            留资成本CPL: n.msg_leads ? n.msg_lead_cost : '-',
+            阅读: n.views,
+            点赞: n.likes,
+            评论: n.comments,
+            收藏: n.collects,
+            分享: n.shares,
+            涨粉: n.follow,
+            链接: n.note_url ?? '',
+          })),
+        });
+      } else {
+        sheets.push({
+          name: '笔记明细',
+          rows: noteRowsRaw.map((n) => ({
+            笔记标题: n.title,
+            作者: n.author_name ?? '',
+            专业号主体: n.brand_user_name ?? '',
+            发布时间: n.publish_time ?? '',
+            推广状态: n.is_rtb_adver === true ? '已推广' : n.is_rtb_adver === false ? '未推广' : '',
+            曝光: n.exposure,
+            阅读: n.views,
+            点赞: n.likes,
+            评论: n.comments,
+            收藏: n.collects,
+            分享: n.shares,
+            涨粉: n.follow_count,
+            链接: n.note_url ?? '',
+          })),
+        });
+      }
     }
 
     if (mode.value === 'real' && detailTab.value === 'region') {
@@ -628,18 +699,36 @@ const maxRegionFee = computed(() =>
   regionRows.value.reduce((mx, r) => Math.max(mx, Number(r.fee ?? 0)), 1),
 );
 
-const noteColumns = [
-  { key: 'title', title: '笔记 / 作者', width: 300 },
-  { key: 'rtb', title: '推广状态', width: 90 },
-  { title: '曝光', dataIndex: 'exposure', width: 100, sorter: (a, b) => a.exposure - b.exposure },
-  { title: '阅读', dataIndex: 'views', width: 100, sorter: (a, b) => a.views - b.views },
-  { title: '点赞', dataIndex: 'likes', width: 80 },
-  { title: '评论', dataIndex: 'comments', width: 80 },
-  { title: '收藏', dataIndex: 'collects', width: 80 },
-  { title: '分享', dataIndex: 'shares', width: 80 },
-  { title: '涨粉', dataIndex: 'follow', width: 80 },
-  { title: '发布时间', dataIndex: 'publish_time', width: 150 },
-];
+const noteColumns = computed(() => {
+  if (isTesla.value) {
+    // 特斯拉：仅投放笔记 + 聚光笔记报表投放数据（消耗/点击/进线/开口/留资/CPL）
+    return [
+      { key: 'title', title: '笔记 / 作者', width: 300 },
+      { title: '发布时间', dataIndex: 'publish_time', width: 150 },
+      { key: 'fee', title: '消耗', dataIndex: 'fee', width: 110, sorter: (a, b) => a.fee - b.fee },
+      { title: '曝光', dataIndex: 'exposure', width: 100, sorter: (a, b) => a.exposure - b.exposure },
+      { title: '点击', dataIndex: 'click', width: 90, sorter: (a, b) => a.click - b.click },
+      { key: 'ctr', title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
+      { title: '互动', dataIndex: 'interaction', width: 80 },
+      { title: '私信进线', dataIndex: 'msg_inquiries', width: 95, sorter: (a, b) => a.msg_inquiries - b.msg_inquiries },
+      { title: '私信开口', dataIndex: 'msg_openings', width: 95 },
+      { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
+      { key: 'msg_lead_cost', title: '留资成本', dataIndex: 'msg_lead_cost', width: 95, sorter: (a, b) => a.msg_lead_cost - b.msg_lead_cost },
+    ];
+  }
+  return [
+    { key: 'title', title: '笔记 / 作者', width: 300 },
+    { key: 'rtb', title: '推广状态', width: 90 },
+    { title: '曝光', dataIndex: 'exposure', width: 100, sorter: (a, b) => a.exposure - b.exposure },
+    { title: '阅读', dataIndex: 'views', width: 100, sorter: (a, b) => a.views - b.views },
+    { title: '点赞', dataIndex: 'likes', width: 80 },
+    { title: '评论', dataIndex: 'comments', width: 80 },
+    { title: '收藏', dataIndex: 'collects', width: 80 },
+    { title: '分享', dataIndex: 'shares', width: 80 },
+    { title: '涨粉', dataIndex: 'follow', width: 80 },
+    { title: '发布时间', dataIndex: 'publish_time', width: 150 },
+  ];
+});
 
 function noteParams(extra = {}) {
   const hasRange = range.value?.[0] && range.value?.[1];
@@ -659,6 +748,29 @@ function noteParams(extra = {}) {
 async function loadNoteTab() {
   noteLoading.value = true;
   try {
+    if (isTesla.value) {
+      // 特斯拉：聚光笔记报表按笔记ID去重求和（仅投放笔记），服务端分页
+      const res = await getSparkCampaignNotes(noteParams());
+      noteTotal.value = res.total ?? 0;
+      noteRows.value = (res.list ?? []).map((n) => ({
+        id: n.note_id,
+        title: n.title,
+        cover: n.cover || `/images/kox-notes/note${(n.note_id?.length % 5) + 1}.webp`,
+        note_url: n.note_url,
+        author_name: n.author_name,
+        publish_time: n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
+        fee: n.fee ?? 0,
+        exposure: n.exposure ?? 0,
+        click: n.click ?? 0,
+        ctr: n.ctr ?? 0,
+        interaction: n.interaction ?? 0,
+        msg_inquiries: n.msg_inquiries ?? 0,
+        msg_openings: n.msg_openings ?? 0,
+        msg_leads: n.msg_leads ?? 0,
+        msg_lead_cost: n.msg_lead_cost ?? 0,
+      }));
+      return;
+    }
     const res = await getKoxNotes(noteParams());
     noteTotal.value = res.total ?? 0;
     noteRows.value = (res.list ?? []).map((n) => ({
@@ -893,6 +1005,11 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+.fee-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .note-cell {

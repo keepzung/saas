@@ -30,6 +30,7 @@
         style="width: 110px"
         :options="[
           { label: '按阅读', value: 'views' },
+          { label: '按曝光', value: 'exposure' },
           { label: '按点赞', value: 'likes' },
           { label: '按互动', value: 'comments' },
         ]"

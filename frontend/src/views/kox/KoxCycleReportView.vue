@@ -33,12 +33,19 @@
       <div class="detail-card">
         <div class="detail-head">
           <span class="detail-title">数据明细</span>
-          <a-radio-group v-model:value="tab" button-style="solid">
-            <a-radio-button value="base">基础投流</a-radio-button>
+          <a-radio-group v-model:value="tab" button-style="solid" @change="load">
+            <a-radio-button value="base">{{ isTesla ? '全部投流' : '基础投流' }}</a-radio-button>
+            <template v-if="isTesla">
+              <a-radio-button value="投喂账号">投喂账号</a-radio-button>
+              <a-radio-button value="全托管">全托管</a-radio-button>
+              <a-radio-button value="CE运营">CE运营</a-radio-button>
+              <a-radio-button value="陪跑KOS">陪跑KOS</a-radio-button>
+            </template>
           </a-radio-group>
+          <span v-if="isTesla && tab !== 'base'" class="muted small">口径：聚光笔记报表逐笔记×账号标签（{{ tab }}）</span>
         </div>
         <a-table
-          :columns="columns"
+          :columns="detailColumns"
           :data-source="rows"
           :pagination="false"
           row-key="date"
@@ -66,6 +73,8 @@ import { exportExcel } from '../../utils/excel';
 
 const auth = useAuthStore();
 const brandParam = () => ({ brandId: auth.currentBrandId ?? undefined });
+// 特斯拉：周期报表支持按账号类型分类（投喂账号/全托管/CE运营/陪跑KOS）
+const isTesla = computed(() => (auth.currentBrandId ?? 0) === 6);
 
 const loading = ref(false);
 const preset = ref('7');
@@ -136,6 +145,8 @@ async function load() {
       start: s.format('YYYY-MM-DD'),
       end: e.format('YYYY-MM-DD'),
       ...brandParam(),
+      // 特斯拉：账号类型页签切换聚光笔记报表×账号标签口径
+      ...(isTesla.value && tab.value !== 'base' ? { accountType: tab.value } : {}),
     });
     summary.value = data.summary ?? {};
     trend.value = data.trend ?? [];
@@ -146,11 +157,22 @@ async function load() {
   }
 }
 
+// 账号类型页签下：消耗账户数列替换为投放笔记数（笔记报表口径）
+const detailColumns = computed(() => {
+  if (!(isTesla.value && tab.value !== 'base')) return columns;
+  return columns.map((c) =>
+    c.dataIndex === 'active_accounts'
+      ? { ...c, title: '投放笔记数', dataIndex: 'note_num' }
+      : c,
+  );
+});
+
 function doExport() {
+  const byType = isTesla.value && tab.value !== 'base';
   exportExcel(
     [
       {
-        name: '周期总览',
+        name: byType ? `周期总览-${tab.value}` : '周期总览',
         rows: [
           ...mainCards.value.map((c) => ({ 指标: c.label, 数值: c.value.replace(/,/g, '') })),
           ...costCards.value.map((c) => ({ 指标: c.label, 数值: c.value })),
@@ -164,14 +186,14 @@ function doExport() {
           展现量: r.impression,
           点击量: r.click,
           点击率: r.ctr,
-          消耗账户数: r.active_accounts,
+          [byType ? '投放笔记数' : '消耗账户数']: byType ? r.note_num : r.active_accounts,
           私信进线: r.msg_inquiries,
           私信开口: r.msg_openings,
           私信留资: r.msg_leads,
         })),
       },
     ],
-    `投流周期报表_${range.value?.[0]?.format('YYYYMMDD')}-${range.value?.[1]?.format('YYYYMMDD')}.xlsx`,
+    `投流周期报表${byType ? `_${tab.value}` : ''}_${range.value?.[0]?.format('YYYYMMDD')}-${range.value?.[1]?.format('YYYYMMDD')}.xlsx`,
   );
   message.success('已导出');
 }
@@ -243,7 +265,11 @@ onMounted(load);
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
+.muted { color: var(--color-text-secondary, #64748b); }
+.small { font-size: 12px; }
 .detail-title {
   font-size: 15px;
   font-weight: 600;

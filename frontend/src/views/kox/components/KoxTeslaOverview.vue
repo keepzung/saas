@@ -377,8 +377,9 @@ async function loadRank() {
 
 async function loadHot() {
   try {
-    const res = await getKoxNotes({ ...dateParams(), metric: 'views', page_size: 8 });
-    hotList.value = (res.list ?? []).slice(0, 8);
+    // 客户批注「不要留空填满」：拉满 20 条，列表内部滚动补齐与左栏等高
+    const res = await getKoxNotes({ ...dateParams(), metric: 'views', page_size: 20 });
+    hotList.value = (res.list ?? []).slice(0, 20);
   } catch {
     hotList.value = [];
   }
@@ -534,14 +535,27 @@ function onResize() {
   regionLineChart?.resize();
 }
 
+// 容器尺寸变化（父级卡片等高拉伸/侧栏收起）时重绘图表，消除柱状图下方留白
+let chartObserver = null;
+function observeCharts() {
+  if (chartObserver || typeof ResizeObserver === 'undefined') return;
+  chartObserver = new ResizeObserver(() => onResize());
+  for (const el of [opsChartEl.value, adChartEl.value, regionBarEl.value, regionLineEl.value]) {
+    if (el) chartObserver.observe(el);
+  }
+}
+
 onMounted(() => {
   loadFacets();
   reload();
   window.addEventListener('resize', onResize);
+  observeCharts();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
+  chartObserver?.disconnect();
+  chartObserver = null;
   opsChart?.dispose();
   adChart?.dispose();
   regionBarChart?.dispose();
@@ -828,6 +842,9 @@ onBeforeUnmount(() => {
 .rank-list {
   display: flex;
   flex-direction: column;
+  /* 客户批注「不要留空填满」：双列表等高，超出内部滚动 */
+  max-height: 640px;
+  overflow-y: auto;
 }
 
 .rank-row {
@@ -881,6 +898,9 @@ onBeforeUnmount(() => {
 .hot-list {
   display: flex;
   flex-direction: column;
+  /* 与左栏账号排行等高，20 条内部滚动补齐不留空 */
+  max-height: 640px;
+  overflow-y: auto;
 }
 
 .hot-row {

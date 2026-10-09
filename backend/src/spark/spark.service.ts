@@ -971,12 +971,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return rows.map((r) => r.name);
   }
 
-  /** 投放汇总：指标卡 + 逐日趋势（scope 可选 dealer/hq） */
+  /** 投放汇总：指标卡 + 逐日趋势（scope 可选 dealer/hq）
+   *  特斯拉(brand6) accountType 非空时：按账号类型（投喂账号/全托管/CE运营/陪跑KOS）切换为
+   *  聚光「标准投笔记报表」逐笔记口径（作者经 KoxNote→基线账号 accountTag 归类） */
   async campaignSummary(query: {
     start?: string;
     end?: string;
     brandId?: string;
     scope?: string;
+    accountType?: string;
   }) {
     // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
     const end = query.end
@@ -993,6 +996,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     if (!query.start) start.setHours(0, 0, 0, 0);
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
+    const accountType = (query.accountType ?? '').trim();
+    if (brandId === 6 && accountType) {
+      return this.campaignSummaryByAccountType(start, end, accountType);
+    }
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
       where: {
@@ -1122,6 +1129,248 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         }
         return out;
       })(),
+    };
+  }
+
+  /** 特斯拉：聚光笔记报表行 → 基线账号映射（作者 KoxNote 优先、回退报表 creator → accountTag） */
+  private async teslaNoteAccountMaps() {
+    const [notes, kos] = await Promise.all([
+      this.prisma.koxNote.findMany({
+        where: { brandId: 6 },
+        select: { noteId: true, authorName: true, accountId: true },
+      }),
+      this.prisma.kosAccount.findMany({
+        where: { brandId: 6 },
+        select: { id: true, nickname: true, accountTag: true },
+      }),
+    ]);
+    const noteAuthor = new Map(notes.map((n) => [n.noteId, n]));
+    const tagById = new Map(kos.map((k) => [k.id, k.accountTag ?? '']));
+    const tagByNick = new Map(kos.map((k) => [k.nickname, k.accountTag ?? '']));
+    return { noteAuthor, tagById, tagByNick };
+  }
+
+  private teslaRowCreatorTag(
+    row: { noteId: string; creator: string | null },
+    noteAuthor: Map<string, { authorName: string | null; accountId: number | null }>,
+    tagById: Map<number, string>,
+    tagByNick: Map<string, string>,
+  ): { creator: string; tag: string } {
+    const meta = noteAuthor.get(row.noteId);
+    const creator = (meta?.authorName ?? row.creator ?? '').trim();
+    const tag =
+      (meta?.accountId != null ? tagById.get(meta.accountId) : undefined) ??
+      tagByNick.get(creator) ??
+      '';
+    return { creator, tag };
+  }
+
+  /** 特斯拉：周期报表按账号类型（投喂账号/全托管/CE运营/陪跑KOS）
+   *  口径=聚光「标准投笔记报表」逐笔记按日 × 基线账号 accountTag */
+  private async campaignSummaryByAccountType(start: Date, end: Date, accountType: string) {
+    const [rows, { noteAuthor, tagById, tagByNick }] = await Promise.all([
+      this.prisma.koxJuguangNoteDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end } },
+      }),
+      this.teslaNoteAccountMaps(),
+    ]);
+
+    type DayAgg = {
+      fee: number; impression: number; click: number; interaction: number;
+      consult: number; open: number; leads: number;
+      notes: Set<string>; creators: Set<string>;
+    };
+    const dayMap = new Map<string, DayAgg>();
+    const allNotes = new Set<string>();
+    const allCreators = new Set<string>();
+    let matched = 0;
+    let totalFee = 0;
+    for (const r of rows) {
+      const { creator, tag } = this.teslaRowCreatorTag(r, noteAuthor, tagById, tagByNick);
+      if (tag !== accountType) continue;
+      matched += 1;
+      totalFee += Number(r.fee);
+      if (creator) allCreators.add(creator);
+      allNotes.add(r.noteId);
+      const key = dayKey08(r.day);
+      const cur = dayMap.get(key) ?? {
+        fee: 0, impression: 0, click: 0, interaction: 0, consult: 0, open: 0, leads: 0,
+        notes: new Set<string>(), creators: new Set<string>(),
+      };
+      cur.fee += Number(r.fee);
+      cur.impression += Number(r.impression);
+      cur.click += Number(r.click);
+      cur.interaction += Number(r.interaction);
+      cur.consult += Number(r.msgInquiries);
+      cur.open += Number(r.msgOpenings);
+      cur.leads += Number(r.msgLeads);
+      cur.notes.add(r.noteId);
+      if (creator) cur.creators.add(creator);
+      dayMap.set(key, cur);
+    }
+    const r2v = (v: number) => Math.round(v * 100) / 100;
+    const totalImpression = [...dayMap.values()].reduce((a, v) => a + v.impression, 0);
+    const totalClick = [...dayMap.values()].reduce((a, v) => a + v.click, 0);
+    const totalConsult = [...dayMap.values()].reduce((a, v) => a + v.consult, 0);
+    const totalOpen = [...dayMap.values()].reduce((a, v) => a + v.open, 0);
+    const totalLeads = [...dayMap.values()].reduce((a, v) => a + v.leads, 0);
+    const totalInteraction = [...dayMap.values()].reduce((a, v) => a + v.interaction, 0);
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endKey = keyOf(end);
+    const trend: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number; note_num: number }[] = [];
+    for (let guard = 0; guard < 366; guard++) {
+      const key = keyOf(startDay);
+      const v = dayMap.get(key);
+      trend.push({
+        date: key,
+        fee: v ? r2v(v.fee) : 0,
+        impression: v?.impression ?? 0,
+        click: v?.click ?? 0,
+        msg_inquiries: v?.consult ?? 0,
+        msg_openings: v?.open ?? 0,
+        msg_leads: v?.leads ?? 0,
+        active_accounts: v?.creators.size ?? 0,
+        note_num: v?.notes.size ?? 0,
+      });
+      if (key === endKey) break;
+      startDay.setDate(startDay.getDate() + 1);
+    }
+
+    return {
+      start: dayKey08(start),
+      end: dayKey08(end),
+      account_type: accountType,
+      total: matched,
+      summary: {
+        account_num: allCreators.size,
+        note_num: allNotes.size,
+        consume_days: dayMap.size,
+        fee: r2v(totalFee),
+        impression: totalImpression,
+        click: totalClick,
+        ctr: totalImpression ? r2v((totalClick / totalImpression) * 100) : 0,
+        cpc: totalClick ? r2v(totalFee / totalClick) : 0,
+        cpm: totalImpression ? r2v((totalFee / totalImpression) * 1000) : 0,
+        interaction: totalInteraction,
+        msg_inquiries: totalConsult,
+        msg_openings: totalOpen,
+        msg_leads: totalLeads,
+        msg_inquiry_cost: totalConsult ? r2v(totalFee / totalConsult) : 0,
+        msg_open_cost: totalOpen ? r2v(totalFee / totalOpen) : 0,
+        msg_lead_cost: totalLeads ? r2v(totalFee / totalLeads) : 0,
+      },
+      trend,
+      metric_note: `投放数据=聚光「标准投笔记报表」逐笔记按日汇总×账号标签（${accountType}；作者经 KoxNote 映射→基线账号 accountTag）`,
+    };
+  }
+
+  /** 特斯拉：投放笔记明细（聚光笔记报表按笔记ID去重求和 × KoxNote 内容累计） */
+  async campaignNotes(query: {
+    start?: string;
+    end?: string;
+    keyword?: string;
+    page?: string;
+    page_size?: string;
+    brandId?: string;
+  }) {
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
+    if (brandId !== 6) {
+      return { total: 0, page: 1, page_size: 0, list: [], metric_note: '投放笔记明细仅特斯拉工作区提供' };
+    }
+    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+    const end = query.end
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date(query.end)
+      : new Date();
+    if (!query.end) end.setHours(23, 59, 59, 999);
+    const start = query.start
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(query.start)
+      : new Date(end.getTime() - 29 * 86400000);
+    if (!query.start) start.setHours(0, 0, 0, 0);
+
+    const rows = await this.prisma.koxJuguangNoteDaily.findMany({
+      where: { brandId: 6, day: { gte: start, lte: end } },
+    });
+    const notes = await this.prisma.koxNote.findMany({
+      where: { brandId: 6 },
+      select: {
+        noteId: true, title: true, coverUrl: true, noteUrl: true, publishTime: true,
+        authorName: true, exposure: true, views: true, likes: true, comments: true,
+        collects: true, shares: true, followCount: true,
+      },
+    });
+    const metaByNoteId = new Map(notes.map((n) => [n.noteId, n]));
+
+    type NoteAgg = {
+      fee: number; impression: number; click: number; interaction: number;
+      inq: number; open: number; leads: number;
+      titleFb?: string; creatorFb?: string;
+    };
+    const agg = new Map<string, NoteAgg>();
+    for (const r of rows) {
+      const cur = agg.get(r.noteId) ?? {
+        fee: 0, impression: 0, click: 0, interaction: 0, inq: 0, open: 0, leads: 0,
+        titleFb: r.title ?? undefined, creatorFb: r.creator ?? undefined,
+      };
+      cur.fee += Number(r.fee);
+      cur.impression += Number(r.impression);
+      cur.click += Number(r.click);
+      cur.interaction += Number(r.interaction);
+      cur.inq += Number(r.msgInquiries);
+      cur.open += Number(r.msgOpenings);
+      cur.leads += Number(r.msgLeads);
+      agg.set(r.noteId, cur);
+    }
+
+    const r2v = (v: number) => Math.round(v * 100) / 100;
+    const keyword = (query.keyword ?? '').trim().toLowerCase();
+    let list = [...agg.entries()].map(([noteId, a]) => {
+      const m = metaByNoteId.get(noteId);
+      return {
+        note_id: noteId,
+        title: m?.title ?? a.titleFb ?? noteId,
+        cover: m?.coverUrl ?? null,
+        note_url: m?.noteUrl ?? null,
+        author_name: m?.authorName ?? a.creatorFb ?? '',
+        publish_time: m?.publishTime ?? null,
+        exposure: m?.exposure ?? 0,
+        views: m?.views ?? 0,
+        likes: m?.likes ?? 0,
+        comments: m?.comments ?? 0,
+        collects: m?.collects ?? 0,
+        shares: m?.shares ?? 0,
+        follow: m?.followCount ?? 0,
+        fee: r2v(a.fee),
+        click: a.click,
+        ctr: a.impression ? r2v((a.click / a.impression) * 100) : 0,
+        interaction: a.interaction,
+        msg_inquiries: a.inq,
+        msg_openings: a.open,
+        msg_leads: a.leads,
+        msg_lead_cost: a.leads ? r2v(a.fee / a.leads) : 0,
+      };
+    });
+    if (keyword) list = list.filter((x) => x.title.toLowerCase().includes(keyword));
+    list.sort((a, b) => b.fee - a.fee);
+
+    const total = list.length;
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(query.page_size ?? 10) || 10));
+    return {
+      start: dayKey08(start),
+      end: dayKey08(end),
+      total,
+      page,
+      page_size: pageSize,
+      list: list.slice((page - 1) * pageSize, page * pageSize),
+      metric_note:
+        '投放数据=聚光「标准投笔记报表」按笔记ID去重求和（所选窗口逐日聚合，仅投放笔记）；曝光/阅读/点赞等累计=商业内容管理笔记档案',
     };
   }
 

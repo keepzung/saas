@@ -15,6 +15,9 @@ export const getSparkCampaignSummary = (params) =>
 export const getSparkCampaignAccounts = (params) =>
   request.get('/spark/campaign/accounts', { params });
 
+export const getSparkCampaignNotes = (params) =>
+  request.get('/spark/campaign/notes', { params });
+
 export const getSparkCampaignRegion = (params) =>
   request.get('/spark/campaign/region', { params });
 

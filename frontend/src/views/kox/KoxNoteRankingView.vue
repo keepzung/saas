@@ -64,7 +64,7 @@
           <span v-if="wcTotalTexts" class="muted mini">基于 {{ wcTotalTexts }} 条{{ wcSource === 'comments' ? '评论' : '笔记标题' }} · 点击词语可筛选内容列表</span>
         </div>
       </template>
-      <div v-show="wcMode === 'cloud'" ref="wordcloudEl" class="wordcloud-chart" />
+      <div v-show="wcMode === 'cloud'" ref="wordcloudEl" class="wordcloud-chart" :class="{ tall: isTesla }" />
       <div v-if="wcMode === 'bar'" class="wc-fallback">
         <div v-for="w in wcWords.slice(0, 30)" :key="w.word" class="wc-bar-row" @click="onWordClick(w.word)">
           <span class="wc-word">{{ w.word }}</span>
@@ -101,7 +101,7 @@
       </div>
     </a-card>
 
-    <div v-if="!isDf" class="note-analysis-row">
+    <div v-if="!isDf && !isTesla" class="note-analysis-row">
       <a-card :bordered="false" size="small" title="内容类型效率对比分析" class="note-analysis-card-left">
         <div ref="typeEffEl" class="type-efficiency-chart" />
       </a-card>
@@ -1350,6 +1350,10 @@ onBeforeUnmount(() => {
 }
 .wordcloud-chart {
   height: 320px;
+}
+/* 特斯拉：客户批注「词云可以做大点」 */
+.wordcloud-chart.tall {
+  height: 480px;
 }
 .wc-tabs {
   margin-left: 12px;

@@ -87,9 +87,24 @@ export class SparkController {
   @Get('spark/campaign/summary')
   campaignSummary(
     @Query()
-    query: { start?: string; end?: string; brandId?: string; scope?: string },
+    query: { start?: string; end?: string; brandId?: string; scope?: string; accountType?: string },
   ) {
     return this.sparkService.campaignSummary(query);
+  }
+
+  @Get('spark/campaign/notes')
+  campaignNotes(
+    @Query()
+    query: {
+      start?: string;
+      end?: string;
+      keyword?: string;
+      page?: string;
+      page_size?: string;
+      brandId?: string;
+    },
+  ) {
+    return this.sparkService.campaignNotes(query);
   }
 
   @Get('spark/campaign/accounts')
