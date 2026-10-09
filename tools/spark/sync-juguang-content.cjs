@@ -43,6 +43,8 @@ if (fs.existsSync(envPath)) {
   }
 }
 const PLACEHOLDER_TITLES = new Set(['(乐允投放笔记)', '(聚光投放笔记)', '(无标题)']);
+// 规则分类器（懒加载 backend 编译产物；不可用时新建笔记不分类，由回填脚本兜底）
+let classifyNote = null;
 const PAGE_SIZE = Number(process.env.JG_PAGE_SIZE || 100);
 const MAX_PAGES = Number(process.env.JG_MAX_PAGES || 600);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -752,6 +754,11 @@ await backToList();
       // 新建未入库笔记（真实发布时间/标题/作者，作者可匹配基线账号时挂 accountId）——收集后批量 createMany
       const pub = parsePub(r.publishTime);
       const accountId = r.authorName ? acctIdByNick.get(r.authorName) ?? null : null;
+      // 规则分类（内容类型 + 车型标签）：复用 backend 编译产物 note-classify，避免新建笔记标签缺失
+      let cls = null;
+      try {
+        cls = (classifyNote || (classifyNote = require(path.join(ROOT, 'backend', 'dist', 'common', 'note-classify.js')).classifyTeslaNote))(r.title || '');
+      } catch { cls = null; }
       createRows.push({
         noteId: r.noteId,
         brandId: BRAND_ID,
@@ -766,6 +773,8 @@ await backToList();
         coverUrl: r.cover ? (r.cover.startsWith('http://') ? r.cover.replace('http://', 'https://') : r.cover) : null,
         rawJson: { publish_time_approx: !pub, source: 'content_manage' },
         statDate: pub ?? new Date('2026-01-01T00:00:00+08:00'),
+        category: cls?.category ?? null,
+        modelTag: cls?.modelTag ?? null,
         ...mData,
       });
       created += 1;
