@@ -18,6 +18,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { calcCes, classifyTier, KOS_TIERS, KosTierMeta } from './kos-tier.service';
 import { extractKeywords } from '../common/text-keywords';
+import { ProMatrixService, ProMatrixResult, PRO_STAFF_DAY_DATE_TYPE } from '../pro/pro-matrix.service';
 
 export interface AccountDto {
   nickname: string;
@@ -78,7 +79,10 @@ const num = (v: unknown): number => {
 
 @Injectable()
 export class KoxService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private proMatrixSvc: ProMatrixService,
+  ) {}
 
   async accounts(query: {
     platform?: string;
@@ -244,12 +248,6 @@ export class KoxService {
     const brandId = query.brandId ? Number(query.brandId) : undefined;
     const accountTag = query.accountTag || '';
     const regionName = query.regionName || '';
-    const windowDays = Math.max(
-      1,
-      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
-    );
-    // 特斯拉专业号快照档位：近1日/近7日/近30日
-    const proDateType = windowDays <= 1 ? 1 : windowDays <= 7 ? 2 : 3;
 
     const where: Prisma.KoxDailyStatWhereInput = {
       platform,
@@ -447,14 +445,15 @@ export class KoxService {
     const [gAccs, gNotes] = await Promise.all([
       this.prisma.kosAccount.findMany({
         where: globalAccountWhere,
-        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true, accountTag: true },
+        select: { id: true, nickname: true, regionName: true, storeName: true, fans: true, noteQuality: true, accountTag: true, authorId: true },
       }),
       gNotesP,
     ]);
 
-    // 客户周度表快照（KoxWeeklySnapshot）已停用：brand6 线索漏斗不再使用该数据（2026-10-08 客户确认）
-    // 特斯拉：内容指标唯一口径 = 专业号员工矩阵窗口快照（发布/曝光/阅读/互动，支持大区/标签过滤）
-    // 无匹配分区（未同步的历史/未来窗口）→ 内容指标 0，不再回退 KoxNote（星火 partner 通道停更已弃用）
+    // 客户周度表快照（KoxWeeklySnapshot）已停用；brand6 指标口径（客户指定，2026-10）：
+    // 发布数 = 聚光「商业内容管理」逐笔记（KoxContentNoteDaily，notePublishTime∈窗口去重）；
+    // 曝光/阅读(点击)/互动 = 专业号「数据中心-员工数据」（dateType=4 逐日求和优先、三档快照回退）；
+    // 大区内容分布按指标拆源：发布=A、三数=E、私信=G（获客工具统计，与账号表现分析同口径）。
     let proContent: {
       item_cnt: number;
       exposure_sum: number;
@@ -465,14 +464,73 @@ export class KoxService {
       stat_date: Date;
       region_content: { region: string; item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }[];
     } | null = null;
-    if (brandId === 6 && windowDays <= 31) {
-      const proMatrix = await this.proMatrixStaff(windowDays, start, end);
+
+    // —— A：发布数（窗口内发布笔记去重 + 作者数 + 逐日发布线 + 账号归属计数）——
+    const contentPubRows = brandId === 6
+      ? await this.prisma.koxContentNoteDaily.findMany({
+          where: { brandId: 6, day: { gte: start, lte: end } },
+          select: { noteId: true, authorName: true, notePublishTime: true },
+        })
+      : [];
+    const pubWinStart = dayKey08(start);
+    const pubWinEnd = dayKey08(end);
+    const pubAuthorOf = new Map<string, string | null>();
+    const pubNoteIds = new Set<string>();
+    const pubDayNotes = new Map<string, Set<string>>();
+    for (const c of contentPubRows) {
+      if (!pubAuthorOf.has(c.noteId)) pubAuthorOf.set(c.noteId, c.authorName);
+      if (!c.notePublishTime) continue;
+      const pd = dayKey08(c.notePublishTime);
+      if (pd < pubWinStart || pd > pubWinEnd) continue;
+      pubNoteIds.add(c.noteId);
+      if (!pubDayNotes.has(pd)) pubDayNotes.set(pd, new Set());
+      pubDayNotes.get(pd)!.add(c.noteId);
+    }
+    // noteId→KoxNote.accountId 映射（accountId 优先、作者名兜底归属基线账号）
+    const pubAccId = new Map<string, number | null>();
+    const pubIds = [...pubAuthorOf.keys()];
+    for (let i = 0; i < pubIds.length; i += 500) {
+      const chunk = pubIds.slice(i, i + 500);
+      const metaRows = await this.prisma.koxNote.findMany({
+        where: { brandId: 6, noteId: { in: chunk } },
+        select: { noteId: true, accountId: true },
+      });
+      for (const m of metaRows) pubAccId.set(m.noteId, m.accountId);
+    }
+    const gAccById = new Map(gAccs.map((a) => [a.id, a]));
+    const gAccByNick = new Map(gAccs.map((a) => [a.nickname, a]));
+    const pubCntByAcc = new Map<number, number>();
+    for (const noteId of pubNoteIds) {
+      const accId = pubAccId.get(noteId);
+      const acc =
+        (accId != null ? gAccById.get(accId) : undefined) ??
+        gAccByNick.get(pubAuthorOf.get(noteId) ?? '');
+      if (!acc) continue; // 未匹配基线账号（含官号）不入统计
+      pubCntByAcc.set(acc.id, (pubCntByAcc.get(acc.id) ?? 0) + 1);
+    }
+    const pubAuthorKeys = new Set<string>();
+    for (const noteId of pubNoteIds) {
+      const accId = pubAccId.get(noteId);
+      if (accId != null) pubAuthorKeys.add(`a${accId}`);
+      else {
+        const nm = pubAuthorOf.get(noteId) ?? '';
+        if (nm) pubAuthorKeys.add(`n${nm}`);
+      }
+    }
+    const pubItemCnt = pubNoteIds.size;
+    const pubAuthorNum = pubAuthorKeys.size;
+
+    // —— E：员工矩阵（曝光/阅读/互动；发布数不用矩阵，保持 A 口径）——
+    let staffUse: ProMatrixResult['rows'] = [];
+    let matrixMeta: { source: string; dateType: number; statDate: Date } | null = null;
+    if (brandId === 6) {
+      const proMatrix = await this.proMatrixSvc.proMatrix(6, start, end);
       if (proMatrix) {
-        const accByNick = new Map(gAccs.map((a) => [a.nickname, a]));
-        let staffUse = proMatrix.rows;
+        staffUse = proMatrix.rows;
+        matrixMeta = { source: proMatrix.source, dateType: proMatrix.dateType, statDate: proMatrix.statDate };
         if (accountTag || regionName) {
           staffUse = proMatrix.rows.filter((s) => {
-            const a = accByNick.get(s.nickName);
+            const a = gAccByNick.get(s.nickName);
             return (
               !!a &&
               (!accountTag || a.accountTag === accountTag) &&
@@ -480,81 +538,117 @@ export class KoxService {
             );
           });
         }
-        const sSum = (f: (s: (typeof staffUse)[number]) => number) =>
-          staffUse.reduce((acc, s) => acc + f(s), 0);
-        const regionAgg = new Map<
-          string,
-          { item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }
-        >();
-        for (const s of staffUse) {
-          const a = accByNick.get(s.nickName);
-          const r = a?.regionName;
-          if (!r) continue; // 匹配不上大区的员工行不进区域图（保持 15 大区横轴）
-          const cur =
-            regionAgg.get(r) ??
-            { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
-          cur.item_cnt += s.createNoteNum;
-          cur.exposure_sum += s.socImpCnt;
-          cur.view_sum += s.socClickCnt;
-          cur.interaction_sum += s.socEnageCnt;
-          cur.pm_leads += s.msgLeadsNum;
-          regionAgg.set(r, cur);
-        }
-        proContent = {
-          item_cnt: sSum((s) => s.createNoteNum),
-          exposure_sum: sSum((s) => s.socImpCnt),
-          view_sum: sSum((s) => s.socClickCnt),
-          interaction_sum: sSum((s) => s.socEnageCnt),
-          author_num: new Set(
-            staffUse.filter((s) => s.createNoteNum > 0).map((s) => s.nickName),
-          ).size,
-          date_type: proMatrix.dateType,
-          stat_date: proMatrix.statDate,
-          region_content: [...regionAgg.entries()]
-            .map(([region, v]) => ({ region, ...v }))
-            .sort((a, b) => b.item_cnt - a.item_cnt),
-        };
       }
     }
-    // 发布区块（特斯拉）：员工矩阵快照覆盖（发布/曝光/阅读/互动；赞藏评/CES 平台无口径为 0）
-    // ???????????????????????????=????????????????????
-    const noteMetaRows = brandId === 6
-      ? await this.prisma.koxNote.findMany({
-          where: { brandId: 6, publishTime: { gte: start, lte: end } },
-          select: { publishTime: true, authorName: true, accountId: true },
-        })
-      : [];
+    const eSum = (f: (s: (typeof staffUse)[number]) => number) => staffUse.reduce((acc, s) => acc + f(s), 0);
+    const eExposure = eSum((s) => s.socImpCnt);
+    const eView = eSum((s) => s.socClickCnt);
+    const eInter = eSum((s) => s.socEnageCnt);
+
+    // —— G：私信三数（逐账号 + 大区分桶；供 proContent.pm_leads 与 lead_funnel 共用）——
+    const clueByUid = new Map<string, { enter: number; open: number; leads: number }>();
+    let proClueFunnel: { enter: number; open: number; leads: number } | null = null;
+    if (brandId === 6) {
+      const clueUids = gAccs.map((a) => a.authorId).filter(Boolean);
+      if (clueUids.length) {
+        const toolRows = await this.prisma.proClueToolStatDaily.findMany({
+          where: {
+            brandId: 6,
+            day: { gte: start, lte: end },
+            belongUserId: { in: clueUids as string[] },
+          },
+          select: {
+            belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+            serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+            landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+            otherLeadsUserCnt: true,
+          },
+        });
+        for (const r of toolRows) {
+          const cur = clueByUid.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+          cur.enter += r.consultUserCnt;
+          cur.open += r.msgChatUserCnt;
+          cur.leads +=
+            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+            r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+            r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+          clueByUid.set(r.belongUserId, cur);
+        }
+        const totals = { enter: 0, open: 0, leads: 0 };
+        for (const v of clueByUid.values()) {
+          totals.enter += v.enter;
+          totals.open += v.open;
+          totals.leads += v.leads;
+        }
+        proClueFunnel = totals;
+      }
+    }
+
+    // —— 组装 proContent（大区内容分布拆源）——
+    if (brandId === 6) {
+      const regionAgg = new Map<
+        string,
+        { item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }
+      >();
+      const bumpRegion = (region: string | null | undefined) => {
+        if (!region) return null; // 匹配不上大区的不进区域图（保持大区横轴）
+        const cur =
+          regionAgg.get(region) ??
+          { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
+        regionAgg.set(region, cur);
+        return cur;
+      };
+      for (const [accId, cnt] of pubCntByAcc) {
+        const cur = bumpRegion(gAccById.get(accId)?.regionName);
+        if (cur) cur.item_cnt += cnt;
+      }
+      for (const s of staffUse) {
+        const cur = bumpRegion(gAccByNick.get(s.nickName)?.regionName);
+        if (!cur) continue;
+        cur.exposure_sum += s.socImpCnt;
+        cur.view_sum += s.socClickCnt;
+        cur.interaction_sum += s.socEnageCnt;
+      }
+      for (const a of gAccs) {
+        if (!a.authorId) continue;
+        const v = clueByUid.get(a.authorId);
+        if (!v) continue;
+        const cur = bumpRegion(a.regionName);
+        if (cur) cur.pm_leads += v.leads;
+      }
+      proContent = {
+        item_cnt: pubItemCnt,
+        exposure_sum: eExposure,
+        view_sum: eView,
+        interaction_sum: eInter,
+        author_num: pubAuthorNum,
+        date_type: matrixMeta?.dateType ?? 0,
+        stat_date: matrixMeta?.statDate ?? start,
+        region_content: [...regionAgg.entries()]
+          .map(([region, v]) => ({ region, ...v }))
+          .sort((a, b) => b.item_cnt - a.item_cnt),
+      };
+    }
+
+    // 发布区块（特斯拉）：发布=A；曝光/阅读/互动=E；新增粉丝=B（商业内容管理按日合计）
     const csSum = brandId === 6
       ? await this.prisma.koxContentStatDaily.aggregate({
           where: { brandId: 6, day: { gte: start, lte: end } },
-          _sum: { impNum: true, readFeedNum: true, engageCnt: true, followCnt: true, noteNum: true },
+          _sum: { followCnt: true },
         })
       : null;
-    const csSumG = (k: "impNum" | "readFeedNum" | "engageCnt" | "followCnt" | "noteNum") => Number(csSum?._sum[k] ?? 0);
-    const csDaily = brandId === 6
-      ? await this.prisma.koxContentStatDaily.groupBy({
-          by: ["day"],
-          where: { brandId: 6, day: { gte: start, lte: end } },
-          _sum: { impNum: true, readFeedNum: true, engageCnt: true },
-          orderBy: { day: "asc" },
-        })
-      : [];
+    const followCntSum = Number(csSum?._sum.followCnt ?? 0);
     if (brandId === 6) {
-      const authorKeys = new Set(
-        noteMetaRows.map((n) => (n.accountId != null ? `a${n.accountId}` : `n${n.authorName ?? ""}`)).filter((k) => k !== "n"),
-      );
       publish = {
-        author_num: authorKeys.size,
-        item_cnt: noteMetaRows.length,
+        author_num: pubAuthorNum,
+        item_cnt: pubItemCnt,
         crazy_item_cnt: 0,
-        item_author_ratio: authorKeys.size ? r2(noteMetaRows.length / authorKeys.size) : 0,
-        follow_count_sum: csSumG("followCnt"),
-        exposure_sum: csSumG("impNum"),
-        view_sum: csSumG("readFeedNum"),
-        interaction_sum: csSumG("engageCnt"),
-        interaction_rate: csSumG("readFeedNum")
-          ? r2((csSumG("engageCnt") / csSumG("readFeedNum")) * 100)
-          : 0,
+        item_author_ratio: pubAuthorNum ? r2(pubItemCnt / pubAuthorNum) : 0,
+        follow_count_sum: followCntSum,
+        exposure_sum: eExposure,
+        view_sum: eView,
+        interaction_sum: eInter,
+        interaction_rate: eView ? r2((eInter / eView) * 100) : 0,
         tool_item_cnt_sum: 0,
       };
     }
@@ -636,77 +730,8 @@ export class KoxService {
             : 0,
         };
 
-    // 特斯拉 G2：线索口径统一使用专业号总数据（ProKosOverview 快照，按窗口档位取）
-    const proLeads =
-      brandId === 6
-        ? (await this.prisma.proKosOverview.findFirst({
-            where: { brandId: 6, dateType: proDateType, statDate: { lte: end } },
-            orderBy: { statDate: 'desc' },
-          })) ??
-          (await this.prisma.proKosOverview.findFirst({
-            where: { brandId: 6, statDate: { lte: end } },
-            orderBy: { statDate: 'desc' },
-          }))
-        : null;
-
-    // 特斯拉 G3：线索权威口径 = 专业号「线索经营」按账号去重加总（KOS-only 剔除官号「特斯拉」；
-    // 与 KOS 数据进度逐账号行加总一致；支持大区/标签筛选；账号基线=对照表 enabled 192 户）
-    let proClueFunnel: { enter: number; open: number; leads: number } | null = null;
-    if (brandId === 6) {
-      const clueAccs = await this.prisma.kosAccount.findMany({
-        where: {
-          brandId: 6,
-          status: 'enabled',
-          ...(regionName ? { regionName } : {}),
-          ...(accountTag ? { accountTag } : {}),
-        },
-        select: { authorId: true },
-      });
-      const clueUids = clueAccs.map((a) => a.authorId).filter(Boolean);
-      if (clueUids.length) {
-        // 进线/开口/留资 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
-        const s = await this.prisma.proClueToolStatDaily.aggregate({
-          where: {
-            brandId: 6,
-            day: { gte: start, lte: end },
-            belongUserId: { in: clueUids as string[] },
-          },
-          _sum: {
-            consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
-            serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
-            landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
-            otherLeadsUserCnt: true,
-          },
-        });
-        const g = (k: keyof typeof s._sum) => Number(s._sum[k] ?? 0);
-        proClueFunnel = {
-          enter: g('consultUserCnt'),
-          open: g('msgChatUserCnt'),
-          leads:
-            g('msgLeadsUserCnt') + g('serviceCardLeadsUserCnt') + g('qwAddLeadsUserCnt') +
-            g('bookCompLeadsUserCnt') + g('landingPageLeadsUserCnt') + g('wechatLeadsUserCnt') +
-            g('appCardLeadsUserCnt') + g('otherLeadsUserCnt'),
-        };
-      }
-    }
-
-    // 特斯拉趋势图补充数据源：专业号「近1日」快照（dateType 1，每日同步积累）
-    const proDailies =
-      brandId === 6
-        ? await this.prisma.proKosOverview.findMany({
-            where: { brandId: 6, dateType: 1, statDate: { gte: start, lte: end } },
-            orderBy: { statDate: 'asc' },
-          })
-        : [];
-
-    // 特斯拉：聚光笔记报表窗口聚合（字段6 新增粉丝=新增种草人群；字段7 点击率=聚光 Σclick/Σimp）
-    const jugAgg =
-      brandId === 6
-        ? await this.prisma.koxJuguangNoteDaily.aggregate({
-            where: { brandId: 6, day: { gte: start, lte: end } },
-            _sum: { click: true, impression: true, grassUser: true },
-          })
-        : null;
+    // 特斯拉线索口径（proClueFunnel）已在上方 G 块计算：专业号「客户管理（旧版）获客工具统计」
+    // 严格单源——窗口内无数据如实显示 0，不再回退 ProKosOverview 快照/周度表（客户确认，2026-10）
 
     return {
       global: globalBlock,
@@ -719,7 +744,7 @@ export class KoxService {
       koc_num: typeCount('KOC'),
       publish,
       publish_source: brandId === 6
-        ? noteMetaRows.length
+        ? pubItemCnt > 0
           ? 'content_manage_notes'
           : 'content_manage_no_data'
         : hasNotes
@@ -758,8 +783,8 @@ export class KoxService {
       },
       ad_source: hasCampaign ? 'spark_campaign' : 'kox_daily_stat',
       // 特斯拉版汇总条（账号标签/大区筛选联动）：KOS数/门店数/粉丝覆盖/内容四指标/账均发布
-      // 特斯拉：内容四指标唯一口径=专业号员工矩阵窗口快照（无匹配分区时为 0，不再回退 KoxNote）；
-      // 其他品牌=商业内容管理同步的笔记窗口数据
+      // 特斯拉口径（客户指定）：发布=A 商业内容管理逐笔记；曝光/阅读/互动=E 员工数据（逐日求和/三档快照）；
+      // 新增粉丝=B 商业内容管理按日合计；点击率=E 点击/曝光；其他品牌=商业内容管理同步的笔记窗口数据
       summary: await (async () => {
         const [fansAgg, storeGroups, accountTotal] = await Promise.all([
           this.prisma.kosAccount.aggregate({ where: accountWhere, _sum: { fans: true } }),
@@ -769,40 +794,37 @@ export class KoxService {
           }),
           this.prisma.kosAccount.count({ where: accountWhere }),
         ]);
-        // 口径（客户确认）：内容四项 = 商业内容管理同步的笔记窗口数据（发布数=窗口内真实发布篇数；
-        // 曝光/阅读/互动=窗口内发布笔记的累计值，互动含关注）；周度快照仅用于线索口径
-        const itemCntN = brandId === 6 ? noteMetaRows.length : noteRows.length;
-        const viewN = brandId === 6 ? csSumG("readFeedNum") : noteViewSum;
-        const interN = brandId === 6 ? csSumG("engageCnt") : noteInteractionSum;
+        const itemCntN = brandId === 6 ? pubItemCnt : noteRows.length;
+        const exposureN = brandId === 6 ? eExposure : noteExposureSum;
+        const viewN = brandId === 6 ? eView : noteViewSum;
+        const interN = brandId === 6 ? eInter : noteInteractionSum;
         return {
           kos_num: accountTotal,
           store_num: storeGroups.length,
           fans_sum: fansAgg._sum.fans ?? 0,
           item_cnt: itemCntN,
-          exposure_sum: brandId === 6 ? csSumG("impNum") : noteExposureSum,
+          exposure_sum: exposureN,
           view_sum: viewN,
           interaction_sum: interN,
           // 互动率 = 互动量/阅读量（与 interaction_sum/view_sum 同口径）
           interaction_rate: viewN
             ? r2((interN / viewN) * 100)
             : 0,
-          // 字段6：新增粉丝数 = 聚光笔记报表「新增种草人群」窗口加总（12 子账户）
+          // 新增粉丝数：特斯拉=商业内容管理 followCnt 窗口加总；其他品牌=聚光种草人群/笔记涨粉
           follow_count_sum: brandId === 6
-            ? csSumG("followCnt")
-            : jugAgg && Number(jugAgg._sum.grassUser ?? 0) > 0
-              ? Number(jugAgg._sum.grassUser)
-              : noteRows.reduce((acc, n) => acc + n.followCount, 0),
-          // 字段7：点击率 = 聚光笔记报表 Σ点击/Σ展现（仅投流口径）
-          ...(jugAgg && Number(jugAgg._sum.impression ?? 0) > 0
-            ? { ctr: r2((Number(jugAgg._sum.click) / Number(jugAgg._sum.impression)) * 100) }
+            ? followCntSum
+            : noteRows.reduce((acc, n) => acc + n.followCount, 0),
+          // 点击率（特斯拉）= 员工数据 点击/曝光
+          ...(brandId === 6
+            ? (eExposure > 0 ? { ctr: r2((eView / eExposure) * 100) } : {})
             : {}),
           avg_publish: accountTotal ? r2(itemCntN / accountTotal) : 0,
         };
       })(),
       content_source: brandId === 6
-        ? `content_manage_daily(???????????????${csSum ? "??? " + dayKey08(start) + "~" + dayKey08(end) : "????"})`
-        : 'content_manage_notes(??????????)',
-      // ??????????????????????
+        ? `juguang_content_publish + pro_staff_${matrixMeta?.source ?? 'no_partition'}(窗口 ${dayKey08(start)}~${dayKey08(end)})`
+        : 'content_manage_notes(笔记窗口数据)',
+      // 特斯拉口径明细（员工矩阵来源/分区）
       pro_content: proContent,
       // 特斯拉版线索转化漏斗：专业号「线索经营」KOS 口径（权威，覆盖周度快照/线下表）> 周度快照 > 投放+自然 > 专业号总数据
       lead_funnel: await (async () => {
@@ -855,43 +877,7 @@ export class KoxService {
             };
           }
         }
-        // 兜底：无逐日投放数据时用专业号三档快照（不随自定义区间变化）
-        if (proLeads) {
-          let inquiries = proLeads.messageOpenCnt;
-          let openings = proLeads.messageDrivingOpenCnt;
-          let leads = proLeads.msgLeadsNum;
-          let formLeads = proLeads.leadsSuccess;
-          let scopeExtra = '';
-          if (accountTag || regionName) {
-            // 平台总数据无区域维度：改用同档位员工矩阵按筛选账号汇总
-            const staffRowsPro = await this.prisma.proKosStaff.findMany({
-              where: { brandId: 6, statDate: proLeads.statDate, dateType: proLeads.dateType },
-              take: 1000,
-            });
-            const accNickSet = new Set(
-              (filteredAccounts ?? []).map((a) => a.nickname),
-            );
-            const staffUse = staffRowsPro.filter((s) => !!s.nickName && accNickSet.has(s.nickName));
-            inquiries = staffUse.reduce((a, s) => a + s.messageOpenCnt, 0);
-            openings = staffUse.reduce((a, s) => a + s.messageDrivingOpenCnt, 0);
-            leads = staffUse.reduce((a, s) => a + s.msgLeadsNum, 0);
-            formLeads = staffUse.reduce((a, s) => a + s.leadsSuccess, 0);
-            scopeExtra = '；已按大区/标签筛选（员工矩阵汇总）';
-          }
-          const winLabel = proLeads.dateType === 1 ? '近1日' : proLeads.dateType === 2 ? '近7日' : '近30日';
-          return {
-            pm_inquiries: inquiries,
-            pm_openings: openings,
-            pm_leads: leads,
-            open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
-            lead_rate: inquiries ? r2((leads / inquiries) * 100) : 0,
-            form_leads: formLeads,
-            campaign: { enter: 0, open: 0, leads: 0 },
-            organic: { inquiries: 0, openings: 0, leads: 0 },
-            scope_note: `专业号线索总数据口径（${winLabel}窗口，含自然与投放；快照截至 ${dayKey08(proLeads.statDate)}，每日自动同步）${scopeExtra}`,
-            source: 'pro_overview',
-          };
-        }
+        // 特斯拉严格单源：G（获客工具统计）无数据时如实 0，不再回退专业号快照
         return {
           pm_inquiries: 0,
           pm_openings: 0,
@@ -1038,78 +1024,73 @@ export class KoxService {
             byDate.set(key, { ...emptyRow(), ...campPart(camp) });
           }
         }
-        // 特斯拉：专业号「近1日」快照逐日积累，填充无笔记日期的内容数/阅读量（真实日数据）
-        if (proDailies.length) {
-          for (const d of proDailies) {
-            const key = dayKey08(d.statDate);
-            const proItems = d.createNoteNum;
-            const proViews = d.socReadCnt + d.adsReadCnt;
-            const existing = byDate.get(key);
-            if (!existing) {
-              byDate.set(key, {
-                ...emptyRow(),
-                ...campPart(campByDate.get(key)),
-                item_cnt: proItems,
-                view_sum: proViews,
-              });
-            } else if (!existing.item_cnt) {
-              existing.item_cnt = proItems;
-              if (!existing.view_sum) existing.view_sum = proViews;
+        // 特斯拉趋势口径（客户指定，2026-10）：
+        // 发布线 = A 商业内容管理逐日发布数（notePublishTime 当日去重）；
+        // 曝光/阅读/互动线 = E 员工数据日档（dateType=4）逐日求和；窗口无日档分区 → 回退 A 逐日；
+        // 投放三线（进线/开口/留资）= C 聚光标准投笔记报表逐日（与周期报表同口径）
+        if (brandId === 6) {
+          for (const [key, ids] of pubDayNotes) {
+            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+            cur.item_cnt = ids.size;
+            byDate.set(key, cur);
+          }
+          const eDayRows = await this.prisma.proKosStaff.findMany({
+            where: {
+              brandId: 6,
+              dateType: PRO_STAFF_DAY_DATE_TYPE,
+              statDate: {
+                gte: new Date(`${pubWinStart}T00:00:00`),
+                lte: new Date(`${pubWinEnd}T23:59:59.999`),
+              },
+            },
+            select: { statDate: true, socImpCnt: true, socClickCnt: true, socEnageCnt: true },
+          });
+          const eByDay = new Map<string, { imp: number; click: number; inter: number }>();
+          for (const r of eDayRows) {
+            const k = dayKey08(r.statDate);
+            const cur = eByDay.get(k) ?? { imp: 0, click: 0, inter: 0 };
+            cur.imp += r.socImpCnt;
+            cur.click += r.socClickCnt;
+            cur.inter += r.socEnageCnt;
+            eByDay.set(k, cur);
+          }
+          if (eByDay.size > 0) {
+            for (const [key, v] of eByDay) {
+              const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+              cur.exposure_sum = v.imp;
+              cur.view_sum = v.click;
+              cur.interaction_sum = v.inter;
+              byDate.set(key, cur);
+            }
+          } else {
+            // 回退：窗口无 E 日档分区（回填未覆盖的历史）→ A 逐日（商业内容管理逐笔记表现）
+            const aDaily = await this.prisma.koxContentNoteDaily.groupBy({
+              by: ['day'],
+              where: { brandId: 6, day: { gte: start, lte: end } },
+              _sum: { impNum: true, readFeedNum: true, engageCnt: true },
+              orderBy: { day: 'asc' },
+            });
+            for (const d of aDaily) {
+              const key = dayKey08(d.day);
+              const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
+              cur.exposure_sum = Number(d._sum.impNum ?? 0);
+              cur.view_sum = Number(d._sum.readFeedNum ?? 0);
+              cur.interaction_sum = Number(d._sum.engageCnt ?? 0);
+              byDate.set(key, cur);
             }
           }
-        }
-        // 字段8：运营趋势内容三线 = 聚光笔记报表（12 子账户加总，note×日；弃乐允快照/ranf）
-        if (brandId === 6) {
-          const jugDaily = await this.prisma.$queryRaw<{
-            day: Date;
-            cnt: bigint;
-            imp: bigint;
-            click: bigint;
-            inter: bigint;
-          }[]>`
-            SELECT (day AT TIME ZONE 'UTC') AS day, COUNT(*)::bigint AS cnt, SUM(impression) AS imp, SUM(click) AS click, SUM(interaction) AS inter
-            FROM "KoxJuguangNoteDaily"
-            WHERE "brandId" = 6 AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
-            GROUP BY day`;
-          for (const r of jugDaily) {
-            const key = dayKey08(r.day);
-            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
-            cur.item_cnt = Number(r.cnt);
-            cur.exposure_sum = Number(r.imp);
-            cur.view_sum = Number(r.click);
-            cur.interaction_sum = Number(r.inter);
-            byDate.set(key, cur);
-          }
-        }
-        // 字段9：投放趋势进线/开口/留资 = 专业号·线索经营 KOS-only 逐日（剔官号「特斯拉」）
-        // ???????????????????????????????????
-        if (brandId === 6 && csDaily.length) {
-          const pubDayCnt = new Map<string, number>();
-          for (const n of noteMetaRows) {
-            if (!n.publishTime) continue;
-            const k = dayKey08(n.publishTime);
-            pubDayCnt.set(k, (pubDayCnt.get(k) ?? 0) + 1);
-          }
-          for (const d of csDaily) {
+          const jugMsgDaily = await this.prisma.koxJuguangNoteDaily.groupBy({
+            by: ['day'],
+            where: { brandId: 6, day: { gte: start, lte: end } },
+            _sum: { msgInquiries: true, msgOpenings: true, msgLeads: true },
+            orderBy: { day: 'asc' },
+          });
+          for (const d of jugMsgDaily) {
             const key = dayKey08(d.day);
             const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
-            cur.item_cnt = pubDayCnt.get(key) ?? 0;
-            cur.exposure_sum = Number(d._sum.impNum ?? 0);
-            cur.view_sum = Number(d._sum.readFeedNum ?? 0);
-            cur.interaction_sum = Number(d._sum.engageCnt ?? 0);
-            byDate.set(key, cur);
-          }
-        }
-        if (brandId === 6) {
-          const clueDaily = await this.prisma.proClueDaily.findMany({
-            where: { brandId: 6, day: { gte: start, lte: end } },
-          });
-          for (const r of clueDaily) {
-            const key = dayKey08(r.day);
-            const cur = byDate.get(key) ?? { ...emptyRow(), ...campPart(campByDate.get(key)) };
-            cur.ad_msg_enter = r.enterKos;
-            cur.ad_msg_open = r.openKos;
-            cur.ad_msg_leads = r.leadsKos;
+            cur.ad_msg_enter = Number(d._sum.msgInquiries ?? 0);
+            cur.ad_msg_open = Number(d._sum.msgOpenings ?? 0);
+            cur.ad_msg_leads = Number(d._sum.msgLeads ?? 0);
             byDate.set(key, cur);
           }
         }
@@ -1833,34 +1814,47 @@ export class KoxService {
     return { source, start, end, total_texts: totalTexts, words };
   }
 
-  /** 聚光笔记报表 per-note 加总（brand6 笔记排行/内容表现/热门内容口径：曝光=Σ展现、阅读=Σ点击、私信三数=Σ） */
+  /** 笔记级指标加总（brand6 笔记排行/内容表现/热门内容口径）：
+   *  曝光=ΣimpNum、阅读=ΣreadFeedNum、互动=ΣengageCnt ← 聚光「商业内容管理」逐笔记（A，全量笔记覆盖）；
+   *  私信三数 ← 聚光「标准投笔记报表」（C，投流口径） */
   private async juguangNoteMap(brandId: number) {
-    if (brandId !== 6) return new Map<string, { imp: number; click: number; inter: number; inq: number; open: number; leads: number }>();
-    const rows = await this.prisma.koxJuguangNoteDaily.groupBy({
-      by: ['noteId'],
-      where: { brandId: 6 },
-      _sum: {
-        impression: true,
-        click: true,
-        interaction: true,
-        msgInquiries: true,
-        msgOpenings: true,
-        msgLeads: true,
-      },
-    });
-    return new Map(
-      rows.map((r) => [
-        r.noteId,
-        {
-          imp: Number(r._sum.impression ?? 0),
-          click: Number(r._sum.click ?? 0),
-          inter: Number(r._sum.interaction ?? 0),
-          inq: Number(r._sum.msgInquiries ?? 0),
-          open: Number(r._sum.msgOpenings ?? 0),
-          leads: Number(r._sum.msgLeads ?? 0),
+    const empty = new Map<string, { imp: number; click: number; inter: number; inq: number; open: number; leads: number }>();
+    if (brandId !== 6) return empty;
+    const [contentRows, jugRows] = await Promise.all([
+      this.prisma.koxContentNoteDaily.groupBy({
+        by: ['noteId'],
+        where: { brandId: 6 },
+        _sum: { impNum: true, readFeedNum: true, engageCnt: true },
+      }),
+      this.prisma.koxJuguangNoteDaily.groupBy({
+        by: ['noteId'],
+        where: { brandId: 6 },
+        _sum: {
+          msgInquiries: true,
+          msgOpenings: true,
+          msgLeads: true,
         },
-      ]),
-    );
+      }),
+    ]);
+    const map = new Map<string, { imp: number; click: number; inter: number; inq: number; open: number; leads: number }>();
+    for (const r of contentRows) {
+      map.set(r.noteId, {
+        imp: Number(r._sum.impNum ?? 0),
+        click: Number(r._sum.readFeedNum ?? 0),
+        inter: Number(r._sum.engageCnt ?? 0),
+        inq: 0,
+        open: 0,
+        leads: 0,
+      });
+    }
+    for (const r of jugRows) {
+      const cur = map.get(r.noteId) ?? { imp: 0, click: 0, inter: 0, inq: 0, open: 0, leads: 0 };
+      cur.inq = Number(r._sum.msgInquiries ?? 0);
+      cur.open = Number(r._sum.msgOpenings ?? 0);
+      cur.leads = Number(r._sum.msgLeads ?? 0);
+      map.set(r.noteId, cur);
+    }
+    return map;
   }
 
   async notes(query: {
@@ -1904,7 +1898,7 @@ export class KoxService {
     };
     // brand6：剔除官号（特斯拉）笔记
     if (brandId === 6) where.authorName = { not: '特斯拉' };
-    // brand6：曝光/阅读/私信三数以聚光笔记报表 per-note 加总为准（内存排序分页）
+    // brand6：曝光/阅读/互动以商业内容管理逐笔记加总为准（A）、私信三数以聚光笔记报表为准（C）
     const jug = await this.juguangNoteMap(brandId ?? 0);
     let rows;
     let total;
@@ -2023,7 +2017,7 @@ export class KoxService {
         keyword: true,
       },
     });
-    // brand6：曝光/阅读/私信三数以聚光笔记报表加总为准
+    // brand6：曝光/阅读/互动以商业内容管理逐笔记加总为准（A）、私信三数以聚光笔记报表为准（C）
     const jug = await this.juguangNoteMap(query.brandId ? Number(query.brandId) : 0);
     const rows = jug.size
       ? rowsQ.map((n) => {
@@ -2091,6 +2085,215 @@ export class KoxService {
               .slice(0, 42)
               .map(([text, count]) => ({ text, count }))
           : extractKeywords(rows.map((r) => r.title), 42),
+    };
+  }
+
+  /** ─── Morgandada(5) 运营总览：账号/内容/阅读/花费/留资 hero + 内容·线索·投放三象限 + 趋势 ─── */
+  async mddOverview(query: { start?: string; end?: string }) {
+    const brandId = 5;
+    const asDay = (s: string | undefined, endOfDay = false) =>
+      s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+        ? new Date(`${s}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}+08:00`)
+        : undefined;
+    const end = asDay(query.end, true) ?? new Date();
+    const start = asDay(query.start) ?? new Date(end.getTime() - 29 * 86400000);
+
+    const noteWhere: Prisma.KoxNoteWhereInput = { brandId, publishTime: { gte: start, lte: end } };
+    const campWhere: Prisma.KoxCampaignDailyStatWhereInput = { brandId, statDate: { gte: start, lte: end } };
+    const leadScope: Prisma.LaiguLeadWhereInput = {
+      brandId,
+      isMdd: true,
+      OR: [{ sessionCreatedAt: { gte: start, lte: end } }, { lastMessageAt: { gte: start, lte: end } }],
+    };
+
+    const [kosNum, notes, campRows, leads] = await Promise.all([
+      this.prisma.kosAccount.count({ where: { brandId, status: 'enabled' } }),
+      this.prisma.koxNote.findMany({
+        where: noteWhere,
+        select: {
+          noteId: true, title: true, coverUrl: true, noteUrl: true, publishTime: true, authorName: true,
+          exposure: true, views: true, likes: true, collects: true, comments: true, shares: true,
+          followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true,
+        },
+      }),
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: campWhere,
+        select: { statDate: true, fee: true, impression: true, click: true, interaction: true, msgLeadsNum: true },
+      }),
+      this.prisma.laiguLead.findMany({
+        where: leadScope,
+        select: {
+          sessionId: true, isResource: true, phone: true, clientMessageCount: true,
+          messageCount: true, sessionCreatedAt: true, lastMessageAt: true,
+        },
+      }),
+    ]);
+
+    const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+    const n = (v: unknown) => Number(v ?? 0) || 0;
+    const r2 = (v: number) => (Math.round(v * 100) / 100) || 0;
+
+    // 内容象限（笔记口径）
+    const content = {
+      note_cnt: notes.length,
+      exposure_sum: sum(notes.map((x) => x.exposure)),
+      view_sum: sum(notes.map((x) => x.views)),
+      interaction_sum: sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares)),
+      follow_sum: sum(notes.map((x) => x.followCount)),
+      author_num: new Set(notes.map((x) => x.authorName).filter(Boolean)).size,
+      read_rate: 0,
+      interaction_rate: 0,
+    };
+    content.read_rate = content.exposure_sum ? r2((content.view_sum / content.exposure_sum) * 100) : 0;
+    content.interaction_rate = content.view_sum ? r2((content.interaction_sum / content.view_sum) * 100) : 0;
+
+    // 线索象限（私信会话口径）
+    const openLeads = leads.filter((x) => x.clientMessageCount > 0);
+    const lead = {
+      inquiry_cnt: leads.length,
+      open_cnt: openLeads.length,
+      open_rate: leads.length ? r2((openLeads.length / leads.length) * 100) : 0,
+      resource_cnt: leads.filter((x) => x.isResource).length,
+      phone_cnt: leads.filter((x) => x.phone).length,
+      msg_cnt: sum(leads.map((x) => x.messageCount)),
+    };
+
+    // 投放象限（聚光投放口径）
+    const ad = {
+      cost: r2(sum(campRows.map((x) => n(x.fee)))),
+      impression: sum(campRows.map((x) => n(x.impression))),
+      click: sum(campRows.map((x) => n(x.click))),
+      interaction: sum(campRows.map((x) => n(x.interaction))),
+      msg_leads: sum(campRows.map((x) => n(x.msgLeadsNum))),
+      ctr: 0,
+      cpc: 0,
+      cpm: 0,
+      leads_cost: 0,
+    };
+    ad.ctr = ad.impression ? r2((ad.click / ad.impression) * 100) : 0;
+    ad.cpc = ad.click ? r2(ad.cost / ad.click) : 0;
+    ad.cpm = ad.impression ? r2((ad.cost / ad.impression) * 1000) : 0;
+    ad.leads_cost = lead.resource_cnt ? r2(ad.cost / lead.resource_cnt) : 0;
+
+    // 全链路留资（私信留资 ∪ 电话）
+    const totalLeads = leads.filter((x) => x.isResource || x.phone).length;
+
+    // 趋势（按东八区日键）
+    const days: string[] = [];
+    for (let t = new Date(`${dayKey08(start)}T00:00:00+08:00`).getTime(); t <= new Date(`${dayKey08(end)}T00:00:00+08:00`).getTime(); t += 86400000) {
+      days.push(new Date(t).toISOString().slice(0, 10));
+    }
+    const trendMap = new Map(days.map((d) => [d, { date: d, note_cnt: 0, view_sum: 0, interaction_sum: 0, ad_cost: 0, lead_cnt: 0 }]));
+    for (const x of notes) {
+      if (!x.publishTime) continue;
+      const row = trendMap.get(dayKey08(x.publishTime));
+      if (row) {
+        row.note_cnt += 1;
+        row.view_sum += x.views;
+        row.interaction_sum += x.likes + x.collects + x.comments + x.shares;
+      }
+    }
+    for (const x of campRows) {
+      const row = trendMap.get(dayKey08(x.statDate));
+      if (row) row.ad_cost += n(x.fee);
+    }
+    for (const x of leads) {
+      const at = x.sessionCreatedAt ?? x.lastMessageAt;
+      if (!at) continue;
+      const row = trendMap.get(dayKey08(at));
+      if (row) row.lead_cnt += x.isResource || x.phone ? 1 : 0;
+    }
+
+    return {
+      start: dayKey08(start),
+      end: dayKey08(end),
+      hero: {
+        kos_num: kosNum,
+        note_cnt: content.note_cnt,
+        view_sum: content.view_sum,
+        ad_cost: ad.cost,
+        total_leads: totalLeads,
+      },
+      content,
+      lead,
+      ad,
+      trend: [...trendMap.values()],
+    };
+  }
+
+  /** ─── Morgandada(5) 笔记合规检测：违禁词库扫描 title+content，返回逐篇命中 ─── */
+  async mddNoteCompliance(query: { start?: string; end?: string; state?: string }) {
+    const brandId = 5;
+    const asDay = (s: string | undefined, endOfDay = false) =>
+      s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+        ? new Date(`${s}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}+08:00`)
+        : undefined;
+    const end = asDay(query.end, true) ?? new Date();
+    const start = asDay(query.start) ?? new Date(end.getTime() - 29 * 86400000);
+
+    // 违禁词库（广告法向）：绝对化用语 / 权威背书 / 夸大承诺 / 金融敏感
+    const GROUPS: { group: string; words: string[] }[] = [
+      { group: '绝对化用语', words: ['最好', '最优', '最佳', '最强', '第一', 'NO.1', 'TOP1', '顶级', '极致', '绝无仅有', '独一无二', '史上', '全网最低', '全网第一', '销量冠军', '行业领先', '领先者', '之首', '全球首发', '全国首发'] },
+      { group: '权威背书', words: ['国家级', '国家认证', '官方认证', '质量免检', '免检', '专利', '驰名商标', '国家×', '专家推荐', '权威', '监督抽查'] },
+      { group: '夸大承诺', words: ['百分之百', '100%', '稳赚', '必涨', '必买', '闭眼入', '无脑冲', '永久', '终身', '包治', '根治', '立竿见影', '秒杀', '疯抢', '最后一天', '仅此一天', '错过再无'] },
+      { group: '金融敏感', words: ['零首付', '免息', '低息', '返现', '返利', '抽奖', '中签', '理财', '稳赚不赔', '保本'] },
+    ];
+
+    const rows = await this.prisma.koxNote.findMany({
+      where: { brandId, publishTime: { gte: start, lte: end } },
+      select: {
+        noteId: true, title: true, content: true, coverUrl: true, noteUrl: true,
+        noteType: true, publishTime: true, authorName: true, accountType: true,
+        views: true, likes: true, collects: true, comments: true, shares: true,
+      },
+      orderBy: { publishTime: 'desc' },
+    });
+
+    const scanned = rows.map((x) => {
+      const text = `${x.title ?? ''}\n${x.content ?? ''}`;
+      const hits: { group: string; word: string }[] = [];
+      for (const g of GROUPS) {
+        for (const w of g.words) {
+          if (text.toUpperCase().includes(w.toUpperCase())) hits.push({ group: g.group, word: w });
+        }
+      }
+      // 去重（同词同组只记一次）
+      const seen = new Set<string>();
+      const violations = hits.filter((h) => {
+        const k = `${h.group}|${h.word}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      return {
+        note_id: x.noteId,
+        title: x.title,
+        cover_url: x.coverUrl,
+        note_url: x.noteUrl,
+        note_type: x.noteType,
+        publish_time: x.publishTime,
+        author_name: x.authorName,
+        account_type: x.accountType,
+        views: x.views,
+        interaction: x.likes + x.collects + x.comments + x.shares,
+        violations,
+        violation_cnt: violations.length,
+        state: violations.length ? 'violation' : 'ok',
+      };
+    });
+
+    const want = query.state === 'ok' || query.state === 'violation' ? query.state : null;
+    const filtered = want ? scanned.filter((x) => x.state === want) : scanned;
+    const violationCnt = scanned.filter((x) => x.state === 'violation').length;
+    return {
+      start: dayKey08(start),
+      end: dayKey08(end),
+      total: scanned.length,
+      violation_cnt: violationCnt,
+      ok_cnt: scanned.length - violationCnt,
+      groups: GROUPS.map((g) => ({ group: g.group, words: g.words.length })),
+      list: filtered,
+      scope_note: '合规检测=违禁词库规则扫描（标题+正文）；命中仅供参考，最终以平台审核为准',
     };
   }
 
@@ -2206,15 +2409,15 @@ export class KoxService {
     }
     const r2 = (v: number) => Math.round(v * 100) / 100;
     if (brandId === 6) {
-      // 特斯拉：内容指标=聚光「商业内容管理」逐笔记×逐日（时段发布口径，客户 1008 截图行为一致）
-      // 笔记数量/有发布=窗口内发布的员工笔记（notePublishTime ∈ 窗口，去重）；
-      // 曝光/阅读/互动=上述笔记集合在窗口内的逐日表现和；归属=noteId→KoxNote.accountId 优先、
-      // authorName→基线昵称兜底 → 210 基线账号大区/标签分桶（未匹配不入桶，保持 15 大区横轴）
+      // 特斯拉口径（客户指定，2026-10）：
+      // 笔记数量/有发布 = 聚光「商业内容管理」逐笔记（A，notePublishTime∈窗口去重；归属=noteId→KoxNote.accountId 优先、
+      // authorName→基线昵称兜底，未匹配不入桶）；
+      // 曝光/阅读/互动 = 专业号「数据中心-员工数据」（E，dateType=4 逐日求和优先、三档快照回退）→ 基线账号大区/标签分桶；
+      // 私信三数 = 获客工具统计（G，与账号表现分析同口径）
       const contentNotes = await this.prisma.koxContentNoteDaily.findMany({
         where: { brandId: 6, day: { gte: start, lte: end } },
         select: {
-          noteId: true, impNum: true, readFeedNum: true, engageCnt: true,
-          authorName: true, notePublishTime: true,
+          noteId: true, authorName: true, notePublishTime: true,
         },
       });
       const noteIds = [...new Set(contentNotes.map((c) => c.noteId))];
@@ -2229,15 +2432,9 @@ export class KoxService {
       }
       const winStartDay = dayKey08(start);
       const winEndDay = dayKey08(end);
-      const perfOf = new Map<string, { exposure: number; view: number; interaction: number }>();
       const authorOf = new Map<string, string | null>();
       const publishedNotes = new Set<string>();
       for (const c of contentNotes) {
-        const cur = perfOf.get(c.noteId) ?? { exposure: 0, view: 0, interaction: 0 };
-        cur.exposure += c.impNum;
-        cur.view += c.readFeedNum;
-        cur.interaction += c.engageCnt;
-        perfOf.set(c.noteId, cur);
         if (!authorOf.has(c.noteId)) authorOf.set(c.noteId, c.authorName);
         if (c.notePublishTime) {
           const pd = dayKey08(c.notePublishTime);
@@ -2252,13 +2449,24 @@ export class KoxService {
         if (!acc) continue; // 未匹配基线账号的笔记不入桶
         const g = bucketOf(groups, regionOf(acc));
         const tg = bucketOf(tagGroups, tagOf(acc));
-        const perf = perfOf.get(noteId)!;
         for (const bucket of [g, tg]) {
           bucket.published.add(acc.id);
           bucket.note_cnt += 1;
-          bucket.exposure += perf.exposure;
-          bucket.view += perf.view;
-          bucket.interaction += perf.interaction;
+        }
+      }
+      // 曝光/阅读/互动：员工数据窗口（E）按账号→大区/标签分桶
+      const proMatrix = await this.proMatrixSvc.proMatrix(6, start, end);
+      if (proMatrix) {
+        for (const s of proMatrix.rows) {
+          const acc = s.nickName ? nameToAcc.get(s.nickName) : undefined;
+          if (!acc) continue;
+          const g = bucketOf(groups, regionOf(acc));
+          const tg = bucketOf(tagGroups, tagOf(acc));
+          for (const bucket of [g, tg]) {
+            bucket.exposure += s.socImpCnt;
+            bucket.view += s.socClickCnt;
+            bucket.interaction += s.socEnageCnt;
+          }
         }
       }
       // 私信进线/开口/留资 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
@@ -2345,8 +2553,13 @@ export class KoxService {
       };
     };
     type RegionRow = ReturnType<typeof mapRow>;
+    // 排序（客户指定 2026-10）：默认留资数从多到少；「全国」行恒置底
     const sortRows = (rows: RegionRow[]) =>
-      rows.sort((a, b) => b.kos_cnt - a.kos_cnt || b.pm_leads - a.pm_leads);
+      rows.sort((a, b) => {
+        if (a.name === '全国') return 1;
+        if (b.name === '全国') return -1;
+        return b.pm_leads - a.pm_leads || b.kos_cnt - a.kos_cnt;
+      });
 
     return {
       start,
@@ -2354,7 +2567,7 @@ export class KoxService {
       days,
       metric_note:
         brandId === 6
-          ? '内容指标=聚光「商业内容管理」逐笔记×逐日（时段发布口径：笔记数量/有发布=所选时段内发布的员工笔记；曝光/阅读/互动=该笔记集合在时段内的表现）；私信进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；区域/标签归属按 210 账号基线，未匹配不入表'
+          ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
           : '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
@@ -2461,6 +2674,7 @@ export class KoxService {
       comments: number;
       shares: number;
       ces: number;
+      fans_gained: number;
       pm_inquiries: number;
       pm_openings: number;
       pm_leads: number;
@@ -2477,6 +2691,7 @@ export class KoxService {
       comments: 0,
       shares: 0,
       ces: 0,
+      fans_gained: 0,
       pm_inquiries: 0,
       pm_openings: 0,
       pm_leads: 0,
@@ -2537,8 +2752,8 @@ export class KoxService {
           a.item_cnt += 1;
         });
       }
-      // 曝光/阅读（点击）/互动：专业号员工矩阵窗口快照（近1/7/30日三档）
-      const proMatrix = await this.proMatrixStaff(days, start, end);
+      // 曝光/阅读（点击）/互动：专业号员工数据窗口（dateType=4 逐日求和优先、三档快照回退）
+      const proMatrix = await this.proMatrixSvc.proMatrix(6, start, end);
       if (proMatrix) {
         for (const s of proMatrix.rows) {
           const accId = s.nickName ? nameToId.get(s.nickName) : null;
@@ -2549,7 +2764,7 @@ export class KoxService {
             a.interaction += s.socEnageCnt;
           });
         }
-        metric_source = `juguang_content_publish + pro_staff_matrix(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)})`;
+        metric_source = `juguang_content_publish + pro_staff_${proMatrix.source}(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)})`;
       } else {
         metric_source = 'juguang_content_publish + pro_staff(no_partition)';
       }
@@ -2571,6 +2786,7 @@ export class KoxService {
         a.collects += n.collects;
         a.comments += n.comments;
         a.shares += n.shares;
+        a.fans_gained += n.followCount;
         a.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
       });
     }
@@ -2716,6 +2932,8 @@ export class KoxService {
         comments_sum: g.comments,
         shares_sum: g.shares,
         ces: g.ces,
+        fans_gained: g.fans_gained,
+        fans_rate: g.view ? Math.round((g.fans_gained / g.view) * 10000) / 100 : 0,
         pm_inquiries: g.pm_inquiries,
         pm_openings: g.pm_openings,
         pm_leads: g.pm_leads,
@@ -2741,10 +2959,10 @@ export class KoxService {
     const metric = (METRICS as readonly string[]).includes(query.metric ?? '')
       ? (query.metric as (typeof METRICS)[number])
       : 'pm_leads';
-    // 排序：默认留资数 tab 保留「分层(周度留资)优先」；其余指标按所选指标降序（分层仅作同分兜底）
+    // 排序（客户指定 2026-10）：所有排行默认「留资数从多到少」纯降序；切换其他指标时按所选指标降序
     rows.sort((a, b) =>
       metric === 'pm_leads'
-        ? a.tier_rank - b.tier_rank || b.pm_leads - a.pm_leads
+        ? b.pm_leads - a.pm_leads || a.tier_rank - b.tier_rank
         : b[metric] - a[metric] || b.pm_leads - a.pm_leads,
     );
 
@@ -3142,40 +3360,6 @@ export class KoxService {
   }
 
   /**
-   * 特斯拉专业号员工矩阵窗口快照（近1日/近7日/近30日三档，dateType 1/2/3）。
-   * 按查询窗口选最新分区（statDate=数据日；窗口含「今天」时回退昨日分区，当日快照次日才产出）。
-   * 无匹配分区返回 null（未同步的历史/未来窗口），调用方按内容指标 0 处理，不再回退 KoxNote。
-   */
-  private async proMatrixStaff(days: number, start: Date, end: Date) {
-    const dateType = days <= 1 ? 1 : days <= 7 ? 2 : 3;
-    const winStartDay = dayKey08(start);
-    const winEndDay = dayKey08(end);
-    const todayDay = dayKey08(new Date());
-    const yesterdayDay = dayKey08(new Date(Date.now() - 86400000));
-    const partDays = await this.prisma.proKosStaff.findMany({
-      where: { brandId: 6, dateType },
-      orderBy: { statDate: 'desc' },
-      distinct: ['statDate'],
-      select: { statDate: true },
-      take: 60,
-    });
-    const chosen =
-      partDays.find((r) => {
-        const d = dayKey08(r.statDate);
-        return d >= winStartDay && d <= winEndDay;
-      }) ??
-      (winEndDay === todayDay || winStartDay === todayDay
-        ? partDays.find((r) => dayKey08(r.statDate) === yesterdayDay)
-        : undefined);
-    if (!chosen) return null;
-    const rows = await this.prisma.proKosStaff.findMany({
-      where: { brandId: 6, statDate: chosen.statDate, dateType },
-      take: 2000,
-    });
-    return { rows, statDate: chosen.statDate, dateType };
-  }
-
-  /**
    * KOS 运营进度总览（特斯拉，按账号拆分）：专业号员工快照 × 账号归属
    * 内容完成度 = 周度篇数/3；进线完成度 = 周度进线/5；综合得分 = 内容40% + 留资60%
    */
@@ -3249,14 +3433,14 @@ export class KoxService {
       fn(cur);
     };
 
-    // 内容指标：聚光「商业内容管理」逐笔记×逐日（时段发布口径，与区域数据分析一致）
-    // 发布数=窗口内发布的员工笔记数；曝光/阅读/互动=该笔记集合在窗口内的逐日表现和
-    // 归属：noteId→KoxNote.accountId 优先、authorName→基线昵称兜底；未匹配不入统计
+    // 内容指标（客户指定 2026-10）：
+    // 发布数 = 聚光「商业内容管理」逐笔记（A，notePublishTime∈窗口去重；归属=noteId→KoxNote.accountId 优先、
+    //   authorName→基线昵称兜底，未匹配不入统计）
+    // 曝光/阅读/互动 = 专业号「数据中心-员工数据」（E，dateType=4 逐日求和优先、三档快照回退）
     const contentNotes = await this.prisma.koxContentNoteDaily.findMany({
       where: { brandId: 6, day: { gte: start, lte: end } },
       select: {
-        noteId: true, impNum: true, readFeedNum: true, engageCnt: true,
-        authorName: true, notePublishTime: true,
+        noteId: true, authorName: true, notePublishTime: true,
       },
     });
     const cNoteIds = [...new Set(contentNotes.map((c) => c.noteId))];
@@ -3272,15 +3456,9 @@ export class KoxService {
     const idToAccLocal = new Map(accounts.map((a) => [a.id, a]));
     const winStartDayP = dayKey08(start);
     const winEndDayP = dayKey08(end);
-    const cPerf = new Map<string, { exposure: number; view: number; interaction: number }>();
     const cAuthor = new Map<string, string | null>();
     const cPublished = new Set<string>();
     for (const c of contentNotes) {
-      const cur = cPerf.get(c.noteId) ?? { exposure: 0, view: 0, interaction: 0 };
-      cur.exposure += c.impNum;
-      cur.view += c.readFeedNum;
-      cur.interaction += c.engageCnt;
-      cPerf.set(c.noteId, cur);
       if (!cAuthor.has(c.noteId)) cAuthor.set(c.noteId, c.authorName);
       if (c.notePublishTime) {
         const pd = dayKey08(c.notePublishTime);
@@ -3293,40 +3471,54 @@ export class KoxService {
         (accId != null ? idToAccLocal.get(accId) : undefined) ??
         nameToAcc.get(cAuthor.get(noteId) ?? '');
       if (!acc) continue;
-      const perf = cPerf.get(noteId)!;
       bump(acc.id, (a) => {
         a.item_cnt += 1;
-        a.exposure_sum += perf.exposure;
-        a.click_sum += perf.view;
-        a.interaction_sum += perf.interaction;
       });
     }
-    // 进线/开口/留资：专业号「线索经营→客户视图」客户行为三分类（进线/开口/留资下拉口径）
-    // 按客户去重（COUNT DISTINCT customerUserId）、剔除官号「特斯拉」、归属账号=belongUserId
-    const clueRowsPro = await this.prisma.$queryRaw<{
-      belong: string;
-      enter: number;
-      open: number;
-      leads: number;
-    }[]>`
-      SELECT "belongUserId" AS belong,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE entered)::int AS enter,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE opened)::int AS open,
-        COUNT(DISTINCT "customerUserId") FILTER (WHERE leads)::int AS leads
-      FROM "ProClueUserDay"
-      WHERE "brandId" = ${brandId} AND (day AT TIME ZONE 'UTC') >= ${start} AND (day AT TIME ZONE 'UTC') <= ${end}
-        AND NOT "isOfficial" AND "belongUserId" IS NOT NULL
-      GROUP BY "belongUserId"`;
+    // 曝光/阅读/互动：员工数据窗口（E）按账号聚合
+    const proMatrixP = await this.proMatrixSvc.proMatrix(brandId, start, end);
+    if (proMatrixP) {
+      for (const s of proMatrixP.rows) {
+        const acc = s.nickName ? nameToAcc.get(s.nickName) : null;
+        if (!acc) continue;
+        bump(acc.id, (a) => {
+          a.exposure_sum += s.socImpCnt;
+          a.click_sum += s.socClickCnt;
+          a.interaction_sum += s.socEnageCnt;
+        });
+      }
+    }
+    // 进线/开口/留资：专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（G，与账号表现分析/区域数据同口径）
+    const toolRowsP = await this.prisma.proClueToolStatDaily.findMany({
+      where: { brandId, day: { gte: start, lte: end }, belongUserId: { not: '' } },
+      select: {
+        belongUserId: true, consultUserCnt: true, msgChatUserCnt: true, msgLeadsUserCnt: true,
+        serviceCardLeadsUserCnt: true, qwAddLeadsUserCnt: true, bookCompLeadsUserCnt: true,
+        landingPageLeadsUserCnt: true, wechatLeadsUserCnt: true, appCardLeadsUserCnt: true,
+        otherLeadsUserCnt: true,
+      },
+    });
     const authorToIdPro = new Map(
       accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
     );
-    for (const r of clueRowsPro) {
-      const accId = authorToIdPro.get(r.belong);
+    const toolAggP = new Map<string, { enter: number; open: number; leads: number }>();
+    for (const r of toolRowsP) {
+      const cur = toolAggP.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+      cur.enter += r.consultUserCnt;
+      cur.open += r.msgChatUserCnt;
+      cur.leads +=
+        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
+        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
+        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+      toolAggP.set(r.belongUserId, cur);
+    }
+    for (const [belong, v] of toolAggP) {
+      const accId = authorToIdPro.get(belong);
       if (accId == null) continue;
       bump(accId, (a) => {
-        a.pm_inquiries = Number(r.enter);
-        a.pm_openings = Number(r.open);
-        a.pm_leads = Number(r.leads);
+        a.pm_inquiries = v.enter;
+        a.pm_openings = v.open;
+        a.pm_leads = v.leads;
       });
     }
 
@@ -3381,7 +3573,8 @@ export class KoxService {
       };
     });
 
-    rows.sort((a, b) => b.score - a.score || b.pm_leads - a.pm_leads);
+    // 排序（客户指定 2026-10）：默认留资数从多到少（同分按综合得分）
+    rows.sort((a, b) => b.pm_leads - a.pm_leads || b.score - a.score || b.item_cnt - a.item_cnt);
 
     const tierStat = KOS_TIERS.map((t) => ({
       key: t.key,
@@ -3393,9 +3586,9 @@ export class KoxService {
       days,
       date_type: null,
       stat_date: null,
-      caliber: 'juguang_content_note_daily+pro_clue',
+      caliber: 'juguang_content_publish+pro_staff_matrix+pro_clue_tool_stat',
       metric_note:
-        '内容指标=聚光「商业内容管理」逐笔记×逐日（时段发布口径：发布数=所选时段内发布的员工笔记数；曝光/阅读/互动=该笔记集合在时段内的表现）；进线/开口/留资=专业号线索经营客户视图按客户去重；账号基线=210 账号表',
+        '发布数=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G）；排序默认留资数从多到少',
       weekly_notes_target: weeklyNotesTarget,
       weekly_enter_target: weeklyEnterTarget,
       total: rows.length,

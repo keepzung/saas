@@ -40,9 +40,14 @@
               <a-radio-button value="全托管">全托管</a-radio-button>
               <a-radio-button value="CE运营">CE运营</a-radio-button>
               <a-radio-button value="陪跑KOS">陪跑KOS</a-radio-button>
+              <a-radio-button value="官号">官号</a-radio-button>
             </template>
           </a-radio-group>
-          <span v-if="isTesla && tab !== 'base'" class="muted small">口径：聚光笔记报表逐笔记×账号标签（{{ tab }}）</span>
+          <a-tooltip v-if="isTesla && tab === 'base'" title="消耗/曝光/点击=投放日表×子账户（剔官号）；私信三数=聚光笔记报表；官号投流见「官号」页签">
+            <span class="muted small" style="cursor: help">口径：投放日表（不含官号）+ 聚光笔记报表三数</span>
+          </a-tooltip>
+          <span v-else-if="isTesla && tab === '官号'" class="muted small">口径：投放日表官号行（含官号私信三数；无笔记维度，展示消耗账户数）</span>
+          <span v-else-if="isTesla" class="muted small">口径：投放日表×账号标签（{{ tab }}）+ 聚光笔记报表三数</span>
         </div>
         <a-table
           :columns="detailColumns"
@@ -157,9 +162,9 @@ async function load() {
   }
 }
 
-// 账号类型页签下：消耗账户数列替换为投放笔记数（笔记报表口径）
+// 账号类型页签下：消耗账户数列替换为投放笔记数（笔记报表口径）；官号页签无笔记维度，保留消耗账户数
 const detailColumns = computed(() => {
-  if (!(isTesla.value && tab.value !== 'base')) return columns;
+  if (!(isTesla.value && tab.value !== 'base') || tab.value === '官号') return columns;
   return columns.map((c) =>
     c.dataIndex === 'active_accounts'
       ? { ...c, title: '投放笔记数', dataIndex: 'note_num' }
@@ -168,7 +173,7 @@ const detailColumns = computed(() => {
 });
 
 function doExport() {
-  const byType = isTesla.value && tab.value !== 'base';
+  const byType = isTesla.value && tab.value !== 'base' && tab.value !== '官号';
   exportExcel(
     [
       {

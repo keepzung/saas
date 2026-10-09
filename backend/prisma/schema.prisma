@@ -1235,6 +1235,9 @@ model LaiguLead {
   firstMessageAt     DateTime?
   lastMessageAt      DateTime?
   lastClientContent  String?
+  staffName          String?
+  advertiserName     String? 
+  isMdd              Boolean  @default(false)
   sessionCreatedAt   DateTime?
   sessionEndedAt     DateTime?
   rawJson            Json
@@ -1243,6 +1246,8 @@ model LaiguLead {
 
   @@index([brandId])
   @@index([brandId, sessionEndedAt])
+  @@index([brandId, staffName])
+  @@index([brandId, isMdd])
   @@index([phone])
 }
 

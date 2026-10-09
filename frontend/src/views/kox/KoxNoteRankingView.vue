@@ -587,22 +587,28 @@ function renderCharts() {
       for (const n of filtered.value) byModel.set(n.model, (byModel.get(n.model) ?? 0) + 1);
       pieData = [...byModel.entries()].map(([name, value]) => ({ name, value }));
     }
+    // 环形图（客户批注 2026-10）：多种颜色区分车型、百分比标注在环外侧带引导线、
+    // 环心垂直居中（50%）与词云圆心同一水平高度
+    const MODEL_PALETTE = ['#3456E6', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16', '#F97316', '#14B8A6', '#6366F1', '#D946EF'];
     pieChart.setOption({
+      color: MODEL_PALETTE,
       tooltip: { trigger: 'item', formatter: '{b}: {c}篇 ({d}%)' },
-      legend: { orient: 'vertical', right: 10, top: 'center' },
+      legend: { orient: 'vertical', right: 6, top: 'center', type: 'scroll', icon: 'circle', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
       series: [
         {
           type: 'pie',
-          radius: ['38%', '66%'],
-          center: ['38%', '50%'],
+          radius: ['42%', '70%'],
+          center: ['42%', '50%'],
           data: pieData,
-          label: { show: false },
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#8cc8ff' },
-              { offset: 1, color: '#5087ec' },
-            ]),
+          label: {
+            show: true,
+            formatter: '{d}%',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#475569',
           },
+          labelLine: { show: true, length: 10, length2: 8, lineStyle: { color: '#cbd5e1' } },
+          itemStyle: { borderColor: '#fff', borderWidth: 2 },
         },
       ],
     });
@@ -1147,9 +1153,19 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
+.mention-model-card {
+  display: flex;
+  flex-direction: column;
+}
+.mention-model-card .ant-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 .mention-model-chart {
   width: 100%;
-  height: 420px;
+  flex: 1;
+  min-height: 460px;
   margin-top: 4px;
 }
 
@@ -1341,7 +1357,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 词云 + 提及车型 同行各半（词云更高更大；单卡存在时自动占满整行） */
+/* 词云 + 提及车型 同行（词云占更宽、更高；单卡存在时自动占满整行） */
 .wc-model-row {
   display: flex;
   gap: 12px;
@@ -1351,6 +1367,13 @@ onBeforeUnmount(() => {
 .wc-model-row > .ant-card {
   flex: 1 1 0;
   min-width: 0;
+}
+/* 词云占比再放大（客户批注）：词云卡 1.25 份 / 车型卡 0.75 份 */
+.wc-model-row > .wordcloud-card {
+  flex: 1.25 1 0;
+}
+.wc-model-row > .mention-model-card {
+  flex: 0.75 1 0;
 }
 @media (max-width: 1100px) {
   .wc-model-row {
@@ -1368,11 +1391,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .wordcloud-chart {
-  height: 460px;
+  height: 500px;
 }
-/* 特斯拉：客户批注「词云可以做大点」 */
+/* 特斯拉：客户批注「词云可以做大点」→ 再放大 */
 .wordcloud-chart.tall {
-  height: 580px;
+  height: 640px;
 }
 .wc-tabs {
   margin-left: 12px;

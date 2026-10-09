@@ -29,6 +29,23 @@ const RELOGIN_COOLDOWN_MIN = 30;
 const LOG_DIR = process.env.KEEPALIVE_LOG_DIR || path.join(ROOT, 'tools/spark/state');
 const STATE_FILE = path.join(LOG_DIR, 'keepalive-state.json');
 
+/** chromium 可执行文件探测：ms-playwright 只装了完整版 chromium（headless_shell 缺失时 launch 会失败） */
+function resolveChromium() {
+  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
+  try {
+    const base = path.join(process.env.HOME || '/root', '.cache/ms-playwright');
+    const dirs = fs.readdirSync(base).filter((d) => /^chromium-\d+$/.test(d)).sort().reverse();
+    for (const d of dirs) {
+      for (const sub of ['chrome-linux64/chrome', 'chrome-linux/chrome']) {
+        const p = path.join(base, d, sub);
+        if (fs.existsSync(p)) return p;
+      }
+    }
+  } catch {}
+  return undefined;
+}
+const CHROMIUM_BIN = resolveChromium();
+
 const prisma = new PrismaClient();
 const state = {}; // brandId -> { lastOk, lastFail, consecutiveFails, lastReloginAt, alive, lastLatency }
 
@@ -104,7 +121,7 @@ async function probeMcc(cookie) {
 
 /** partner 无头账密重登（滑块出现则失败 → need_manual_login） */
 async function reloginPartner(brandId) {
-  const browser = await chromium.launch({ headless: true, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  const browser = await chromium.launch({ headless: true, executablePath: CHROMIUM_BIN, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
   try {
     const cfg = await prisma.sparkOrgConfig.findUnique({ where: { brandId } });
     const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
@@ -162,7 +179,7 @@ async function reloginMcc(brandId) {
   const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
   const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
   if (!ACCOUNT || !PASSWORD) return { ok: false, note: `缺 SPARK_ACCOUNT_B${brandId}/SPARK_PASSWORD_B${brandId}` };
-  const browser = await chromium.launch({ headless: true, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  const browser = await chromium.launch({ headless: true, executablePath: CHROMIUM_BIN, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
   try {
     const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
     const page = await ctx.newPage();

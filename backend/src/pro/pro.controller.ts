@@ -17,6 +17,16 @@ export class ProController {
     return this.pro.sync(Number(body?.brandId ?? 6));
   }
 
+  /** E 逐日历史回填：body { brandId?, from, to }（YYYY-MM-DD，跨度≤62天） */
+  @Post('pro/sync/backfill')
+  backfill(@Body() body: { brandId?: string | number; from?: string; to?: string }) {
+    return this.pro.syncRange(
+      Number(body?.brandId ?? 6),
+      String(body?.from ?? ''),
+      String(body?.to ?? ''),
+    );
+  }
+
   @Post('pro/storage-state')
   saveStorageState(
     @Body() body: { brandId?: string | number; storageState?: string },

@@ -294,7 +294,7 @@ const ovMetric = ref('item');
 const ov = ref({});
 const rankList = ref([]);
 const hotList = ref([]);
-// 点击率 = 聚光笔记报表 Σ点击/Σ展现（summary.ctr，仅投流口径）；无聚光数据时回退 阅读/曝光
+// 点击率 = 员工数据 点击/曝光（summary.ctr，E 口径）；无 E 数据时回退 阅读/曝光
 const ctrPct = computed(() => {
   const s = ov.value?.summary ?? {};
   if (s.ctr != null) return Number(s.ctr);
@@ -591,7 +591,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* 顶部两卡等高等宽：卡片纵向 flex，图表区弹性填充 */
+/* 顶部两卡等高等宽：卡片纵向 flex，图表区弹性填充；两卡指标区固定等高（96px），
+   保证左右图表画布同高、下沿严格对齐（不依赖行拉伸行为） */
 .top-row {
   align-items: stretch;
 }
@@ -619,6 +620,8 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-bottom: 8px;
+  min-height: 96px;
+  align-content: stretch;
 }
 
 .ov3-item,
@@ -650,6 +653,8 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-bottom: 8px;
+  min-height: 96px;
+  align-content: stretch;
 }
 
 .ov6-item {

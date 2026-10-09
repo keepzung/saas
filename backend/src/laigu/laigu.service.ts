@@ -16,12 +16,19 @@ const MAX_PAGES_PER_SYNC = 100;
 const SYNC_OVERLAP_SECONDS = 3600;
 const MAX_WINDOW_SECONDS = 29 * 24 * 3600;
 const LAIGU_BRAND_ID = 5;
+/** Morgandada 投放账户白名单（逗号分隔，env 可覆盖） */
+const MDD_ADVERTISERS = (process.env.LAIGU_MDD_ADVERTISERS ?? 'Morgan DaDa-种草')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 @Injectable()
 export class LaiguService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LaiguService.name);
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private syncing = false;
+  /** MDD 账号匹配集缓存（小红书 userid + 客服昵称），5 分钟刷新 */
+  private mddSetsCache: { userIds: Set<string>; nicknames: Set<string>; at: number } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -374,13 +381,57 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
-  private upsertSession(session: LaiguSession) {
+  /** 归属员工：取第一条非客户消息的发送者名（客服/KOS 账号昵称），供特斯拉 210 基线过滤 */
+  private extractStaffName(session: LaiguSession): string | null {
+    for (const m of session.messages ?? []) {
+      if (m.role === 'client') continue;
+      const name = (m.name ?? '').trim();
+      if (name) return name.slice(0, 60);
+    }
+    return null;
+  }
+
+  /** Morgandada(5) 账号匹配集：KosAccount.authorUrl 提取小红书 userid + 客服昵称（缓存 5 分钟） */
+  private async mddAccountSets(): Promise<{ userIds: Set<string>; nicknames: Set<string> }> {
+    if (this.mddSetsCache && Date.now() - this.mddSetsCache.at < 5 * 60_000) {
+      return this.mddSetsCache;
+    }
+    const accs = await this.prisma.kosAccount.findMany({
+      where: { brandId: 5 },
+      select: { nickname: true, authorUrl: true },
+    });
+    const userIds = new Set<string>();
+    const nicknames = new Set<string>();
+    for (const a of accs) {
+      if (a.nickname) nicknames.add(a.nickname);
+      const m = (a.authorUrl ?? '').match(/\/profile\/([0-9a-f]+)$/);
+      if (m) userIds.add(m[1]);
+    }
+    this.mddSetsCache = { userIds, nicknames, at: Date.now() };
+    return this.mddSetsCache;
+  }
+
+  /** Morgandada 归属判定（并集）：投放账户白名单 / 小红书账号 id / 客服昵称 */
+  private async isMddSession(session: LaiguSession, staffName: string | null): Promise<boolean> {
+    const advertiser = (session.ad_info as { advertiser_name?: string } | undefined)?.advertiser_name;
+    if (advertiser && MDD_ADVERTISERS.includes(advertiser.trim())) return true;
+    const sets = await this.mddAccountSets();
+    if (session.sub_source && sets.userIds.has(session.sub_source)) return true;
+    if (staffName && sets.nicknames.has(staffName)) return true;
+    return false;
+  }
+
+  private async upsertSession(session: LaiguSession) {
     const messages = session.messages ?? [];
     const times = messages.map((m) => m.created_at).filter((t): t is number => typeof t === 'number');
     const clientMessages = messages.filter((m) => m.role === 'client');
     const lastClientText = [...clientMessages]
       .reverse()
       .find((m) => (m.type === 'text' || !m.type) && m.content)?.content;
+    const staffName = this.extractStaffName(session);
+    const advertiserName =
+      (session.ad_info as { advertiser_name?: string } | undefined)?.advertiser_name ?? null;
+    const isMdd = await this.isMddSession(session, staffName);
     const data: Prisma.LaiguLeadUncheckedCreateInput = {
       brandId: LAIGU_BRAND_ID,
       sessionId: String(session.session_id),
@@ -399,6 +450,9 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       firstMessageAt: times.length ? new Date(Math.min(...times) * 1000) : null,
       lastMessageAt: times.length ? new Date(Math.max(...times) * 1000) : null,
       lastClientContent: lastClientText ? lastClientText.slice(0, 500) : null,
+      staffName,
+      advertiserName,
+      isMdd,
       sessionCreatedAt: session.created_at ? new Date(session.created_at * 1000) : null,
       sessionEndedAt: session.ended_at ? new Date(session.ended_at * 1000) : null,
       rawJson: session as unknown as Prisma.InputJsonValue,
@@ -417,6 +471,9 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         firstMessageAt: data.firstMessageAt,
         lastMessageAt: data.lastMessageAt,
         lastClientContent: data.lastClientContent,
+        staffName: data.staffName ?? undefined,
+        advertiserName: data.advertiserName ?? undefined,
+        isMdd: data.isMdd,
         sessionCreatedAt: data.sessionCreatedAt,
         sessionEndedAt: data.sessionEndedAt,
         rawJson: data.rawJson,
@@ -439,6 +496,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const pageSize = Math.min(100, Number(query.page_size ?? 10) || 10);
     const brandId = Number(query.brandId ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
     const where: Prisma.LaiguLeadWhereInput = { brandId };
+    // Morgandada(5)：仅显示本品牌会话（投放账户/账号id/客服昵称三判据，env LAIGU_MDD_FILTER=off 可关）
+    if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') where.isMdd = true;
     if (query.isResource === 'true') where.isResource = true;
     if (query.isResource === 'false') where.isResource = false;
     if (query.hasPhone === 'true') where.phone = { not: null };
@@ -511,7 +570,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
 
   async stats(brandIdParam?: string) {
     const brandId = Number(brandIdParam ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
-    const scope = { brandId };
+    const scope: Prisma.LaiguLeadWhereInput = { brandId };
+    if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') scope.isMdd = true;
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const [total, resourced, withPhone, today] = await Promise.all([
@@ -531,18 +591,31 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
     const since = new Date(Date.now() - days * 86400000);
 
+    // 特斯拉（brand6）：只显示归属员工 ∈ 210 基线账号的私信会话（来鼓网关多品牌共用，剔除其他品牌员工会话）
+    // Morgandada（brand5）：只显示 isMdd 会话（投放账户/账号id/客服昵称三判据并集）
+    const sessionWhere: Prisma.LaiguLeadWhereInput = {
+      brandId,
+      OR: [{ lastMessageAt: { gte: since } }, { sessionCreatedAt: { gte: since } }],
+    };
+    if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') sessionWhere.isMdd = true;
+    if (brandId === 6) {
+      const baseline = await this.prisma.kosAccount.findMany({
+        where: { brandId: 6, status: 'enabled' },
+        select: { nickname: true },
+      });
+      const nicknames = baseline.map((a) => a.nickname).filter(Boolean);
+      if (nicknames.length) sessionWhere.staffName = { in: nicknames };
+    }
+
     // 来鼓评论口径（专业号 KOS 评论流）：会话为空但有评论时启用
-    const leadCount = await this.prisma.laiguLead.count({ where: { brandId } });
+    const leadCount = await this.prisma.laiguLead.count({ where: sessionWhere });
     const commentCount = await this.prisma.laiguComment.count({ where: { brandId } });
     if (leadCount === 0 && commentCount > 0) {
       return this.commentFeedback(brandId, days, since);
     }
 
     const rows = await this.prisma.laiguLead.findMany({
-      where: {
-        brandId,
-        OR: [{ lastMessageAt: { gte: since } }, { sessionCreatedAt: { gte: since } }],
-      },
+      where: sessionWhere,
       select: {
         id: true,
         clientName: true,
@@ -551,6 +624,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         phone: true,
         messageCount: true,
         clientMessageCount: true,
+        staffName: true,
         lastMessageAt: true,
         sessionCreatedAt: true,
       },
@@ -640,7 +714,12 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         .sort((a, b) => b.count - a.count),
       comments: detail,
       topics: extractKeywords(contents, 30),
-      scope_note: '数据源=来鼓私信会话（用户最后一条消息），非小红书笔记评论；分类/情感为关键词规则引擎判定',
+      scope_note:
+        brandId === 6
+          ? '数据源=来鼓私信会话（用户最后一条消息），仅显示归属员工为特斯拉基线账号（210 户）的会话；分类/情感为关键词规则引擎判定'
+          : brandId === 5
+            ? '数据源=来鼓私信会话（用户最后一条消息），仅显示 Morgandada 投放账户/门店账号的会话；分类/情感为关键词规则引擎判定'
+            : '数据源=来鼓私信会话（用户最后一条消息），非小红书笔记评论；分类/情感为关键词规则引擎判定',
     };
   }
 

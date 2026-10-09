@@ -87,6 +87,16 @@ export class KoxController {
     return this.koxService.overview(query);
   }
 
+  @Get('kox/mdd/overview')
+  mddOverview(@Query() query: { start?: string; end?: string }) {
+    return this.koxService.mddOverview(query);
+  }
+
+  @Get('kox/mdd/note-compliance')
+  mddNoteCompliance(@Query() query: { start?: string; end?: string; state?: string }) {
+    return this.koxService.mddNoteCompliance(query);
+  }
+
   @Get('kox/region-analysis')
   regionAnalysis(
     @Query()

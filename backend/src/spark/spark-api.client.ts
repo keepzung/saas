@@ -107,7 +107,11 @@ export class SparkApiClient {
         body: method === 'POST' ? (body === null ? '{}' : JSON.stringify(body)) : undefined,
       });
     } catch (error) {
-      throw new Error(`星火 API 网络错误: ${(error as Error).message}`);
+      // cause 透传（undici fetch failed 的真实原因如 ECONNRESET/EAI_AGAIN 藏在 cause 里）
+      const cause = (error as { cause?: unknown })?.cause;
+      throw new Error(
+        `星火 API 网络错误: ${(error as Error).message}${cause ? ` cause=${String(cause).slice(0, 120)}` : ''}`,
+      );
     }
     if (res.status === 401 || res.status === 403) {
       throw new SparkCookieExpiredError();

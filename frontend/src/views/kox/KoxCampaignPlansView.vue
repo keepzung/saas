@@ -23,7 +23,12 @@
     />
 
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
-      <div class="section-title"><span class="bar"></span>投流情况总览</div>
+      <div class="section-title">
+        <span class="bar"></span>投流情况总览
+        <a-tooltip v-if="isTesla" title="消耗/曝光/点击=投放日表×子账户（剔官号）；私信进线/开口/留资=聚光「标准投笔记报表」；官号投流单列于区域汇总官号行，不计入本页">
+          <span class="muted small" style="cursor: help; margin-left: 8px; font-weight: 400">（口径：不含官号）</span>
+        </a-tooltip>
+      </div>
 
       <div class="hero-row">
         <div class="hero-item">
@@ -325,7 +330,7 @@ const heroFee = computed(() => {
 });
 const heroFeeScopeNote = computed(() => {
   if (isTesla.value && platform.value?.month_fee > 0 && isCurrentMonthWindow.value) {
-    return '平台本月消耗口径快照（本周/本月至今，合作伙伴平台盯盘助手），完整覆盖本月；日明细仅自 09-25 起存档';
+    return '平台本月消耗口径快照（本周/本月至今，合作伙伴平台盯盘助手，剔官号子账户），完整覆盖本月；日明细仅自 09-25 起存档';
   }
   return '';
 });

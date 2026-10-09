@@ -6,6 +6,10 @@
 #
 # 用法：
 #   bash /opt/saas/deploy/deploy.sh
+# 注意：必须始终以 root 运行（与线上一致）。历史上曾以 deploy 用户执行过一次，
+# 产生 /home/deploy/.pm2 第二个 PM2 实例，与 root 实例互抢 3000 端口，
+# 导致 saas-api 崩溃循环数千次、外部 fetch 假失败。如发现双实例：
+#   PM2_HOME=/home/deploy/.pm2 pm2 kill && kill $(ss -ltnp | grep :3000 的 pid)
 #=============================================================================
 set -euo pipefail
 
@@ -41,6 +45,12 @@ if pm2 describe "$PM2_APP" >/dev/null 2>&1; then
   pm2 restart "$PM2_APP" --update-env
 else
   pm2 start dist/main.js --name "$PM2_APP"
+fi
+pm2 save
+
+echo "==> [5.5/7] 确保会话保活守护（saas-keepalive，MCC/partner cookie 自动重登）"
+if ! pm2 describe saas-keepalive >/dev/null 2>&1; then
+  pm2 start "$APP_DIR/tools/spark/keepalive-daemon.cjs" --name saas-keepalive
 fi
 pm2 save
 

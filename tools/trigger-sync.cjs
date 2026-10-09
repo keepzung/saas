@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
-const backendRequire = createRequire(path.join(__dirname, '../../backend', 'package.json'));
+const backendRequire = createRequire(path.join(__dirname, '..', 'backend', 'package.json'));
 const jwt = backendRequire('jsonwebtoken');
 const env = fs.readFileSync('/opt/saas/backend/.env', 'utf8');
 const m = env.match(/JWT_SECRET="([^"]+)"/);

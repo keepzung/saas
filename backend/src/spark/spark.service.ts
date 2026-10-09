@@ -9,6 +9,11 @@ import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
 import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.client';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 
+/** 特斯拉官号投流行识别：partner 子账户名含「官号」（与 sync-juguang.cjs 官号枚举过滤一致） */
+const OFFICIAL_BRAND_USER_KEYWORD = '官号';
+const isOfficialCampaignRow = (brandUserName: string | null | undefined) =>
+  !!brandUserName && brandUserName.includes(OFFICIAL_BRAND_USER_KEYWORD);
+
 const RTB_PAGE_SIZE = 500;
 // 东八区日键：statDate 多以 +08:00 零点存储，toISOString（UTC）会提前一天
 const dayKey08 = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
@@ -1001,7 +1006,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       return this.campaignSummaryByAccountType(start, end, accountType);
     }
 
-    const rows = await this.prisma.koxCampaignDailyStat.findMany({
+    const rowsAll = await this.prisma.koxCampaignDailyStat.findMany({
       where: {
         statDate: { gte: start, lte: end },
         brandId,
@@ -1009,27 +1014,65 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       },
       orderBy: { statDate: 'asc' },
     });
+    // 特斯拉：投放数据剔除官号（官号投流仅在区域汇总官号行/周期报表官号页签单独展示）
+    const rows = brandId === 6 ? rowsAll.filter((r) => !isOfficialCampaignRow(r.brandUserName)) : rowsAll;
+
+    // 特斯拉：私信三数 = 聚光「标准投笔记报表」逐日（C，与按笔记汇总/账号类型 tab 同口径）
+    const jugMsgRows = brandId === 6
+      ? await this.prisma.koxJuguangNoteDaily.groupBy({
+          by: ['day'],
+          where: { brandId: 6, day: { gte: start, lte: end } },
+          _sum: { msgInquiries: true, msgOpenings: true, msgLeads: true },
+        })
+      : [];
+    const jugMsgByDay = new Map<string, { enter: number; open: number; leads: number }>();
+    let jugTotals = { enter: 0, open: 0, leads: 0 };
+    for (const r of jugMsgRows) {
+      const key = dayKey08(r.day);
+      const cur = {
+        enter: Number(r._sum.msgInquiries ?? 0),
+        open: Number(r._sum.msgOpenings ?? 0),
+        leads: Number(r._sum.msgLeads ?? 0),
+      };
+      jugMsgByDay.set(key, cur);
+      jugTotals.enter += cur.enter;
+      jugTotals.open += cur.open;
+      jugTotals.leads += cur.leads;
+    }
 
     const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
     const totalFee = rows.reduce((acc, r) => acc + Number(r.fee), 0);
-    const totalMsgLeads = sum((r) => r.msgLeadsNum);
-    const totalConsult = sum((r) => r.messageConsult);
-    const totalOpen = sum((r) => r.msgChatUserCnt);
+    // 特斯拉：进线/开口/留资 = 聚光笔记报表口径（C）；消耗/曝光/点击 = 投放日表（D，剔官号）
+    const totalMsgLeads = brandId === 6 ? jugTotals.leads : sum((r) => r.msgLeadsNum);
+    const totalConsult = brandId === 6 ? jugTotals.enter : sum((r) => r.messageConsult);
+    const totalOpen = brandId === 6 ? jugTotals.open : sum((r) => r.msgChatUserCnt);
     const totalImpression = sum((r) => r.impression);
     const totalClick = sum((r) => r.click);
 
     const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
       const key = dayKey08(r.statDate);
+      const jug = brandId === 6 ? jugMsgByDay.get(key) : undefined;
       const cur = dayMap.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0, consult: 0, open: 0, accounts: new Set<string>() };
       cur.fee += Number(r.fee);
       cur.impression += r.impression;
       cur.click += r.click;
-      cur.msg_leads += r.msgLeadsNum;
-      cur.consult += r.messageConsult;
-      cur.open += r.msgChatUserCnt;
+      cur.msg_leads += brandId === 6 ? (jug?.leads ?? 0) : r.msgLeadsNum;
+      cur.consult += brandId === 6 ? (jug?.enter ?? 0) : r.messageConsult;
+      cur.open += brandId === 6 ? (jug?.open ?? 0) : r.msgChatUserCnt;
       cur.accounts.add(r.virtualSellerId);
       dayMap.set(key, cur);
+    }
+    // C 里有投放三数但 D 无行的天（如官号外当日未跑量）也要进趋势：补入 jugMsgByDay 缺失日
+    if (brandId === 6) {
+      for (const [key, jug] of jugMsgByDay) {
+        if (dayMap.has(key)) continue;
+        dayMap.set(key, {
+          fee: 0, impression: 0, click: 0,
+          msg_leads: jug.leads, consult: jug.enter, open: jug.open,
+          accounts: new Set<string>(),
+        });
+      }
     }
     const r2v = (v: number) => Math.round(v * 100) / 100;
 
@@ -1048,14 +1091,18 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     // partner 通道（如特斯拉）：平台盯盘 周/月消耗口径快照（week_cost=本周至今，month_cost=本月至今）
     // 仅 partner 账户有该快照（MCC 通道账户 partnerSnapshotAt 为空，自动为 null）
-    const partnerAccs = await this.prisma.sparkAccount.findMany({
+    // 特斯拉：剔除官号子账户（官号消耗只在官号专属行/页签出现）
+    const partnerAccRows = await this.prisma.sparkAccount.findMany({
       where: {
         brandId,
         accountKind: 'partner_vseller',
         partnerSnapshotAt: { not: null },
       },
-      select: { weekCost: true, monthCost: true, partnerSnapshotAt: true },
+      select: { name: true, weekCost: true, monthCost: true, partnerSnapshotAt: true },
     });
+    const partnerAccs = brandId === 6
+      ? partnerAccRows.filter((a) => !isOfficialCampaignRow(a.name))
+      : partnerAccRows;
     const platform = partnerAccs.length
       ? {
           week_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.weekCost ?? 0), 0)),
@@ -1085,6 +1132,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       promo_note_cnt,
       platform,
       coverage,
+      // 特斯拉口径说明：消耗/曝光/点击=投放日表（剔官号）；私信三数=聚光笔记报表；官号数据见官号页签
+      ...(brandId === 6
+        ? {
+            metric_note:
+              '消耗/曝光/点击/互动=投放日表×子账户（剔官号）；私信进线/开口/留资=聚光「标准投笔记报表」窗口加总；官号投流单列（周期报表官号页签/区域汇总官号行），不计入本口径',
+          }
+        : {}),
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,
@@ -1165,20 +1219,26 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return { creator, tag };
   }
 
-  /** 特斯拉：周期报表按账号类型（投喂账号/全托管/CE运营/陪跑KOS）
-   *  口径=聚光「标准投笔记报表」逐笔记按日 × 基线账号 accountTag */
+  /** 特斯拉：周期报表按账号类型（投喂账号/全托管/CE运营/陪跑KOS/官号）
+   *  标签页签口径：聚光「标准投笔记报表」逐笔记按日（C）×基线账号 accountTag
+   *  ——投放日表（D）为项目级子账户行（brandUserName=项目名），无法按账号标签拆分，故标签页签全口径取 C；
+   *  accountType='官号'：聚光笔记报表已剔官号（C 无数据），改用投放日表官号行（D，brandUserName 含「官号」） */
   private async campaignSummaryByAccountType(start: Date, end: Date, accountType: string) {
-    const [rows, { noteAuthor, tagById, tagByNick }] = await Promise.all([
-      this.prisma.koxJuguangNoteDaily.findMany({
-        where: { brandId: 6, day: { gte: start, lte: end } },
-      }),
-      this.teslaNoteAccountMaps(),
-    ]);
+    const isOfficialTab = accountType === '官号';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: Array<Record<string, any>> = isOfficialTab
+      ? await this.prisma.koxCampaignDailyStat.findMany({
+          where: { brandId: 6, statDate: { gte: start, lte: end } },
+        })
+      : await this.prisma.koxJuguangNoteDaily.findMany({
+          where: { brandId: 6, day: { gte: start, lte: end } },
+        });
+    const { noteAuthor, tagById, tagByNick } = await this.teslaNoteAccountMaps();
 
     type DayAgg = {
       fee: number; impression: number; click: number; interaction: number;
       consult: number; open: number; leads: number;
-      notes: Set<string>; creators: Set<string>;
+      notes: Set<string>; creators: Set<string>; accounts: Set<string>;
     };
     const dayMap = new Map<string, DayAgg>();
     const allNotes = new Set<string>();
@@ -1186,26 +1246,45 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     let matched = 0;
     let totalFee = 0;
     for (const r of rows) {
-      const { creator, tag } = this.teslaRowCreatorTag(r, noteAuthor, tagById, tagByNick);
-      if (tag !== accountType) continue;
-      matched += 1;
-      totalFee += Number(r.fee);
-      if (creator) allCreators.add(creator);
-      allNotes.add(r.noteId);
-      const key = dayKey08(r.day);
+      const key = dayKey08(isOfficialTab ? r.statDate : r.day);
       const cur = dayMap.get(key) ?? {
         fee: 0, impression: 0, click: 0, interaction: 0, consult: 0, open: 0, leads: 0,
-        notes: new Set<string>(), creators: new Set<string>(),
+        notes: new Set<string>(), creators: new Set<string>(), accounts: new Set<string>(),
       };
-      cur.fee += Number(r.fee);
-      cur.impression += Number(r.impression);
-      cur.click += Number(r.click);
-      cur.interaction += Number(r.interaction);
-      cur.consult += Number(r.msgInquiries);
-      cur.open += Number(r.msgOpenings);
-      cur.leads += Number(r.msgLeads);
-      cur.notes.add(r.noteId);
-      if (creator) cur.creators.add(creator);
+      if (isOfficialTab) {
+        if (!isOfficialCampaignRow(r.brandUserName)) continue;
+        cur.fee += Number(r.fee);
+        cur.impression += Number(r.impression);
+        cur.click += Number(r.click);
+        cur.interaction += Number(r.interaction);
+        cur.consult += Number(r.messageConsult);
+        cur.open += Number(r.msgChatUserCnt);
+        cur.leads += Number(r.msgLeadsNum);
+        cur.accounts.add(r.virtualSellerId);
+        totalFee += Number(r.fee);
+        matched += 1;
+      } else {
+        const { creator, tag } = this.teslaRowCreatorTag(
+          r as { noteId: string; creator: string | null },
+          noteAuthor,
+          tagById,
+          tagByNick,
+        );
+        if (tag !== accountType) continue;
+        matched += 1;
+        totalFee += Number(r.fee);
+        if (creator) allCreators.add(creator);
+        allNotes.add(r.noteId);
+        cur.fee += Number(r.fee);
+        cur.impression += Number(r.impression);
+        cur.click += Number(r.click);
+        cur.interaction += Number(r.interaction);
+        cur.consult += Number(r.msgInquiries);
+        cur.open += Number(r.msgOpenings);
+        cur.leads += Number(r.msgLeads);
+        cur.notes.add(r.noteId);
+        if (creator) cur.creators.add(creator);
+      }
       dayMap.set(key, cur);
     }
     const r2v = (v: number) => Math.round(v * 100) / 100;
@@ -1220,7 +1299,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     const endKey = keyOf(end);
-    const trend: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number; note_num: number }[] = [];
+    const trend: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number; note_num: number | null }[] = [];
     for (let guard = 0; guard < 366; guard++) {
       const key = keyOf(startDay);
       const v = dayMap.get(key);
@@ -1232,8 +1311,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         msg_inquiries: v?.consult ?? 0,
         msg_openings: v?.open ?? 0,
         msg_leads: v?.leads ?? 0,
-        active_accounts: v?.creators.size ?? 0,
-        note_num: v?.notes.size ?? 0,
+        // 官号页签无笔记维度：active_accounts=当日有消耗账户数，note_num=null（前端回退显示账户数）
+        active_accounts: isOfficialTab ? (v?.accounts.size ?? 0) : (v?.creators.size ?? 0),
+        note_num: isOfficialTab ? null : (v?.notes.size ?? 0),
       });
       if (key === endKey) break;
       startDay.setDate(startDay.getDate() + 1);
@@ -1245,9 +1325,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       account_type: accountType,
       total: matched,
       summary: {
-        account_num: allCreators.size,
-        note_num: allNotes.size,
-        consume_days: dayMap.size,
+        account_num: isOfficialTab
+          ? new Set([...dayMap.values()].flatMap((v) => [...v.accounts])).size
+          : allCreators.size,
+        note_num: isOfficialTab ? null : allNotes.size,
+        consume_days: [...dayMap.values()].filter((v) => v.fee > 0).length,
         fee: r2v(totalFee),
         impression: totalImpression,
         click: totalClick,
@@ -1263,7 +1345,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         msg_lead_cost: totalLeads ? r2v(totalFee / totalLeads) : 0,
       },
       trend,
-      metric_note: `投放数据=聚光「标准投笔记报表」逐笔记按日汇总×账号标签（${accountType}；作者经 KoxNote 映射→基线账号 accountTag）`,
+      metric_note: isOfficialTab
+        ? '官号页签：消耗/曝光/点击/互动/私信三数=投放日表官号行（brandUserName 含「官号」）；聚光笔记报表口径已剔官号，故无笔记维度'
+        : `投放数据=聚光「标准投笔记报表」逐笔记按日汇总×账号标签（${accountType}；作者经 KoxNote 映射→基线账号 accountTag）`,
     };
   }
 
@@ -1677,16 +1761,23 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
-    // 特斯拉：按区域/门店汇总 = 聚光「标准投笔记报表」逐笔记（作者经 KoxNote 映射 → 基线账号大区/门店）
-    // 旧逻辑按 vseller 项目账户名映射（与账号昵称/门店无关）恒为未匹配，brand6 不再使用
+    // 特斯拉：按区域/门店汇总（客户指定 2026-10）：
+    // 非官号桶 = 聚光「标准投笔记报表」逐笔记（C：消耗/曝光/点击/互动/私信三数，作者经 KoxNote 映射→基线大区/门店）
+    // ——投放日表（D）为项目级子账户行，无法按大区/门店归属，故非官号桶不取 D；
+    // 官号投流（D 官号行，brandUserName 含「官号」）单列一行「特斯拉官号」（含私信三数=投放日表口径），顶部合计不含官号行
     if (brandId === 6) {
-      const rows6 = await this.prisma.koxJuguangNoteDaily.findMany({
-        where: { brandId: 6, day: { gte: start, lte: end } },
-      });
-      const kos6 = await this.prisma.kosAccount.findMany({
-        where: { brandId: 6 },
-        select: { id: true, nickname: true, storeName: true, regionName: true },
-      });
+      const [rows6, dRows6, kos6] = await Promise.all([
+        this.prisma.koxJuguangNoteDaily.findMany({
+          where: { brandId: 6, day: { gte: start, lte: end } },
+        }),
+        this.prisma.koxCampaignDailyStat.findMany({
+          where: { brandId: 6, statDate: { gte: start, lte: end } },
+        }),
+        this.prisma.kosAccount.findMany({
+          where: { brandId: 6 },
+          select: { id: true, nickname: true, storeName: true, regionName: true },
+        }),
+      ]);
       const regionByNick = new Map(kos6.map((k) => [k.nickname, k.regionName ?? "未匹配"]));
       const storeByNick = new Map(kos6.filter((k) => k.storeName).map((k) => [k.nickname, k.storeName as string]));
       const regionById = new Map(kos6.map((k) => [k.id, k.regionName ?? "未匹配"]));
@@ -1698,32 +1789,53 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       })) {
         noteAuthor.set(n.noteId, { authorName: n.authorName, accountId: n.accountId });
       }
-      type Agg6 = { region: string; store: string; creators: Set<string>; fee: number; impression: number; click: number; interaction: number; msg_inquiries: number; msg_openings: number; msg_leads: number };
+      type Agg6 = { region: string; store: string; official: boolean; accounts: Set<string>; creators: Set<string>; fee: number; impression: number; click: number; interaction: number; msg_inquiries: number; msg_openings: number; msg_leads: number };
       const groups6 = new Map<string, Agg6>();
+      const bucketOf6 = (region: string, store: string, official = false): Agg6 => {
+        const key = official ? '__official__' : groupby === 'store' ? `${region}·${store}` : region;
+        let cur = groups6.get(key);
+        if (!cur) {
+          cur = { region, store, official, accounts: new Set(), creators: new Set(), fee: 0, impression: 0, click: 0, interaction: 0, msg_inquiries: 0, msg_openings: 0, msg_leads: 0 };
+          groups6.set(key, cur);
+        }
+        return cur;
+      };
+      // 官号投流（D 官号行）单列；非官号 D 行为项目级数据无法归属，不参与区域分桶
+      for (const r of dRows6) {
+        if (!isOfficialCampaignRow(r.brandUserName)) continue;
+        const g = bucketOf6('官号', '特斯拉官号', true);
+        g.fee += Number(r.fee);
+        g.impression += Number(r.impression);
+        g.click += Number(r.click);
+        g.interaction += Number(r.interaction);
+        g.msg_inquiries += Number(r.messageConsult);
+        g.msg_openings += Number(r.msgChatUserCnt);
+        g.msg_leads += Number(r.msgLeadsNum);
+        g.accounts.add(r.virtualSellerId);
+      }
+      // 非官号桶：聚光笔记报表（C）逐笔记全口径
       for (const r of rows6) {
         // 作者：KoxNote（商业内容管理维护）优先，回退报表 creator
         const meta = noteAuthor.get(r.noteId);
-        const creator = (meta?.authorName ?? r.creator ?? "").trim();
+        const creator = (meta?.authorName ?? r.creator ?? '').trim();
         const accId = meta?.accountId ?? null;
-        const region = (accId != null ? regionById.get(accId) : undefined) ?? regionByNick.get(creator) ?? "未匹配";
-        const store = (accId != null ? storeById.get(accId) : undefined) ?? storeByNick.get(creator) ?? (region === "未匹配" ? "未匹配" : creator);
-        const key = groupby === "store" ? `${region}·${store}` : region;
-        const cur = groups6.get(key) ?? { region, store, creators: new Set<string>(), fee: 0, impression: 0, click: 0, interaction: 0, msg_inquiries: 0, msg_openings: 0, msg_leads: 0 };
-        cur.creators.add(creator);
-        cur.fee += Number(r.fee);
-        cur.impression += Number(r.impression);
-        cur.click += Number(r.click);
-        cur.interaction += Number(r.interaction);
-        cur.msg_inquiries += Number(r.msgInquiries);
-        cur.msg_openings += Number(r.msgOpenings);
-        cur.msg_leads += Number(r.msgLeads);
-        groups6.set(key, cur);
+        const region = (accId != null ? regionById.get(accId) : undefined) ?? regionByNick.get(creator) ?? '未匹配';
+        const store = (accId != null ? storeById.get(accId) : undefined) ?? storeByNick.get(creator) ?? (region === '未匹配' ? '未匹配' : creator);
+        const g = bucketOf6(region, store);
+        g.creators.add(creator);
+        g.fee += Number(r.fee);
+        g.impression += Number(r.impression);
+        g.click += Number(r.click);
+        g.interaction += Number(r.interaction);
+        g.msg_inquiries += Number(r.msgInquiries);
+        g.msg_openings += Number(r.msgOpenings);
+        g.msg_leads += Number(r.msgLeads);
       }
       const list6 = [...groups6.values()]
         .map((g) => ({
-          name: groupby === "store" ? g.store : g.region,
-          region: groupby === "store" ? g.region : undefined,
-          account_num: g.creators.size,
+          name: g.official ? '特斯拉官号' : groupby === 'store' ? g.store : g.region,
+          region: groupby === 'store' ? g.region : undefined,
+          account_num: g.creators.size || g.accounts.size,
           fee: Math.round(g.fee * 100) / 100,
           impression: g.impression,
           click: g.click,
@@ -1733,23 +1845,27 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           msg_openings: g.msg_openings,
           msg_leads: g.msg_leads,
           msg_lead_cost: g.msg_leads ? Math.round((g.fee / g.msg_leads) * 10) / 10 : 0,
+          official: g.official,
         }))
-        .sort((a, b) => b.fee - a.fee);
+        .sort((a, b) => (a.official === b.official ? b.fee - a.fee : a.official ? 1 : -1));
+      // 顶部合计不含官号行（客户指定：投放数据不含官号，官号仅单行展示）
+      const nonOfficial = list6.filter((x) => !x.official);
       return {
         groupby,
         start: dayKey08(start),
         end: dayKey08(end),
         total: list6.length,
         summary: {
-          group_num: list6.length,
-          account_num: list6.reduce((a, x) => a + x.account_num, 0),
-          fee: Math.round(list6.reduce((a, x) => a + x.fee, 0) * 100) / 100,
-          impression: list6.reduce((a, x) => a + x.impression, 0),
-          click: list6.reduce((a, x) => a + x.click, 0),
-          msg_leads: list6.reduce((a, x) => a + x.msg_leads, 0),
+          group_num: nonOfficial.length,
+          account_num: nonOfficial.reduce((a, x) => a + x.account_num, 0),
+          fee: Math.round(nonOfficial.reduce((a, x) => a + x.fee, 0) * 100) / 100,
+          impression: nonOfficial.reduce((a, x) => a + x.impression, 0),
+          click: nonOfficial.reduce((a, x) => a + x.click, 0),
+          msg_leads: nonOfficial.reduce((a, x) => a + x.msg_leads, 0),
         },
         list: list6,
-        metric_note: "投放数据=聚光「标准投笔记报表」逐笔记按日汇总（作者经 KoxNote 映射→基线大区/门店）；未匹配=报表未返回作者昵称的行",
+        metric_note:
+          '消耗/曝光/点击/互动/私信三数=聚光「标准投笔记报表」逐笔记按日（作者经 KoxNote 映射→基线大区/门店）；特斯拉官号投流单列一行（投放日表官号行，含私信三数），不计入顶部合计',
       };
     }
 
