@@ -117,8 +117,8 @@ import { exportExcel } from '../../utils/excel';
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const isDf = [7, 8].includes(Number(auth.currentBrandId));
-const isTesla = Number(auth.currentBrandId) === 6;
+const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
+const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const CROWNS = ['👑', '🥈', '🥉'];
 
 const quick = ref('7');
@@ -147,7 +147,7 @@ const ncol = (title, key, width = 96) => ({
 });
 
 const columns = computed(() => {
-  if (isDf) {
+  if (isDf.value) {
     return [
       { title: '排名', key: 'rank', width: 64, fixed: 'left' },
       { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 190, fixed: 'left' },
