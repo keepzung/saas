@@ -170,7 +170,8 @@ await backToList();
     console.log(`[stat-daily] 子账户 ${accounts.length} 个（active ${accounts.filter((a) => a.status === 'active').length}）`);
     const upserts = [];
     let okAcc = 0;
-    for (const acc of accounts.filter((a) => a.status === 'active')) {
+    const JG_T = process.env.JG_TARGET;
+    for (const acc of accounts.filter((a) => a.status === 'active' && (!JG_T || a.name.includes(JG_T)))) {
       // 跳转子账户聚光（与 sync-juguang.cjs ensureJump 同款：popup → 同页兜底 → hover「聚光平台」菜单兜底）
       let popup2 = null;
       for (let attempt = 1; attempt <= 3 && !popup2; attempt++) {
