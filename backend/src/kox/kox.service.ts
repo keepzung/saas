@@ -2491,19 +2491,22 @@ export class KoxService {
     };
     // 员工矩阵/笔记聚合前的公共映射
     const nameToId = new Map(accounts.map((a) => [a.nickname, a.id]));
-    // 内容指标：聚光「商业内容管理」逐笔记×逐日（时段发布口径，与区域数据/KOS进度一致）
-    // 发布数=窗口内发布的员工笔记数；曝光/阅读/互动=该笔记集合在窗口内的逐日表现和
-    // 归属：noteId→KoxNote.accountId 优先、authorName→基线昵称兜底；未匹配不入统计
+    // 账号表现分析口径（客户确认）：
+    // ①发布数 = 聚光「商业内容管理」逐笔记×逐日（时段发布口径：窗口内发布的员工笔记数）
+    //   归属：noteId→KoxNote.accountId 优先、authorName→基线昵称兜底；未匹配不入统计
+    // ②曝光/阅读（点击）/互动 = 专业号「数据中心-员工数据」窗口快照（socImpCnt/socClickCnt/socEnageCnt）
+    // ③私信三数 = 专业号「客户管理（旧版）获客工具统计」（下方 toolRows 块）
     if (brandId === 6) {
       const contentNotes = await this.prisma.koxContentNoteDaily.findMany({
         where: { brandId: 6, day: { gte: start, lte: end } },
         select: {
-          noteId: true, impNum: true, readFeedNum: true, engageCnt: true,
-          authorName: true, notePublishTime: true,
+          noteId: true,
+          authorName: true,
+          notePublishTime: true,
         },
       });
-      const cIds = [...new Set(contentNotes.map((c) => c.noteId))];
       const cAcc = new Map<string, number | null>();
+      const cIds = [...new Set(contentNotes.map((c) => c.noteId))];
       for (let i = 0; i < cIds.length; i += 500) {
         const chunk = cIds.slice(i, i + 500);
         const metaRows = await this.prisma.koxNote.findMany({
@@ -2515,15 +2518,9 @@ export class KoxService {
       const idToAccR = new Map(accounts.map((a) => [a.id, a]));
       const wStart = dayKey08(start);
       const wEnd = dayKey08(end);
-      const cPerf = new Map<string, { exposure: number; view: number; interaction: number }>();
       const cAuthor = new Map<string, string | null>();
       const cPublished = new Set<string>();
       for (const c of contentNotes) {
-        const cur = cPerf.get(c.noteId) ?? { exposure: 0, view: 0, interaction: 0 };
-        cur.exposure += c.impNum;
-        cur.view += c.readFeedNum;
-        cur.interaction += c.engageCnt;
-        cPerf.set(c.noteId, cur);
         if (!cAuthor.has(c.noteId)) cAuthor.set(c.noteId, c.authorName);
         if (c.notePublishTime) {
           const pd = dayKey08(c.notePublishTime);
@@ -2536,15 +2533,26 @@ export class KoxService {
           accIdFromNote != null ? accIdFromNote : nameToId.get(cAuthor.get(noteId) ?? '') ?? null;
         const acc = accIdResolved != null ? idToAccR.get(accIdResolved) : undefined;
         if (!acc) continue;
-        const perf = cPerf.get(noteId)!;
         bump(acc.id, (a) => {
           a.item_cnt += 1;
-          a.exposure += perf.exposure;
-          a.view += perf.view;
-          a.interaction += perf.interaction;
         });
       }
-      metric_source = 'juguang_content_note_daily(publish_in_window)';
+      // 曝光/阅读（点击）/互动：专业号员工矩阵窗口快照（近1/7/30日三档）
+      const proMatrix = await this.proMatrixStaff(days, start, end);
+      if (proMatrix) {
+        for (const s of proMatrix.rows) {
+          const accId = s.nickName ? nameToId.get(s.nickName) : null;
+          if (accId == null) continue;
+          bump(accId, (a) => {
+            a.exposure += s.socImpCnt;
+            a.view += s.socClickCnt;
+            a.interaction += s.socEnageCnt;
+          });
+        }
+        metric_source = `juguang_content_publish + pro_staff_matrix(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)}) + pro_clue_tool_stat`;
+      } else {
+        metric_source = 'juguang_content_publish + pro_staff(no_partition) + pro_clue_tool_stat';
+      }
     }
     for (const n of notes) {
       let accId: number | null = null;
