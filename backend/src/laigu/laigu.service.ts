@@ -592,10 +592,11 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const since = new Date(Date.now() - days * 86400000);
 
     // 特斯拉（brand6）：来鼓坐席为组名（非个人账号），按组名含「特斯拉」过滤，
-    // 剔除「上汽大众区域号（全天）」「超级管理员」等其他品牌/管理坐席的会话
+    // 剔除「上汽大众区域号（全天）」「超级管理员」等其他品牌/管理坐席的会话；
+    // 会话表为单网关存储（brandId 固定为 LAIGU_BRAND_ID=5），brand6 查询不按 brandId 过滤
     // Morgandada（brand5）：只显示 isMdd 会话（投放账户/账号id/客服昵称三判据并集）
     const sessionWhere: Prisma.LaiguLeadWhereInput = {
-      brandId,
+      ...(brandId === 6 ? {} : { brandId }),
       OR: [{ lastMessageAt: { gte: since } }, { sessionCreatedAt: { gte: since } }],
     };
     if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') sessionWhere.isMdd = true;
