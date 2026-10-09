@@ -818,6 +818,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+  min-height: 24px;
 }
 
 .rank-tabs {
@@ -849,7 +850,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 8px;
+  height: 40px;
+  padding: 0 8px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
@@ -905,6 +907,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 64px;
   padding: 8px 6px;
   border-radius: 8px;
   cursor: pointer;
@@ -919,8 +922,8 @@ onBeforeUnmount(() => {
 }
 
 .hot-thumb {
-  width: 45px;
-  height: 60px;
+  width: 36px;
+  height: 48px;
   border-radius: 6px;
   overflow: hidden;
   background: #f1f5f9;
