@@ -1428,25 +1428,37 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
-    // ???????/???? = ???????????????creator=KOS ???? ? ??????/???
-    // ???? vseller ?????????????/???????????brand6 ????
+    // 特斯拉：按区域/门店汇总 = 聚光「标准投笔记报表」逐笔记（作者经 KoxNote 映射 → 基线账号大区/门店）
+    // 旧逻辑按 vseller 项目账户名映射（与账号昵称/门店无关）恒为未匹配，brand6 不再使用
     if (brandId === 6) {
       const rows6 = await this.prisma.koxJuguangNoteDaily.findMany({
         where: { brandId: 6, day: { gte: start, lte: end } },
       });
       const kos6 = await this.prisma.kosAccount.findMany({
         where: { brandId: 6 },
-        select: { nickname: true, storeName: true, regionName: true },
+        select: { id: true, nickname: true, storeName: true, regionName: true },
       });
-      const regionByNick = new Map(kos6.map((k) => [k.nickname, k.regionName ?? "???"]));
+      const regionByNick = new Map(kos6.map((k) => [k.nickname, k.regionName ?? "未匹配"]));
       const storeByNick = new Map(kos6.filter((k) => k.storeName).map((k) => [k.nickname, k.storeName as string]));
+      const regionById = new Map(kos6.map((k) => [k.id, k.regionName ?? "未匹配"]));
+      const storeById = new Map(kos6.filter((k) => k.storeName).map((k) => [k.id, k.storeName as string]));
+      const noteAuthor = new Map<string, { authorName: string | null; accountId: number | null }>();
+      for (const n of await this.prisma.koxNote.findMany({
+        where: { brandId: 6 },
+        select: { noteId: true, authorName: true, accountId: true },
+      })) {
+        noteAuthor.set(n.noteId, { authorName: n.authorName, accountId: n.accountId });
+      }
       type Agg6 = { region: string; store: string; creators: Set<string>; fee: number; impression: number; click: number; interaction: number; msg_inquiries: number; msg_openings: number; msg_leads: number };
       const groups6 = new Map<string, Agg6>();
       for (const r of rows6) {
-        const creator = (r.creator ?? "").trim();
-        const region = regionByNick.get(creator) ?? "???";
-        const store = storeByNick.get(creator) ?? (region === "???" ? "???" : creator);
-        const key = groupby === "store" ? region + "?" + store : region;
+        // 作者：KoxNote（商业内容管理维护）优先，回退报表 creator
+        const meta = noteAuthor.get(r.noteId);
+        const creator = (meta?.authorName ?? r.creator ?? "").trim();
+        const accId = meta?.accountId ?? null;
+        const region = (accId != null ? regionById.get(accId) : undefined) ?? regionByNick.get(creator) ?? "未匹配";
+        const store = (accId != null ? storeById.get(accId) : undefined) ?? storeByNick.get(creator) ?? (region === "未匹配" ? "未匹配" : creator);
+        const key = groupby === "store" ? `${region}·${store}` : region;
         const cur = groups6.get(key) ?? { region, store, creators: new Set<string>(), fee: 0, impression: 0, click: 0, interaction: 0, msg_inquiries: 0, msg_openings: 0, msg_leads: 0 };
         cur.creators.add(creator);
         cur.fee += Number(r.fee);
@@ -1488,7 +1500,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           msg_leads: list6.reduce((a, x) => a + x.msg_leads, 0),
         },
         list: list6,
-        metric_note: "????=???????????????????creator=KOS?????????/???????=???????????",
+        metric_note: "投放数据=聚光「标准投笔记报表」逐笔记按日汇总（作者经 KoxNote 映射→基线大区/门店）；未匹配=报表未返回作者昵称的行",
       };
     }
 
