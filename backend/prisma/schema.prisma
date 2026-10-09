@@ -1332,6 +1332,27 @@ model KoxContentStatDaily {
   @@index([brandId, day])
 }
 
+// 聚光「商业内容管理」逐笔记×逐日（窗口内发布的员工笔记；区域数据分析内容指标权威源）
+model KoxContentNoteDaily {
+  id              Int      @id @default(autoincrement())
+  brandId         Int      @default(6)
+  noteId          String
+  day             DateTime
+  impNum          Int      @default(0)
+  readFeedNum     Int      @default(0)
+  engageCnt       Int      @default(0)
+  followCnt       Int      @default(0)
+  authorName      String?
+  vSellerId       String?
+  notePublishTime DateTime?
+  isRtbAdver      Boolean?
+  fetchedAt       DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, noteId, day])
+  @@index([brandId, day])
+  @@index([brandId, notePublishTime])
+}
+
 // 专业号「线索经营」客户×日明细（三行为标记；任意窗口按客户去重聚合的数据源）
 model ProClueUserDay {
   id             Int      @id @default(autoincrement())

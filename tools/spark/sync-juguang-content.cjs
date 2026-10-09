@@ -125,8 +125,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const sStart = sIdx > -1 ? process.argv[sIdx + 1] : new Date(new Date(`${sEnd}T00:00:00Z`).getTime() - 29 * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
     const statDays = [];
     for (let d = sStart, g = 0; d <= sEnd && g++ < 200; d = new Date(new Date(`${d}T00:00:00Z`).getTime() + 86400000 + 8 * 3600000).toISOString().slice(0, 10)) statDays.push(d);
-    console.log(`[stat-daily] 区间 ${sStart} ~ ${sEnd}（${statDays.length} 天）`);
+    // 发布窗口：只采集「窗口内发布的员工笔记」的逐日表现（区域数据分析时段发布口径）
+    // 回填显式传 --pub-start/--pub-end；缺省=滚动近 PUB_WINDOW_DAYS 天（每日 cron 用）
+    const pubStartIdx = process.argv.indexOf('--pub-start');
+    const pubEndIdx = process.argv.indexOf('--pub-end');
+    const PUB_DAYS = Number(process.env.PUB_WINDOW_DAYS || 35);
+    const pubStart = pubStartIdx > -1 ? process.argv[pubStartIdx + 1] : new Date(new Date(`${sEnd}T00:00:00Z`).getTime() - (PUB_DAYS - 1) * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
+    const pubEnd = pubEndIdx > -1 ? process.argv[pubEndIdx + 1] : sEnd;
+    console.log(`[stat-daily] 区间 ${sStart} ~ ${sEnd}（${statDays.length} 天）；发布窗口 ${pubStart} ~ ${pubEnd}`);
     const F = (x) => { const n = Number(x); return Number.isFinite(n) ? Math.round(n) : 0; };
+    const parsePubS = (s) => {
+      if (!s) return null;
+      const d = new Date(String(s).replace(' ', 'T') + '+08:00');
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
 
     const enumerateAll = async () => {
       const out = [];
@@ -223,7 +235,7 @@ await backToList();
       if (!onManage) { console.log(`[${acc.name}] 未进入商业内容管理，跳过`); await popup2.close().catch(() => {}); await backToList(); continue; }
 
       const statCall = async (day) =>
-        popup2.evaluate(async ({ vseller, day }) => {
+        popup2.evaluate(async ({ vseller, day, pageNum, pageSize, pubStart, pubEnd }) => {
           const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -233,51 +245,130 @@ await backToList();
               reportBrandUserId: vseller,
               noteContentTypeList: [], noteType: 0, spuIdList: [], tagIdList: [], recIdList: [],
               noteDataStartTime: day, noteDataEndTime: day,
-              notePublishTimeStart: '', notePublishTimeEnd: '',
+              notePublishTimeStart: pubStart, notePublishTimeEnd: pubEnd,
               fansNumAccumLower: null, fansNumAccumUpper: null, ownOrderNote: false,
               staffLabelList: [], staffCountry: [], staffProvince: [], staffCity: [],
-              pageNum: 1, pageSize: 1, sortDirect: '', sortColumn: '', noteCustomType: 0,
+              pageNum, pageSize, sortDirect: '', sortColumn: '', noteCustomType: 0,
             }),
           });
           const j = await res.json().catch(() => null);
-          return j?.data?.noteStatData ?? null;
-        }, { vseller, day }).catch(() => null);
+          const d = j?.data ?? {};
+          return {
+            stat: d.noteStatData ?? null,
+            total: d.total ?? 0,
+            totalPage: d.totalPage ?? 0,
+            rows: (d.noteList ?? []).map((n) => ({
+              noteId: String(n.noteId ?? ''),
+              authorName: n.authorName ?? '',
+              publishTime: n.notePublishTime ?? '',
+              isRtb: n.isRtbAdver === 1,
+              nd: n.noteData ?? null,
+            })),
+          };
+        }, { vseller, day, pageNum: 1, pageSize: 1, pubStart, pubEnd }).catch(() => null);
+
+      // 逐笔记分页版（合计行 + noteList 一起拿，同请求零额外成本）
+      const noteRowsCall = async (day, pageNum) =>
+        popup2.evaluate(async ({ vseller, day, pageNum, pageSize, pubStart, pubEnd }) => {
+          const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              brandUserId: vseller,
+              reportBrandUserId: vseller,
+              noteContentTypeList: [], noteType: 0, spuIdList: [], tagIdList: [], recIdList: [],
+              noteDataStartTime: day, noteDataEndTime: day,
+              notePublishTimeStart: pubStart, notePublishTimeEnd: pubEnd,
+              fansNumAccumLower: null, fansNumAccumUpper: null, ownOrderNote: false,
+              staffLabelList: [], staffCountry: [], staffProvince: [], staffCity: [],
+              pageNum, pageSize, sortDirect: '', sortColumn: '', noteCustomType: 0,
+            }),
+          });
+          const j = await res.json().catch(() => null);
+          const d = j?.data ?? {};
+          return {
+            stat: d.noteStatData ?? null,
+            total: d.total ?? 0,
+            totalPage: d.totalPage ?? 0,
+            rows: (d.noteList ?? []).map((n) => ({
+              noteId: String(n.noteId ?? ''),
+              authorName: n.authorName ?? '',
+              publishTime: n.notePublishTime ?? '',
+              isRtb: n.isRtbAdver === 1,
+              nd: n.noteData ?? null,
+            })),
+          };
+        }, { vseller, day, pageNum, pageSize: 100, pubStart, pubEnd }).catch(() => null);
 
       for (const day of statDays) {
-        const nd = await statCall(day);
-        if (!nd) { console.log(`[${acc.name} ${day}] 无合计行`); continue; }
-        upserts.push({
-          brandId: 6,
-          day: new Date(`${day}T00:00:00+08:00`),
-          vSellerId: vseller,
-          vSellerName: acc.name,
-          impNum: F(nd.impNum), readFeedNum: F(nd.readFeedNum), engageCnt: F(nd.engageCnt),
-          followCnt: F(nd.followCnt), noteNum: F(nd.noteNum),
-          ziranImpCnt: F(nd.ziranImpCnt), ziranReadCnt: F(nd.ziranReadCnt),
-          tuiguangImpCnt: F(nd.tuiguangImpCnt), tuiguangReadCnt: F(nd.tuiguangReadCnt),
-        });
-      }
-      okAcc += 1;
-      // 逐账户即时落库（部分失败不丢已采集数据）
-      for (let i = 0; i < upserts.length; i += 200) {
-        const chunk = upserts.slice(i, i + 200);
-        for (const r of chunk) {
-          await prisma.koxContentStatDaily.upsert({
-            where: { brandId_day_vSellerId: { brandId: r.brandId, day: r.day, vSellerId: r.vSellerId } },
-            update: { impNum: r.impNum, readFeedNum: r.readFeedNum, engageCnt: r.engageCnt, followCnt: r.followCnt, noteNum: r.noteNum, ziranImpCnt: r.ziranImpCnt, ziranReadCnt: r.ziranReadCnt, tuiguangImpCnt: r.tuiguangImpCnt, tuiguangReadCnt: r.tuiguangReadCnt, vSellerName: r.vSellerName },
+        const dayDate = new Date(`${day}T00:00:00+08:00`);
+        let stat = null;
+        const noteUpserts = [];
+        let totalPages = 1;
+        for (let page = 1; page <= totalPages && page <= 20; page++) {
+          const r = await noteRowsCall(day, page);
+          if (!r) { console.log(`[${acc.name} ${day}] p${page} 无响应`); break; }
+          if (r.stat) stat = r.stat;
+          totalPages = r.totalPage || 1;
+          for (const row of r.rows) {
+            if (!row.noteId || !row.nd) continue;
+            noteUpserts.push({
+              brandId: 6,
+              noteId: row.noteId,
+              day: dayDate,
+              impNum: F(row.nd.impNum), readFeedNum: F(row.nd.readFeedNum),
+              engageCnt: F(row.nd.engageCnt), followCnt: F(row.nd.followCnt),
+              authorName: row.authorName || null,
+              vSellerId: vseller,
+              notePublishTime: parsePubS(row.publishTime),
+              isRtbAdver: row.isRtb,
+            });
+          }
+          if (totalPages <= 1) break;
+          await sleep(400);
+        }
+        if (stat) {
+          upserts.push({
+            brandId: 6,
+            day: dayDate,
+            vSellerId: vseller,
+            vSellerName: acc.name,
+            impNum: F(stat.impNum), readFeedNum: F(stat.readFeedNum), engageCnt: F(stat.engageCnt),
+            followCnt: F(stat.followCnt), noteNum: F(stat.noteNum),
+            ziranImpCnt: F(stat.ziranImpCnt), ziranReadCnt: F(stat.ziranReadCnt),
+            tuiguangImpCnt: F(stat.tuiguangImpCnt), tuiguangReadCnt: F(stat.tuiguangReadCnt),
+          });
+        }
+        if (!stat && !noteUpserts.length) { console.log(`[${acc.name} ${day}] 无数据`); continue; }
+        // 逐日即时落库：合计行（全部笔记口径，总览用）+ 逐笔记行（时段发布口径，区域用）
+        if (stat) {
+          for (const r of upserts) {
+            await prisma.koxContentStatDaily.upsert({
+              where: { brandId_day_vSellerId: { brandId: r.brandId, day: r.day, vSellerId: r.vSellerId } },
+              update: { impNum: r.impNum, readFeedNum: r.readFeedNum, engageCnt: r.engageCnt, followCnt: r.followCnt, noteNum: r.noteNum, ziranImpCnt: r.ziranImpCnt, ziranReadCnt: r.ziranReadCnt, tuiguangImpCnt: r.tuiguangImpCnt, tuiguangReadCnt: r.tuiguangReadCnt, vSellerName: r.vSellerName },
+              create: r,
+            });
+          }
+          upserts.length = 0;
+        }
+        for (const r of noteUpserts) {
+          await prisma.koxContentNoteDaily.upsert({
+            where: { brandId_noteId_day: { brandId: r.brandId, noteId: r.noteId, day: r.day } },
+            update: { impNum: r.impNum, readFeedNum: r.readFeedNum, engageCnt: r.engageCnt, followCnt: r.followCnt, authorName: r.authorName, vSellerId: r.vSellerId, notePublishTime: r.notePublishTime, isRtbAdver: r.isRtbAdver },
             create: r,
           });
         }
       }
-      upserts.length = 0;
-      console.log(`[${acc.name}] ${statDays.length} 天合计行已落库（${okAcc}/${accounts.filter((a) => a.status === 'active').length}）`);
+      okAcc += 1;
+      console.log(`[${acc.name}] ${statDays.length} 天合计行+逐笔记行已落库（${okAcc}/${accounts.filter((a) => a.status === 'active').length}）`);
       await popup2.close().catch(() => {});
       await backToList();
     }
     await prisma.sparkSyncLog.create({
-      data: { brandId: 6, syncType: 'content_stat_daily', statDate: sEnd, fetched: upserts.length, upserted: upserts.length, message: `accounts ok ${okAcc}, days ${statDays.length}, rows ${upserts.length}` },
+      data: { brandId: 6, syncType: 'content_stat_daily', statDate: sEnd, fetched: okAcc, upserted: okAcc, message: `accounts ok ${okAcc}, days ${statDays.length}, pubWindow ${pubStart}~${pubEnd}` },
     });
-    console.log(`[stat-daily] 完成：${okAcc} 账号 × ${statDays.length} 天，落库 ${upserts.length} 行`);
+    console.log(`[stat-daily] 完成：${okAcc} 账号 × ${statDays.length} 天（发布窗口 ${pubStart} ~ ${pubEnd}）`);
     await browser.close();
     await prisma.$disconnect();
     process.exit(0);

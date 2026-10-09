@@ -2206,22 +2206,59 @@ export class KoxService {
     }
     const r2 = (v: number) => Math.round(v * 100) / 100;
     if (brandId === 6) {
-      // 特斯拉：内容指标=专业号员工矩阵窗口快照（笔记数量/有发布/曝光/阅读/互动）
-      // KoxNote 笔记口径与聚光投流口径弃用（星火 partner 通道停更）；CES/自然留资暂无口径为 0
-      const proMatrix = await this.proMatrixStaff(days, start, end);
-      if (proMatrix) {
-        for (const s of proMatrix.rows) {
-          const acc = s.nickName ? nameToAcc.get(s.nickName) : undefined;
-          if (!acc) continue;
-          const g = bucketOf(groups, regionOf(acc));
-          const tg = bucketOf(tagGroups, tagOf(acc));
-          for (const bucket of [g, tg]) {
-            bucket.published.add(acc.id);
-            bucket.note_cnt += s.createNoteNum;
-            bucket.exposure += s.socImpCnt;
-            bucket.view += s.socClickCnt;
-            bucket.interaction += s.socEnageCnt;
-          }
+      // 特斯拉：内容指标=聚光「商业内容管理」逐笔记×逐日（时段发布口径，客户 1008 截图行为一致）
+      // 笔记数量/有发布=窗口内发布的员工笔记（notePublishTime ∈ 窗口，去重）；
+      // 曝光/阅读/互动=上述笔记集合在窗口内的逐日表现和；归属=noteId→KoxNote.accountId 优先、
+      // authorName→基线昵称兜底 → 210 基线账号大区/标签分桶（未匹配不入桶，保持 15 大区横轴）
+      const contentNotes = await this.prisma.koxContentNoteDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end } },
+        select: {
+          noteId: true, impNum: true, readFeedNum: true, engageCnt: true,
+          authorName: true, notePublishTime: true,
+        },
+      });
+      const noteIds = [...new Set(contentNotes.map((c) => c.noteId))];
+      const noteAccId = new Map<string, number | null>();
+      for (let i = 0; i < noteIds.length; i += 500) {
+        const chunk = noteIds.slice(i, i + 500);
+        const metaRows = await this.prisma.koxNote.findMany({
+          where: { brandId: 6, noteId: { in: chunk } },
+          select: { noteId: true, accountId: true },
+        });
+        for (const m of metaRows) noteAccId.set(m.noteId, m.accountId);
+      }
+      const winStartDay = dayKey08(start);
+      const winEndDay = dayKey08(end);
+      const perfOf = new Map<string, { exposure: number; view: number; interaction: number }>();
+      const authorOf = new Map<string, string | null>();
+      const publishedNotes = new Set<string>();
+      for (const c of contentNotes) {
+        const cur = perfOf.get(c.noteId) ?? { exposure: 0, view: 0, interaction: 0 };
+        cur.exposure += c.impNum;
+        cur.view += c.readFeedNum;
+        cur.interaction += c.engageCnt;
+        perfOf.set(c.noteId, cur);
+        if (!authorOf.has(c.noteId)) authorOf.set(c.noteId, c.authorName);
+        if (c.notePublishTime) {
+          const pd = dayKey08(c.notePublishTime);
+          if (pd >= winStartDay && pd <= winEndDay) publishedNotes.add(c.noteId);
+        }
+      }
+      for (const noteId of publishedNotes) {
+        const accId = noteAccId.get(noteId);
+        const acc =
+          (accId != null ? idToAcc.get(accId) : undefined) ??
+          nameToAcc.get(authorOf.get(noteId) ?? '');
+        if (!acc) continue; // 未匹配基线账号的笔记不入桶
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        const perf = perfOf.get(noteId)!;
+        for (const bucket of [g, tg]) {
+          bucket.published.add(acc.id);
+          bucket.note_cnt += 1;
+          bucket.exposure += perf.exposure;
+          bucket.view += perf.view;
+          bucket.interaction += perf.interaction;
         }
       }
       // 私信进线/开口/留资 = 专业号「客户管理（旧版）获客工具统计」按日×归属账号求和（与账号表现分析同口径）
@@ -2317,7 +2354,7 @@ export class KoxService {
       days,
       metric_note:
         brandId === 6
-          ? '内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；私信进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；CES/自然留资暂无口径为 0'
+          ? '内容指标=聚光「商业内容管理」逐笔记×逐日（时段发布口径：笔记数量/有发布=所选时段内发布的员工笔记；曝光/阅读/互动=该笔记集合在时段内的表现）；私信进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；区域/标签归属按 210 账号基线，未匹配不入表'
           : '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
