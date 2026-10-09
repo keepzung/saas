@@ -491,31 +491,33 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
   }
 
   private resolveChromium(): string | null {
+    if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
     try {
       const pw = require('playwright-core') as typeof import('playwright-core');
       const p = pw.chromium.executablePath();
       if (p && fs.existsSync(p)) return p;
     } catch { /* fallthrough */ }
-    // 兜底：扫描 ms-playwright 缓存
-    const base = process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, 'ms-playwright')
-      : process.env.HOME
-        ? path.join(process.env.HOME, '.cache', 'ms-playwright')
-        : '';
-    if (!base) return null;
-    try {
-      const dirs = fs
-        .readdirSync(base)
-        .filter((d) => d.startsWith('chromium-'))
-        .sort()
-        .reverse();
-      for (const d of dirs) {
-        for (const sub of ['chrome-win64', 'chrome-win', 'chrome-linux']) {
-          const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
-          if (fs.existsSync(exe)) return exe;
+    // 兜底：扫描 ms-playwright 缓存（headless_shell 缺失时用完整版 chromium）
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    const bases = [
+      ...(process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, 'ms-playwright')] : []),
+      ...(home ? [path.join(home, '.cache', 'ms-playwright')] : []),
+    ];
+    for (const base of bases) {
+      try {
+        const dirs = fs
+          .readdirSync(base)
+          .filter((d) => d.startsWith('chromium-'))
+          .sort()
+          .reverse();
+        for (const d of dirs) {
+          for (const sub of ['chrome-linux64', 'chrome-linux', 'chrome-win64', 'chrome-win']) {
+            const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
+            if (fs.existsSync(exe)) return exe;
+          }
         }
-      }
-    } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    }
     return null;
   }
 
