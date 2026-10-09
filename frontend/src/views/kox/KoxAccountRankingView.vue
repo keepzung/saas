@@ -170,6 +170,23 @@ const columns = computed(() => {
       { title: '操作', key: 'action', width: 90, fixed: 'right' },
     ];
   }
+  if (isTesla.value) {
+    // 特斯拉：按客户 1009 批注只保留 进线/开口/留资/发布/曝光/阅读（点击）/互动
+    return [
+      { title: '排名', key: 'rank', width: 64, fixed: 'left' },
+      { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
+      { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 92, fixed: 'left' },
+      ncol('私信进线', 'pm_inquiries'),
+      ncol('私信开口', 'pm_openings'),
+      ncol('私信留资', 'pm_leads'),
+      ncol('内容发布数', 'item_cnt'),
+      ncol('内容曝光数', 'exposure_sum', 110),
+      ncol('阅读（点击）', 'view_sum', 110),
+      ncol('内容互动数', 'interaction_sum', 104),
+      { title: '所属门店/团队', key: 'store', width: 220 },
+      { title: '操作', key: 'action', width: 90, fixed: 'right' },
+    ];
+  }
   return [
     { title: '排名', key: 'rank', width: 64, fixed: 'left' },
     { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
@@ -186,18 +203,9 @@ const columns = computed(() => {
     ncol('内容发布数', 'item_cnt'),
     ncol('内容曝光数', 'exposure_sum', 110),
     ncol('内容阅读数', 'view_sum', 110),
-    // 特斯拉：赞/藏/评为聚光「商业内容管理」按笔记累计口径（partner→聚光链路维护），不随日期窗口变化
-    ...(isTesla.value
-      ? [
-          ncol('内容点赞数（累计）', 'likes_sum', 130),
-          ncol('内容收藏数（累计）', 'collects_sum', 130),
-          ncol('内容评论数（累计）', 'comments_sum', 130),
-        ]
-      : [
-          ncol('内容点赞数', 'likes_sum', 110),
-          ncol('内容收藏数', 'collects_sum', 110),
-          ncol('内容评论数', 'comments_sum', 110),
-        ]),
+    ncol('内容点赞数', 'likes_sum', 110),
+    ncol('内容收藏数', 'collects_sum', 110),
+    ncol('内容评论数', 'comments_sum', 110),
     { title: '所属门店/团队', key: 'store', width: 220 },
     { title: '操作', key: 'action', width: 90, fixed: 'right' },
   ];
@@ -275,21 +283,22 @@ function exportDetail() {
     排名: (pagination.value.current - 1) * pagination.value.pageSize + i + 1,
     账号: r.nickname,
     分层: r.tier_label,
-    粉丝数: r.fans,
-    账号标签: r.account_tag ?? '',
-    账号类型: r.account_type,
+    ...(isTesla.value
+      ? {}
+      : { 粉丝数: r.fans, 账号标签: r.account_tag ?? '', 账号类型: r.account_type }),
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
     私信留资: r.pm_leads,
-    ...(r.total_leads != null
-      ? { 总留资: r.total_leads, 服务卡留资: r.service_card_leads ?? 0, 个微复制留资: r.wecom_copy_leads ?? 0 }
-      : {}),
+    ...(isTesla.value
+      ? {}
+      : r.total_leads != null
+        ? { 总留资: r.total_leads, 服务卡留资: r.service_card_leads ?? 0, 个微复制留资: r.wecom_copy_leads ?? 0 }
+        : {}),
     内容发布数: r.item_cnt,
     内容曝光数: r.exposure_sum,
-    内容阅读数: r.view_sum,
-    内容点赞数: r.likes_sum,
-    内容收藏数: r.collects_sum,
-    内容评论数: r.comments_sum,
+    ...(isTesla.value
+      ? { 阅读点击: r.view_sum, 内容互动数: r.interaction_sum }
+      : { 内容阅读数: r.view_sum, 内容点赞数: r.likes_sum, 内容收藏数: r.collects_sum, 内容评论数: r.comments_sum }),
     所属门店: r.store_name ?? '',
     大区: r.region_name ?? '',
   }));
