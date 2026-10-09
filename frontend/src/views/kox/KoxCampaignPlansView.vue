@@ -25,8 +25,8 @@
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
       <div class="section-title">
         <span class="bar"></span>投流情况总览
-        <a-tooltip v-if="isTesla" title="消耗/曝光/点击=投放日表×子账户（剔官号）；私信进线/开口/留资=聚光「标准投笔记报表」；官号投流单列于区域汇总官号行，不计入本页">
-          <span class="muted small" style="cursor: help; margin-left: 8px; font-weight: 400">（口径：不含官号）</span>
+        <a-tooltip v-if="isTesla" title="全部指标=聚光「标准投笔记报表」逐笔记按日汇总（剔官号），与周期报表标签页签同源（相加=全部投流）；投流账号数=被投流的 KOS 账号数；官号投流单列于区域汇总官号行；当天数据 T+1">
+          <span class="muted small" style="cursor: help; margin-left: 8px; font-weight: 400">（口径：聚光笔记报表 · 不含官号 · 当天 T+1）</span>
         </a-tooltip>
       </div>
 
@@ -56,14 +56,19 @@
         <div class="metric-card">
           <div class="metric-label">
             投流内容数
-            <a-tooltip title="全部历史被投流推广的笔记数（数据来源：聚光笔记推广状态，T+1）">
+            <a-tooltip :title="isTesla ? '所选周期内被投流的笔记数（聚光笔记报表按笔记去重，剔官号，T+1）' : '全部历史被投流推广的笔记数（数据来源：聚光笔记推广状态，T+1）'">
               <InfoCircleOutlined class="metric-tip" />
             </a-tooltip>
           </div>
           <div class="metric-value">{{ mode === 'real' ? fmtNum(summary.promo_note_cnt ?? 0) : '—' }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">投流账号数</div>
+          <div class="metric-label">
+            投流账号数
+            <a-tooltip title="所选周期内被投流的 KOS 账号数（投流笔记 → 基线账号去重，剔官号，T+1）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtNum(summary.account_num) }}</div>
         </div>
         <div class="metric-card">

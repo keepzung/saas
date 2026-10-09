@@ -1005,8 +1005,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     if (brandId === 6 && accountType) {
       return this.campaignSummaryByAccountType(start, end, accountType);
     }
+    // 特斯拉「全部投流」：聚光笔记报表口径（2026-10 客户确认——与账号类型页签完全同源，
+    // 四标签相加 = 全部投流；当天数据 T+1 次日上午同步后可见；官号投流单独在官号页签/区域汇总官号行）
+    if (brandId === 6) {
+      return this.campaignSummaryJuguangBase(start, end);
+    }
 
-    const rowsAll = await this.prisma.koxCampaignDailyStat.findMany({
+    const rows = await this.prisma.koxCampaignDailyStat.findMany({
       where: {
         statDate: { gte: start, lte: end },
         brandId,
@@ -1014,65 +1019,27 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       },
       orderBy: { statDate: 'asc' },
     });
-    // 特斯拉：投放数据剔除官号（官号投流仅在区域汇总官号行/周期报表官号页签单独展示）
-    const rows = brandId === 6 ? rowsAll.filter((r) => !isOfficialCampaignRow(r.brandUserName)) : rowsAll;
-
-    // 特斯拉：私信三数 = 聚光「标准投笔记报表」逐日（C，与按笔记汇总/账号类型 tab 同口径）
-    const jugMsgRows = brandId === 6
-      ? await this.prisma.koxJuguangNoteDaily.groupBy({
-          by: ['day'],
-          where: { brandId: 6, day: { gte: start, lte: end } },
-          _sum: { msgInquiries: true, msgOpenings: true, msgLeads: true },
-        })
-      : [];
-    const jugMsgByDay = new Map<string, { enter: number; open: number; leads: number }>();
-    let jugTotals = { enter: 0, open: 0, leads: 0 };
-    for (const r of jugMsgRows) {
-      const key = dayKey08(r.day);
-      const cur = {
-        enter: Number(r._sum.msgInquiries ?? 0),
-        open: Number(r._sum.msgOpenings ?? 0),
-        leads: Number(r._sum.msgLeads ?? 0),
-      };
-      jugMsgByDay.set(key, cur);
-      jugTotals.enter += cur.enter;
-      jugTotals.open += cur.open;
-      jugTotals.leads += cur.leads;
-    }
 
     const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((acc, r) => acc + f(r), 0);
     const totalFee = rows.reduce((acc, r) => acc + Number(r.fee), 0);
-    // 特斯拉：进线/开口/留资 = 聚光笔记报表口径（C）；消耗/曝光/点击 = 投放日表（D，剔官号）
-    const totalMsgLeads = brandId === 6 ? jugTotals.leads : sum((r) => r.msgLeadsNum);
-    const totalConsult = brandId === 6 ? jugTotals.enter : sum((r) => r.messageConsult);
-    const totalOpen = brandId === 6 ? jugTotals.open : sum((r) => r.msgChatUserCnt);
+    const totalMsgLeads = sum((r) => r.msgLeadsNum);
+    const totalConsult = sum((r) => r.messageConsult);
+    const totalOpen = sum((r) => r.msgChatUserCnt);
     const totalImpression = sum((r) => r.impression);
     const totalClick = sum((r) => r.click);
 
     const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
       const key = dayKey08(r.statDate);
-      const jug = brandId === 6 ? jugMsgByDay.get(key) : undefined;
       const cur = dayMap.get(key) ?? { fee: 0, impression: 0, click: 0, msg_leads: 0, consult: 0, open: 0, accounts: new Set<string>() };
       cur.fee += Number(r.fee);
       cur.impression += r.impression;
       cur.click += r.click;
-      cur.msg_leads += brandId === 6 ? (jug?.leads ?? 0) : r.msgLeadsNum;
-      cur.consult += brandId === 6 ? (jug?.enter ?? 0) : r.messageConsult;
-      cur.open += brandId === 6 ? (jug?.open ?? 0) : r.msgChatUserCnt;
+      cur.msg_leads += r.msgLeadsNum;
+      cur.consult += r.messageConsult;
+      cur.open += r.msgChatUserCnt;
       cur.accounts.add(r.virtualSellerId);
       dayMap.set(key, cur);
-    }
-    // C 里有投放三数但 D 无行的天（如官号外当日未跑量）也要进趋势：补入 jugMsgByDay 缺失日
-    if (brandId === 6) {
-      for (const [key, jug] of jugMsgByDay) {
-        if (dayMap.has(key)) continue;
-        dayMap.set(key, {
-          fee: 0, impression: 0, click: 0,
-          msg_leads: jug.leads, consult: jug.enter, open: jug.open,
-          accounts: new Set<string>(),
-        });
-      }
     }
     const r2v = (v: number) => Math.round(v * 100) / 100;
 
@@ -1091,8 +1058,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     // partner 通道（如特斯拉）：平台盯盘 周/月消耗口径快照（week_cost=本周至今，month_cost=本月至今）
     // 仅 partner 账户有该快照（MCC 通道账户 partnerSnapshotAt 为空，自动为 null）
-    // 特斯拉：剔除官号子账户（官号消耗只在官号专属行/页签出现）
-    const partnerAccRows = await this.prisma.sparkAccount.findMany({
+    const partnerAccs = await this.prisma.sparkAccount.findMany({
       where: {
         brandId,
         accountKind: 'partner_vseller',
@@ -1100,9 +1066,6 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       },
       select: { name: true, weekCost: true, monthCost: true, partnerSnapshotAt: true },
     });
-    const partnerAccs = brandId === 6
-      ? partnerAccRows.filter((a) => !isOfficialCampaignRow(a.name))
-      : partnerAccRows;
     const platform = partnerAccs.length
       ? {
           week_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.weekCost ?? 0), 0)),
@@ -1125,31 +1088,6 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           }
         : null;
 
-    // 特斯拉：投流账号数 = 窗口内被投流的 KOS 基线账号数（聚光笔记报表笔记 → KoxNote → 基线账号去重；
-    // 非 D 的项目级子账户数——客户 2026-10 指定「被投流的 KOS 实时账号数」）
-    let kosAccountNum: number | null = null;
-    if (brandId === 6) {
-      const { noteAuthor } = await this.teslaNoteAccountMaps();
-      const kosRows = await this.prisma.kosAccount.findMany({
-        where: { brandId: 6 },
-        select: { id: true, nickname: true },
-      });
-      const kosIdSet = new Set(kosRows.map((k) => k.id));
-      const kosNickSet = new Set(kosRows.map((k) => k.nickname));
-      const cNotes = await this.prisma.koxJuguangNoteDaily.findMany({
-        where: { brandId: 6, day: { gte: start, lte: end } },
-        select: { noteId: true },
-        distinct: ['noteId'],
-      });
-      const accKeys = new Set<string>();
-      for (const cn of cNotes) {
-        const meta = noteAuthor.get(cn.noteId);
-        if (meta?.accountId != null && kosIdSet.has(meta.accountId)) accKeys.add('a' + meta.accountId);
-        else if (meta?.authorName && kosNickSet.has(meta.authorName.trim())) accKeys.add('n' + meta.authorName.trim());
-      }
-      kosAccountNum = accKeys.size;
-    }
-
     return {
       start: dayKey08(start),
       end: dayKey08(end),
@@ -1157,17 +1095,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       promo_note_cnt,
       platform,
       coverage,
-      // 特斯拉口径说明：消耗/曝光/点击=投放日表（剔官号）；私信三数=聚光笔记报表；官号数据见官号页签
-      ...(brandId === 6
-        ? {
-            metric_note:
-              '消耗/曝光/点击/互动=投放日表×子账户（剔官号）；私信进线/开口/留资=聚光「标准投笔记报表」窗口加总；官号投流单列（周期报表官号页签/区域汇总官号行），不计入本口径',
-          }
-        : {}),
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,
-        account_num: kosAccountNum ?? new Set(rows.map((r) => r.virtualSellerId)).size,
+        account_num: new Set(rows.map((r) => r.virtualSellerId)).size,
         fee: r2v(totalFee),
         impression: totalImpression,
         click: totalClick,
@@ -1208,6 +1139,157 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         }
         return out;
       })(),
+    };
+  }
+
+  /** 特斯拉：「全部投流」总览（聚光笔记报表口径，2026-10 客户确认）。
+   *  消耗/曝光/点击/互动/私信三数全部 = 聚光「标准投笔记报表」（C，剔官号天然成立），
+   *  与账号类型页签完全同源——四标签相加 = 全部投流；当天数据 T+1 次日上午同步后可见。
+   *  投流账号数 = 被投流的 KOS 基线账号数；官号投流单独在官号页签/区域汇总官号行（D 口径） */
+  private async campaignSummaryJuguangBase(start: Date, end: Date) {
+    const [cRows, { noteAuthor }] = await Promise.all([
+      this.prisma.koxJuguangNoteDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end } },
+      }),
+      this.teslaNoteAccountMaps(),
+    ]);
+
+    type DayAgg = {
+      fee: number; impression: number; click: number; interaction: number;
+      consult: number; open: number; leads: number;
+      notes: Set<string>; creators: Set<string>;
+    };
+    const dayMap = new Map<string, DayAgg>();
+    let totalFee = 0;
+    let matched = 0;
+    for (const r of cRows) {
+      const meta = noteAuthor.get(r.noteId);
+      const creator = (meta?.authorName ?? r.creator ?? '').trim();
+      const key = dayKey08(r.day);
+      const cur = dayMap.get(key) ?? {
+        fee: 0, impression: 0, click: 0, interaction: 0, consult: 0, open: 0, leads: 0,
+        notes: new Set<string>(), creators: new Set<string>(),
+      };
+      cur.fee += Number(r.fee);
+      cur.impression += Number(r.impression);
+      cur.click += Number(r.click);
+      cur.interaction += Number(r.interaction);
+      cur.consult += Number(r.msgInquiries);
+      cur.open += Number(r.msgOpenings);
+      cur.leads += Number(r.msgLeads);
+      cur.notes.add(r.noteId);
+      if (creator) cur.creators.add(creator);
+      dayMap.set(key, cur);
+      totalFee += Number(r.fee);
+      matched += 1;
+    }
+    const r2v = (v: number) => Math.round(v * 100) / 100;
+    let totalImpression = 0;
+    let totalClick = 0;
+    let totalConsult = 0;
+    let totalOpen = 0;
+    let totalLeads = 0;
+    let totalInteraction = 0;
+    let consumeDays = 0;
+    for (const v of dayMap.values()) {
+      totalImpression += v.impression;
+      totalClick += v.click;
+      totalConsult += v.consult;
+      totalOpen += v.open;
+      totalLeads += v.leads;
+      totalInteraction += v.interaction;
+      if (v.fee > 0) consumeDays += 1;
+    }
+
+    // 投流内容数 = 窗口内被投流的笔记数（C 去重；口径与列表页一致，替代历史 isRtbAdver 计数）
+    const promoNoteCnt = new Set(cRows.map((r) => r.noteId)).size;
+
+    // 投流账号数 = 被投流的 KOS 基线账号数（笔记 → KoxNote → 基线账号去重）
+    const kosRows = await this.prisma.kosAccount.findMany({
+      where: { brandId: 6 },
+      select: { id: true, nickname: true },
+    });
+    const kosIdSet = new Set(kosRows.map((k) => k.id));
+    const kosNickSet = new Set(kosRows.map((k) => k.nickname));
+    const accKeys = new Set<string>();
+    for (const r of cRows) {
+      const meta = noteAuthor.get(r.noteId);
+      if (meta?.accountId != null && kosIdSet.has(meta.accountId)) accKeys.add('a' + meta.accountId);
+      else if (meta?.authorName && kosNickSet.has(meta.authorName.trim())) accKeys.add('n' + meta.authorName.trim());
+    }
+
+    // 平台周/月消耗快照（SparkAccount partner 盯盘，剔官号）——仅作 hero 本月口径参考
+    const partnerAccRows = await this.prisma.sparkAccount.findMany({
+      where: { brandId: 6, accountKind: 'partner_vseller', partnerSnapshotAt: { not: null } },
+      select: { name: true, weekCost: true, monthCost: true, partnerSnapshotAt: true },
+    });
+    const partnerAccs = partnerAccRows.filter((a) => !isOfficialCampaignRow(a.name));
+    const platform = partnerAccs.length
+      ? {
+          week_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.weekCost ?? 0), 0)),
+          month_fee: r2v(partnerAccs.reduce((s, a) => s + Number(a.monthCost ?? 0), 0)),
+          account_cnt: partnerAccs.length,
+          snapshot_at:
+            partnerAccs
+              .map((a) => a.partnerSnapshotAt)
+              .filter((d): d is Date => !!d)
+              .sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
+        }
+      : null;
+
+    const cDays = [...dayMap.keys()].sort();
+    const coverage = cDays.length ? { from: cDays[0], to: cDays[cDays.length - 1] } : null;
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endKey = keyOf(end);
+    const trend: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number }[] = [];
+    for (let guard = 0; guard < 366; guard++) {
+      const key = keyOf(startDay);
+      const v = dayMap.get(key);
+      trend.push({
+        date: key,
+        fee: v ? r2v(v.fee) : 0,
+        impression: v?.impression ?? 0,
+        click: v?.click ?? 0,
+        msg_inquiries: v?.consult ?? 0,
+        msg_openings: v?.open ?? 0,
+        msg_leads: v?.leads ?? 0,
+        active_accounts: v?.creators.size ?? 0,
+      });
+      if (key === endKey) break;
+      startDay.setDate(startDay.getDate() + 1);
+    }
+
+    return {
+      start: dayKey08(start),
+      end: dayKey08(end),
+      total: matched,
+      promo_note_cnt: promoNoteCnt,
+      platform,
+      coverage,
+      metric_note:
+        '全部投流=聚光「标准投笔记报表」逐笔记按日汇总（剔官号），与账号类型页签同源；投流账号数=被投流的 KOS 账号数；当天数据 T+1 次日上午同步后可见；官号投流单独在官号页签/区域汇总官号行（投放日表口径）',
+      summary: {
+        promo_note_cnt: promoNoteCnt,
+        consume_days: consumeDays,
+        account_num: accKeys.size,
+        fee: r2v(totalFee),
+        impression: totalImpression,
+        click: totalClick,
+        ctr: totalImpression ? r2v((totalClick / totalImpression) * 100) : 0,
+        cpc: totalClick ? r2v(totalFee / totalClick) : 0,
+        cpm: totalImpression ? r2v((totalFee / totalImpression) * 1000) : 0,
+        interaction: totalInteraction,
+        msg_inquiries: totalConsult,
+        msg_openings: totalOpen,
+        msg_leads: totalLeads,
+        msg_inquiry_cost: totalConsult ? r2v(totalFee / totalConsult) : 0,
+        msg_open_cost: totalOpen ? r2v(totalFee / totalOpen) : 0,
+        msg_lead_cost: totalLeads ? r2v(totalFee / totalLeads) : 0,
+      },
+      trend,
     };
   }
 

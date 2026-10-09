@@ -43,8 +43,8 @@
               <a-radio-button value="官号">官号</a-radio-button>
             </template>
           </a-radio-group>
-          <a-tooltip v-if="isTesla && tab === 'base'" title="消耗/曝光/点击=投放日表×子账户（剔官号）；私信三数=聚光笔记报表；官号投流见「官号」页签">
-            <span class="muted small" style="cursor: help">口径：投放日表（不含官号）+ 聚光笔记报表三数</span>
+          <a-tooltip v-if="isTesla && tab === 'base'" title="口径：聚光「标准投笔记报表」逐笔记按日汇总（剔官号），与账号类型页签完全同源（相加=全部投流）；当天数据 T+1 次日上午同步后可见；官号投流单独在「官号」页签">
+            <span class="muted small" style="cursor: help">口径：聚光笔记报表（剔官号），与标签页同源 · 当天数据 T+1</span>
           </a-tooltip>
           <span v-else-if="isTesla && tab === '官号'" class="muted small">口径：投放日表官号行（含官号私信三数；无笔记维度，展示消耗账户数）</span>
           <span v-else-if="isTesla" class="muted small">口径：投放日表×账号标签（{{ tab }}）+ 聚光笔记报表三数</span>
