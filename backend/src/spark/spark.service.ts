@@ -1428,6 +1428,70 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     const sellerIds = await this.scopeSellerIds(query.scope);
 
+    // ???????/???? = ???????????????creator=KOS ???? ? ??????/???
+    // ???? vseller ?????????????/???????????brand6 ????
+    if (brandId === 6) {
+      const rows6 = await this.prisma.koxJuguangNoteDaily.findMany({
+        where: { brandId: 6, day: { gte: start, lte: end } },
+      });
+      const kos6 = await this.prisma.kosAccount.findMany({
+        where: { brandId: 6 },
+        select: { nickname: true, storeName: true, regionName: true },
+      });
+      const regionByNick = new Map(kos6.map((k) => [k.nickname, k.regionName ?? "???"]));
+      const storeByNick = new Map(kos6.filter((k) => k.storeName).map((k) => [k.nickname, k.storeName as string]));
+      type Agg6 = { region: string; store: string; creators: Set<string>; fee: number; impression: number; click: number; interaction: number; msg_inquiries: number; msg_openings: number; msg_leads: number };
+      const groups6 = new Map<string, Agg6>();
+      for (const r of rows6) {
+        const creator = (r.creator ?? "").trim();
+        const region = regionByNick.get(creator) ?? "???";
+        const store = storeByNick.get(creator) ?? (region === "???" ? "???" : creator);
+        const key = groupby === "store" ? region + "?" + store : region;
+        const cur = groups6.get(key) ?? { region, store, creators: new Set<string>(), fee: 0, impression: 0, click: 0, interaction: 0, msg_inquiries: 0, msg_openings: 0, msg_leads: 0 };
+        cur.creators.add(creator);
+        cur.fee += Number(r.fee);
+        cur.impression += Number(r.impression);
+        cur.click += Number(r.click);
+        cur.interaction += Number(r.interaction);
+        cur.msg_inquiries += Number(r.msgInquiries);
+        cur.msg_openings += Number(r.msgOpenings);
+        cur.msg_leads += Number(r.msgLeads);
+        groups6.set(key, cur);
+      }
+      const list6 = [...groups6.values()]
+        .map((g) => ({
+          name: groupby === "store" ? g.store : g.region,
+          region: groupby === "store" ? g.region : undefined,
+          account_num: g.creators.size,
+          fee: Math.round(g.fee * 100) / 100,
+          impression: g.impression,
+          click: g.click,
+          ctr: g.impression ? Math.round((g.click / g.impression) * 10000) / 100 : 0,
+          interaction: g.interaction,
+          msg_inquiries: g.msg_inquiries,
+          msg_openings: g.msg_openings,
+          msg_leads: g.msg_leads,
+          msg_lead_cost: g.msg_leads ? Math.round((g.fee / g.msg_leads) * 10) / 10 : 0,
+        }))
+        .sort((a, b) => b.fee - a.fee);
+      return {
+        groupby,
+        start: dayKey08(start),
+        end: dayKey08(end),
+        total: list6.length,
+        summary: {
+          group_num: list6.length,
+          account_num: list6.reduce((a, x) => a + x.account_num, 0),
+          fee: Math.round(list6.reduce((a, x) => a + x.fee, 0) * 100) / 100,
+          impression: list6.reduce((a, x) => a + x.impression, 0),
+          click: list6.reduce((a, x) => a + x.click, 0),
+          msg_leads: list6.reduce((a, x) => a + x.msg_leads, 0),
+        },
+        list: list6,
+        metric_note: "????=???????????????????creator=KOS?????????/???????=???????????",
+      };
+    }
+
     const [rows, kos, sparks] = await Promise.all([
       this.prisma.koxCampaignDailyStat.findMany({
         where: {
