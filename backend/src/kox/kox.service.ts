@@ -2549,9 +2549,9 @@ export class KoxService {
             a.interaction += s.socEnageCnt;
           });
         }
-        metric_source = `juguang_content_publish + pro_staff_matrix(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)}) + pro_clue_tool_stat`;
+        metric_source = `juguang_content_publish + pro_staff_matrix(dateType=${proMatrix.dateType}, statDate=${dayKey08(proMatrix.statDate)})`;
       } else {
-        metric_source = 'juguang_content_publish + pro_staff(no_partition) + pro_clue_tool_stat';
+        metric_source = 'juguang_content_publish + pro_staff(no_partition)';
       }
     }
     for (const n of notes) {
