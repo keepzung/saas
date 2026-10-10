@@ -103,26 +103,6 @@
           </div>
         </a-card>
       </a-col>
-      <a-col :xs="24" :md="12">
-        <a-card size="small">
-          <template #title>
-            <a-tooltip title="直播数据源尚未接入（星火 MCC / 来鼓均未提供直播数据），暂显示 0">
-              <span>直播运营</span>
-            </a-tooltip>
-          </template>
-          <div class="kv-grid">
-            <div class="kv"><span>开播账号</span><b>{{ fmt(ov.live?.live_account_num) }}</b></div>
-            <div class="kv"><span>直播场次</span><b>{{ fmt(ov.live?.live_count) }}</b></div>
-            <div class="kv"><span>有效时长(h)</span><b>{{ Math.round((ov.live?.live_valid_duration ?? 0) / 36) / 100 }}</b></div>
-            <div class="kv"><span>场观人次</span><b>{{ fmt(ov.live?.live_watch_uv) }}</b></div>
-            <div class="kv"><span>组件点击</span><b>{{ fmt(ov.live?.live_tool_click_cnt) }}</b></div>
-            <div class="kv"><span>直播线索</span><b>{{ fmt(ov.live?.live_total_leads) }}</b></div>
-            <div class="kv"><span>线索率</span><b>{{ ov.live?.live_lead_rate ?? 0 }}%</b></div>
-            <div class="kv"><span>直播消耗</span><b>¥{{ fmt(ov.live?.live_cost) }}</b></div>
-            <div class="kv"><span>线索成本</span><b>¥{{ ov.live?.live_conversion_cost ?? 0 }}</b></div>
-          </div>
-        </a-card>
-      </a-col>
     </a-row>
 
     <a-card size="small">
