@@ -1495,12 +1495,22 @@ export class KoxService {
       map.set(key, agg);
     };
 
-    const curMap = new Map<string, Agg>();
-    for (const r of curRows) addRow(curMap, r.account, r);
-    const prevMap = new Map<string, Agg>();
-    for (const r of prevRows) addRow(prevMap, r.account, r);
+    // 日统计新鲜度：窗口内最新日统计早于窗口终点 2 天以上视为断供
+    // （如占位种子到期、同步停更），强制改走 KoxNote 真实累计口径，
+    // 避免默认窗口混入冻结的旧日统计数据
+    const latestDaily = curRows.reduce<Date | null>(
+      (m, r) => (!m || r.statDate > m ? r.statDate : m),
+      null,
+    );
+    const dailyStale =
+      !!latestDaily && latestDaily.getTime() < end.getTime() - 2 * 86400000;
+    const preferNotes =
+      !!query.brandId && (curRows.length === 0 || dailyStale);
 
-    // 笔记累计回退：无日统计（如特斯拉旧数据导入区）时用 KoxNote 累计口径聚合
+    const curMap = new Map<string, Agg>();
+    const prevMap = new Map<string, Agg>();
+
+    // 笔记累计回退：无日统计或日统计断供时用 KoxNote 累计口径聚合
     let metricSource: 'daily' | 'notes_cumulative' = 'daily';
     let fallbackAccounts: {
       id: number;
@@ -1513,10 +1523,12 @@ export class KoxService {
       authorId: string;
       accountType: string;
     }[] = [];
-    if (!curRows.length && query.brandId) {
+    let usedNotes = false;
+    if (preferNotes) {
       const brandIdNum = Number(query.brandId);
       const noteCount = await this.prisma.koxNote.count({ where: { brandId: brandIdNum } });
       if (noteCount > 0) {
+        usedNotes = true;
         metricSource = 'notes_cumulative';
         const accounts = await this.prisma.kosAccount.findMany({
           where: { brandId: brandIdNum },
@@ -1569,6 +1581,11 @@ export class KoxService {
           curMap.set(key, g);
         }
       }
+    }
+    if (!usedNotes) {
+      // 日统计口径（含旧占位、真实日同步两种来源）；笔记回退失败时也照旧展示日统计
+      for (const r of curRows) addRow(curMap, r.account, r);
+      for (const r of prevRows) addRow(prevMap, r.account, r);
     }
 
     const accountInfo = new Map<
@@ -1651,9 +1668,12 @@ export class KoxService {
         pm_leads: 0,
       },
     );
-    const accountTotal = new Set(
-      curRows.map((r) => r.account.id),
-    ).size;
+    // 笔记累计口径下 curRows 为旧日统计行，参与账号数须取自聚合结果
+    const accountTotal = usedNotes
+      ? new Set(
+          [...curMap.values()].flatMap((g) => [...g.accountIds]),
+        ).size
+      : new Set(curRows.map((r) => r.account.id)).size;
 
     return {
       dimension,
