@@ -576,11 +576,11 @@ function renderWordcloud() {
       {
         type: 'wordCloud',
         shape: 'circle',
-        width: '96%',
-        height: '96%',
-        sizeRange: [13, 48],
+        width: '100%',
+        height: '100%',
+        sizeRange: [13, 56],
         rotationRange: [0, 0],
-        gridSize: 7,
+        gridSize: 6,
         drawOutOfBound: false,
         layoutAnimation: true,
         textStyle: {
@@ -1496,11 +1496,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .wordcloud-chart {
-  height: 500px;
+  height: 560px;
 }
-/* 特斯拉：客户批注「词云可以做大点」→ 再放大 */
+/* 特斯拉：客户批注「词云可以做大点」→ 两轮放大 + canvas 占满卡片 */
 .wordcloud-chart.tall {
-  height: 640px;
+  height: 760px;
 }
 .wc-tabs {
   margin-left: 12px;

@@ -3,12 +3,12 @@ import { Injectable } from '@nestjs/common';
 /**
  * KOS 账号留资分层引擎（特斯拉数据看板公共逻辑）
  *
- * 分层规则：
- *   S级头部：月度留资 ≥200（任意周期按 L/(days/30) 归一月度）
- *   其余按周度留资折算（月度数据按 ÷4 折算周度，任意周期按 L/(days/7) 归一）：
- *   头部 ≥25 / 高潜 12.5–25 / 腰部 6.25–12.5 / 尾部 <6
+ * 分层规则（2026-10 客户确认：S 级唯一判定 = 周度留资 ≥ 50，取消月度 ≥200 归一规则；
+ * 周留资 47/48/49 不得进入 S 级。任意周期按 L/(days/7) 归一周度）：
+ *   S级头部 ≥50 / 头部 25–50 / 高潜 12.5–25 / 腰部 6.25–12.5 / 尾部 <6.25
  *
- * 留资口径：KoxNote.pmLeads（含投流笔记），周期 = 筛选日期区间。
+ * 留资口径：ProClueToolStatDaily（客户管理旧版获客工具统计，与账号排行私信留资同口径），
+ * 周期 = 筛选日期区间。
  * 供：账号排行（分层排序）/ KOS账号留资分层页（经销商排行）/ 运营总览共用。
  */
 
@@ -47,12 +47,8 @@ export function tierOfWeekly(weekly: number): KosTierMeta {
   return KOS_TIERS[KOS_TIERS.length - 1];
 }
 
-/** 周期留资量 + 周期天数 → 层级元数据（S级优先按月度留资 ≥200 判定） */
+/** 周期留资量 + 周期天数 → 层级元数据（S 级唯一判定 = 周度留资 ≥ 50，跨窗口归一） */
 export function classifyTier(leads: number, days: number): KosTierMeta {
-  if (Number.isFinite(leads) && Number.isFinite(days) && days > 0) {
-    const monthly = leads / (days / 30);
-    if (monthly >= 200 - EPS) return KOS_TIERS[0]; // S级头部：月度留资 ≥200
-  }
   return tierOfWeekly(toWeekly(leads, days));
 }
 
