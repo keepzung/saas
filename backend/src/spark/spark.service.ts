@@ -1164,22 +1164,23 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const days = [...byDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([day, list]) => {
-        const agg = this.staffWindowAgg(list);
+        // 日汇总口径：全部指标按当日全账户求和（存量型如粉丝/累计曝光 = 组织级当日累计）
+        const sum = (k: string) => list.reduce((acc, r) => acc + Number(r[k] ?? 0), 0);
         return {
           date: day,
           bind_brand_num: list.length,
           open_kos_brand_num: list.filter((r) => r.hasOpenKos === true).length,
-          kos_account_num: agg.kosAccountNum,
-          rtb_account_num: agg.rtbAccountNum,
-          create_note_num: agg.createNoteNum,
-          soc_read_cnt: agg.socReadCnt,
-          fans_num: agg.fansNum,
-          add_fans_num: agg.addFansNum,
-          message_open_cnt: agg.messageOpenCnt,
-          message_driving_open_cnt: agg.messageDrivingOpenCnt,
-          msg_leads_num: agg.msgLeadsNum,
-          leads_success: agg.leadsSuccess,
-          rtb_income_amt: agg.rtbIncomeAmt,
+          kos_account_num: sum('kosAccountNum'),
+          rtb_account_num: sum('rtbAccountNum'),
+          create_note_num: sum('createNoteNum'),
+          soc_read_cnt: sum('socReadCnt'),
+          fans_num: sum('fansNum'),
+          add_fans_num: sum('addFansNum'),
+          message_open_cnt: sum('messageOpenCnt'),
+          message_driving_open_cnt: sum('messageDrivingOpenCnt'),
+          msg_leads_num: sum('msgLeadsNum'),
+          leads_success: sum('leadsSuccess'),
+          rtb_income_amt: sum('rtbIncomeAmt'),
         };
       });
     const latest = days[days.length - 1] ?? {};
