@@ -926,7 +926,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
   /** 拉取视图全量指标码（含维度码；detail 请求必须携带全量，否则服务端退化为单行聚合） */
   private async staffMatrixTargetCodes(ctx: SparkOrgCtx): Promise<string[]> {
-    const cfg = (await this.api.visionDetailList(
+    const cfg = (await this.api.visionConfigList(
       {
         viewAlias: STAFF_VIEW_ALIAS,
         chart: '',

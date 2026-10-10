@@ -174,6 +174,17 @@ export class SparkApiClient {
     );
   }
 
+  /** vision BI 视图指标配置（targetCode 全集/口径元数据） */
+  async visionConfigList(body: Record<string, unknown>, ctx?: SparkOrgCtx) {
+    return this.request<unknown>(
+      '/api/vision/mcc_dashboard/target_config_list',
+      body,
+      `${MCC_BASE}/micro/staff-data`,
+      'POST',
+      ctx,
+    );
+  }
+
   /** 笔记明细行（原始 targetList 结构，值经 pickTarget 提取；publishStart/End 圈定发布日期范围） */
   async noteDetailList(params: {
     timeStart: string;
