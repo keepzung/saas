@@ -575,12 +575,12 @@ function renderWordcloud() {
     series: [
       {
         type: 'wordCloud',
-        // 客户红框标注：词语填满卡片内约 85% 的居中圆形区域（形状=圆，铺满后彩字覆盖约 85%）
+        // 客户标注：词语填满卡片内 95% 的居中圆形区域（圆心与提及车型环形圆心同水平线）
         shape: 'circle',
-        width: '85%',
-        height: '85%',
-        left: '7.5%',
-        top: '7.5%',
+        width: '95%',
+        height: '95%',
+        left: '2.5%',
+        top: '2.5%',
         sizeRange: [13, 56],
         rotationRange: [0, 0],
         gridSize: 6,
@@ -1270,11 +1270,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
+/* 图表容器与词云图等高（760px）且底部锚定：两卡等高 + 图表等高 → 圆心必处同一水平线 */
 .mention-model-chart {
   width: 100%;
-  flex: 1;
-  min-height: 460px;
-  margin-top: 4px;
+  height: 760px;
+  margin-top: auto;
 }
 
 .summary-row {
@@ -1497,12 +1497,17 @@ onBeforeUnmount(() => {
   gap: 8px;
   flex-wrap: wrap;
 }
+.wordcloud-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+}
 .wordcloud-chart {
   height: 560px;
 }
-/* 特斯拉：客户批注「词云可以做大点」→ 两轮放大 + canvas 占满卡片 */
+/* 特斯拉：词云图与车型图等高（760px）且底部锚定 → 圆心同水平线 */
 .wordcloud-chart.tall {
   height: 760px;
+  margin-top: auto;
 }
 .wc-tabs {
   margin-left: 12px;
