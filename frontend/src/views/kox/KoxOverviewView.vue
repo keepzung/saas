@@ -45,9 +45,9 @@
       </div>
     </a-card>
 
-    <a-row :gutter="[12, 12]">
-      <a-col :xs="24" :md="12">
-        <a-card size="small" title="内容发布 & 互动">
+    <a-row :gutter="[12, 12]" class="stat-row">
+      <a-col :xs="24" :md="12" class="stat-col">
+        <a-card size="small" title="内容发布 & 互动" class="fill-card">
           <div class="kv-grid">
             <div class="kv"><span>发帖账号</span><b>{{ fmt(ov.publish?.author_num) }}</b></div>
             <div class="kv"><span>内容数</span><b>{{ fmt(ov.publish?.item_cnt) }}</b></div>
@@ -58,12 +58,11 @@
             <div class="kv"><span>互动量</span><b>{{ fmt(ov.publish?.interaction_sum) }}</b></div>
             <div class="kv"><span>互动率</span><b>{{ ov.publish?.interaction_rate ?? 0 }}%</b></div>
             <div class="kv"><span>涨粉数</span><b>{{ fmt(ov.publish?.follow_count_sum) }}</b></div>
-            <div class="kv"><span>挂载内容</span><b>{{ fmt(ov.publish?.tool_item_cnt_sum) }}</b></div>
           </div>
         </a-card>
       </a-col>
-      <a-col :xs="24" :md="12">
-        <a-card size="small">
+      <a-col :xs="24" :md="12" class="stat-col">
+        <a-card size="small" class="fill-card">
           <template #title>
             <a-tooltip :title="ov.lead_funnel?.scope_note || '线索 = 星火聚光投放私信三数 + 自然笔记私信（随区间与筛选联动）'">
               <span>线索转化</span>
@@ -74,44 +73,23 @@
             <div class="kv"><span>私信开口数</span><b>{{ fmt(ov.lead_funnel?.pm_openings) }}</b></div>
             <div class="kv"><span>私信留资</span><b>{{ fmt(ov.lead_funnel?.pm_leads) }}</b></div>
             <div class="kv"><span>线索率</span><b>{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
-            <div class="kv">
-              <a-tooltip title="组件点击暂无数据源（星火笔记/投放口径均未含该指标）">
-                <span>组件点击</span>
-              </a-tooltip>
-              <b>—</b>
-            </div>
-            <div class="kv">
-              <a-tooltip title="表单线索暂无数据源（专业号表单工具未接入）">
-                <span>表单线索</span>
-              </a-tooltip>
-              <b>—</b>
-            </div>
-          </div>
-        </a-card>
-      </a-col>
-      <a-col :xs="24" :md="12">
-        <a-card size="small" title="投放效率">
-          <div class="kv-grid">
-            <div class="kv"><span>投放消耗</span><b>¥{{ fmt(ov.ad?.ad_cost) }}</b></div>
-            <div class="kv"><span>曝光量</span><b>{{ fmt(ov.ad?.ad_view_sum) }}</b></div>
-            <div class="kv"><span>CTR</span><b>{{ ov.ad?.ad_ctr ?? 0 }}%</b></div>
-            <div class="kv"><span>CPC</span><b>¥{{ ov.ad?.ad_cpc ?? 0 }}</b></div>
-            <div class="kv"><span>CPM</span><b>¥{{ ov.ad?.ad_cpm ?? 0 }}</b></div>
-            <div class="kv"><span>转化数</span><b>{{ fmt(ov.ad?.ad_conversions) }}</b></div>
-            <div class="kv"><span>转化成本</span><b>¥{{ ov.ad?.ad_conversion_cost ?? 0 }}</b></div>
-            <div class="kv"><span>转化率</span><b>{{ ov.ad?.ad_conversion_rate ?? 0 }}%</b></div>
           </div>
         </a-card>
       </a-col>
     </a-row>
 
-    <a-card size="small">
-      <a-tabs v-model:activeKey="trendTab" size="small" @change="onTabChange">
-        <a-tab-pane key="ad" tab="投放效率趋势" />
-        <a-tab-pane key="publish" tab="发布 & 互动趋势" />
-      </a-tabs>
-      <div ref="chartEl" style="height: 320px" />
-    </a-card>
+    <a-row :gutter="[12, 12]">
+      <a-col :xs="24" :md="12">
+        <a-card size="small" title="投放效率趋势">
+          <div ref="adChartEl" style="height: 300px" />
+        </a-card>
+      </a-col>
+      <a-col :xs="24" :md="12">
+        <a-card size="small" title="发布 & 互动趋势">
+          <div ref="pubChartEl" style="height: 300px" />
+        </a-card>
+      </a-col>
+    </a-row>
   </PageWrapper>
 </template>
 
@@ -138,9 +116,10 @@ const range = ref([
   dayjs().subtract(29, 'day'),
   dayjs(),
 ]);
-const chartEl = ref(null);
-let chart = null;
-const trendTab = ref('ad');
+const adChartEl = ref(null);
+const pubChartEl = ref(null);
+let adChart = null;
+let pubChart = null;
 
 const fmt = (n) => (n ?? 0).toLocaleString();
 
@@ -152,76 +131,80 @@ async function reload() {
       params.end = range.value[1].format('YYYY-MM-DD');
     }
     ov.value = await getKoxOverview(params);
-    nextTick(renderChart);
+    nextTick(renderCharts);
   } catch (e) {
     message.error(e.message || '加载总览失败');
   }
 }
 
-function onTabChange() {
-  nextTick(renderChart);
+function renderCharts() {
+  renderAdChart();
+  renderPubChart();
 }
 
-function renderChart() {
-  if (!chartEl.value) return;
-  if (!chart) chart = echarts.init(chartEl.value);
+function renderAdChart() {
+  if (!adChartEl.value) return;
+  if (!adChart) adChart = echarts.init(adChartEl.value);
   const trend = ov.value.trend ?? [];
   const dates = trend.map((t) => t.date.slice(5));
-
-  if (trendTab.value === 'ad') {
-    const ctr = trend.map((t) =>
-      t.ad_impression ? Math.round((t.ad_click / t.ad_impression) * 10000) / 100 : 0,
-    );
-    chart.setOption(
-      {
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['投放消耗', '曝光量', '点击量', 'CTR', '私信留资'] },
-        grid: { left: 60, right: 70, top: 40, bottom: 30 },
-        xAxis: { type: 'category', data: dates },
-        yAxis: [
-          { type: 'value', name: '消耗(元)/留资' },
-          {
-            type: 'value',
-            name: '曝光/点击',
-            axisLabel: { formatter: (v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : v) },
-          },
-        ],
-        series: [
-          { name: '投放消耗', type: 'line', smooth: true, data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
-          { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.ad_msg_leads ?? 0), itemStyle: { color: '#7c3aed' } },
-          { name: '曝光量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_impression ?? 0), itemStyle: { color: '#16a34a' } },
-          { name: '点击量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_click ?? 0), itemStyle: { color: '#d97706' } },
-          { name: 'CTR', type: 'line', smooth: true, yAxisIndex: 1, data: ctr, itemStyle: { color: '#fb7185' }, tooltip: { valueFormatter: (v) => `${v}%` } },
-        ],
-      },
-      { notMerge: true },
-    );
-    return;
-  }
-
-  chart.setOption(
+  const ctr = trend.map((t) =>
+    t.ad_impression ? Math.round((t.ad_click / t.ad_impression) * 10000) / 100 : 0,
+  );
+  adChart.setOption(
     {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['内容数', '阅读量', '互动量', '私信留资'] },
-      grid: { left: 60, right: 60, top: 40, bottom: 30 },
+      legend: { data: ['投放消耗', '曝光量', '点击量', 'CTR', '私信留资'], textStyle: { fontSize: 11 } },
+      grid: { left: 56, right: 60, top: 40, bottom: 28 },
+      xAxis: { type: 'category', data: dates },
+      yAxis: [
+        { type: 'value', name: '消耗(元)/留资' },
+        {
+          type: 'value',
+          name: '曝光/点击',
+          axisLabel: { formatter: (v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : v) },
+        },
+      ],
+      series: [
+        { name: '投放消耗', type: 'line', smooth: true, data: trend.map((t) => t.ad_cost ?? 0), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
+        { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.ad_msg_leads ?? 0), itemStyle: { color: '#7c3aed' } },
+        { name: '曝光量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_impression ?? 0), itemStyle: { color: '#16a34a' } },
+        { name: '点击量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.ad_click ?? 0), itemStyle: { color: '#d97706' } },
+        { name: 'CTR', type: 'line', smooth: true, yAxisIndex: 1, data: ctr, itemStyle: { color: '#fb7185' }, tooltip: { valueFormatter: (v) => `${v}%` } },
+      ],
+    },
+    { notMerge: true },
+  );
+}
+
+function renderPubChart() {
+  if (!pubChartEl.value) return;
+  if (!pubChart) pubChart = echarts.init(pubChartEl.value);
+  const trend = ov.value.trend ?? [];
+  const dates = trend.map((t) => t.date.slice(5));
+  pubChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['内容数', '阅读量', '互动量', '私信留资'], textStyle: { fontSize: 11 } },
+      grid: { left: 56, right: 56, top: 40, bottom: 28 },
       xAxis: { type: 'category', data: dates },
       yAxis: [
         { type: 'value', name: '内容/留资' },
         { type: 'value', name: '阅读/互动', axisLabel: { formatter: (v) => `${Math.round(v / 1000)}k` } },
       ],
-        series: [
-          { name: '内容数', type: 'line', smooth: true, data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
-          { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
-          { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
-          { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
-        ],
+      series: [
+        { name: '内容数', type: 'line', smooth: true, data: trend.map((t) => t.item_cnt), itemStyle: { color: '#3456E6' }, areaStyle: { color: 'rgba(52,86,230,0.08)' } },
+        { name: '阅读量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.view_sum), itemStyle: { color: '#16a34a' } },
+        { name: '互动量', type: 'line', smooth: true, yAxisIndex: 1, data: trend.map((t) => t.interaction_sum), itemStyle: { color: '#d97706' } },
+        { name: '私信留资', type: 'line', smooth: true, data: trend.map((t) => t.total_pm_leads), itemStyle: { color: '#7c3aed' } },
+      ],
     },
     { notMerge: true },
   );
 }
 
 function onResize() {
-  chart?.resize();
+  adChart?.resize();
+  pubChart?.resize();
 }
 
 onMounted(() => {
@@ -231,7 +214,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
-  chart?.dispose();
+  adChart?.dispose();
+  pubChart?.dispose();
 });
 </script>
 
@@ -300,6 +284,21 @@ onBeforeUnmount(() => {
 
 .kv span {
   color: var(--color-text-secondary);
+}
+
+/* 同行指标卡等高、下端拉齐 */
+.stat-col {
+  display: flex;
+}
+.stat-col .fill-card {
+  flex: 1;
+  width: 100%;
+}
+.stat-col .fill-card :deep(.ant-card-body) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
 }
 
 @media (max-width: 767px) {

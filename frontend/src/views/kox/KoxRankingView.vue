@@ -9,13 +9,6 @@
   <PageWrapper v-else :title="pageTitle" :subtitle="pageSubtitle">
     <template #filters>
       <FilterTopbar>
-        <a-select
-          v-model:value="brandId"
-          style="width: 130px"
-          placeholder="品牌"
-          :options="brandOptions"
-          @change="() => reload(true)"
-        />
         <a-radio-group
           v-if="!fixedDimension"
           v-model:value="dimension"
@@ -275,10 +268,6 @@ const { isMobile } = useBreakpoint();
 const isTesla = computed(() => Number(authStore.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(authStore.currentBrandId)));
 const isMdd = computed(() => Number(authStore.currentBrandId) === 5);
-const brandOptions = (authStore.brands ?? []).map((b) => ({
-  value: b.id,
-  label: b.name,
-}));
 
 const METRIC_MAP = {
   view_sum: '阅读量',
@@ -313,7 +302,8 @@ const pageSubtitle = computed(() =>
 );
 
 const dimension = ref(fixedDimension || 'region');
-const brandId = ref(authStore.currentBrandId ?? authStore.brands?.[0]?.id);
+// 工作区恒定为当前品牌（页面内不提供跨工作区切换）
+const brandId = computed(() => authStore.currentBrandId ?? authStore.brands?.[0]?.id);
 const accountType = ref(undefined);
 const metric = ref('view_sum');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);
