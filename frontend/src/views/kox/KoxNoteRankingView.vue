@@ -575,7 +575,8 @@ function renderWordcloud() {
     series: [
       {
         type: 'wordCloud',
-        shape: 'circle',
+        // 特斯拉：square 形状让词语铺满整个卡片矩形（彩字覆盖约 85%）；其他品牌保持 circle
+        shape: isTesla.value ? 'square' : 'circle',
         width: '100%',
         height: '100%',
         sizeRange: [13, 56],
@@ -1462,7 +1463,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 词云 + 提及车型 同行（词云占更宽、更高；单卡存在时自动占满整行） */
+/* 词云 + 提及车型 同行等宽等高（客户 2026-10：左右区域一样、下端齐平）；单卡存在时自动占满整行 */
 .wc-model-row {
   display: flex;
   gap: 12px;
@@ -1472,13 +1473,6 @@ onBeforeUnmount(() => {
 .wc-model-row > .ant-card {
   flex: 1 1 0;
   min-width: 0;
-}
-/* 词云占比再放大（客户批注）：词云卡 1.25 份 / 车型卡 0.75 份 */
-.wc-model-row > .wordcloud-card {
-  flex: 1.25 1 0;
-}
-.wc-model-row > .mention-model-card {
-  flex: 0.75 1 0;
 }
 @media (max-width: 1100px) {
   .wc-model-row {
