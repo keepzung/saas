@@ -568,17 +568,19 @@ function renderWordcloud() {
   if (!wcChart) wcChart = echarts.init(wordcloudEl.value);
   const key = wcMetric.value;
   const data = wcWords.value
-    .slice(0, 100)
+    .slice(0, 120)
     .map((w) => ({ name: w.word, value: Math.max(1, Math.round(Number(w[key]) || 1)) }));
   wcChart.setOption({
     tooltip: { formatter: (p) => `${p.name}：${p.value}${wcMetric.value === 'count' ? '篇' : '互动'}` },
     series: [
       {
         type: 'wordCloud',
-        // 特斯拉：square 形状让词语铺满整个卡片矩形（彩字覆盖约 85%）；其他品牌保持 circle
-        shape: isTesla.value ? 'square' : 'circle',
-        width: '100%',
-        height: '100%',
+        // 客户红框标注：词语填满卡片内约 85% 的居中圆形区域（形状=圆，铺满后彩字覆盖约 85%）
+        shape: 'circle',
+        width: '85%',
+        height: '85%',
+        left: '7.5%',
+        top: '7.5%',
         sizeRange: [13, 56],
         rotationRange: [0, 0],
         gridSize: 6,
@@ -1463,7 +1465,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 词云 + 提及车型 同行等宽等高（客户 2026-10：左右区域一样、下端齐平）；单卡存在时自动占满整行 */
+/* 词云 + 提及车型 同行（客户红框占比：词云约 46.5% / 车型约 53.5%），等高、下端齐平；单卡存在时自动占满整行 */
 .wc-model-row {
   display: flex;
   gap: 12px;
@@ -1473,6 +1475,12 @@ onBeforeUnmount(() => {
 .wc-model-row > .ant-card {
   flex: 1 1 0;
   min-width: 0;
+}
+.wc-model-row > .wordcloud-card {
+  flex: 46.5 1 0;
+}
+.wc-model-row > .mention-model-card {
+  flex: 53.5 1 0;
 }
 @media (max-width: 1100px) {
   .wc-model-row {
