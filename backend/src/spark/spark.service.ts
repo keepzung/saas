@@ -27,6 +27,45 @@ const NOTE_WINDOW_DAYS = 30;
 /** 查询类接口缺省品牌（荣威）；同步写入的品牌取自组织上下文 */
 const SPARK_DEFAULT_BRAND_ID = 2;
 
+/** 员工矩阵分析视图（MCC cookie 直连，无需专业号登录态） */
+const STAFF_VIEW_ALIAS = 'mcc_assets_staffMatrix_analysisView';
+const STAFF_MAX_PAGES = 20;
+const STAFF_PAGE_SIZE = 200;
+/** 主账户维度行指标（brandDetailList） */
+const STAFF_BRAND_TARGETS = [
+  'rtb_account_num',
+  'rtb_note_num',
+  'rtb_income_amt',
+  'ads_read_cnt',
+  'kos_account_num',
+  'create_note_num',
+  'soc_read_cnt',
+  'fans_num',
+  'add_fans_num',
+  'lost_fans_num',
+  'message_open_cnt',
+  'message_driving_open_cnt',
+  'msg_leads_num',
+  'leads_success',
+];
+/** 员工号维度行指标（staffDetailList） */
+const STAFF_USER_TARGETS = [
+  'rtb_note_num',
+  'rtb_income_amt',
+  'ads_read_cnt',
+  'create_note_num',
+  'soc_imp_cnt',
+  'soc_click_cnt',
+  'soc_enage_cnt',
+  'fans_num',
+  'add_fans_num',
+  'lost_fans_num',
+  'message_open_cnt',
+  'message_driving_open_cnt',
+  'msg_leads_num',
+  'leads_success',
+];
+
 export interface SyncResult {
   syncType: string;
   statDate: string;
@@ -196,6 +235,26 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             `星火notes 同步失败 brand=${ctx.brandId} 自${notesOldest}: ${(error as Error).message}`,
           );
         }
+      }
+    }
+
+    // 3) 员工矩阵：逐日补齐窗口内断档（主账户/员工号日明细）
+    for (const d of dates) {
+      if (await this.hasSuccessLog('staff_matrix', d, ctx.brandId)) continue;
+      try {
+        const result = await this.syncStaffMatrix(d, ctx);
+        syncedSomething = true;
+        this.logger.log(
+          `星火员工矩阵同步完成 brand=${ctx.brandId} ${d}：${result.message}`,
+        );
+      } catch (error) {
+        if (error instanceof SparkCookieExpiredError) {
+          cookieBroken = true;
+          break;
+        }
+        this.logger.warn(
+          `星火员工矩阵同步失败 brand=${ctx.brandId} ${d}: ${(error as Error).message}`,
+        );
       }
     }
 
@@ -801,6 +860,483 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     };
     await this.prisma.sparkSyncLog.create({ data: result });
     return result;
+  }
+
+  /* ---------- 员工矩阵（MCC 员工矩阵分析：主账户/员工号 日明细） ---------- */
+
+  /** 视图行 → targetCode 映射（兼容 targetList/targetVos 数组与平铺对象两种行结构） */
+  private staffRowMap(r: Record<string, unknown>): Map<string, unknown> {
+    const m = new Map<string, unknown>();
+    const list = Array.isArray(r.targetList)
+      ? (r.targetList as { targetCode?: string; targetValue?: unknown; targetOriginValue?: unknown; targetDownloadValue?: unknown }[])
+      : Array.isArray(r.targetVos)
+        ? (r.targetVos as { targetCode?: string; targetValue?: unknown; targetOriginValue?: unknown; targetDownloadValue?: unknown }[])
+        : [];
+    for (const t of list ?? []) {
+      const v = t.targetValue ?? t.targetOriginValue ?? t.targetDownloadValue;
+      if (v != null && v !== '') m.set(String(t.targetCode), v);
+    }
+    for (const [k, v] of Object.entries(r)) {
+      if (k !== 'targetList' && k !== 'targetVos' && v != null && v !== '') m.set(k, v);
+    }
+    return m;
+  }
+
+  /** 员工矩阵视图分页拉取（7 天窗口锚定 statDate；行按自身 date_key 落库） */
+  private async staffMatrixRows(
+    chart: 'brandDetailList' | 'staffDetailList',
+    statDate: string,
+    targets: string[],
+    ctx: SparkOrgCtx,
+  ): Promise<Record<string, unknown>[]> {
+    const start = new Date(
+      new Date(`${statDate}T00:00:00+08:00`).getTime() - 6 * 86400000,
+    ).toISOString().slice(0, 10);
+    const rows: Record<string, unknown>[] = [];
+    let total = 0;
+    for (let pageNo = 1; pageNo <= STAFF_MAX_PAGES; pageNo += 1) {
+      const data = (await this.api.visionDetailList(
+        {
+          viewAlias: STAFF_VIEW_ALIAS,
+          chart,
+          dynamicTargets: targets,
+          sorts: [],
+          page: { pageNo, pageSize: STAFF_PAGE_SIZE },
+          frontFilterList: [
+            {
+              filterField: 'time_dim',
+              filterFieldName: '时间维度',
+              tip: '',
+              filterType: 20,
+              selectFilter: {
+                valueSource: 0,
+                selectLabels: [
+                  { labelName: '合计', selected: 1, labelValue: 'all_key' },
+                  { labelValue: 'date_key', labelName: '日维度', selected: 0 },
+                  { labelValue: 'week_key', labelName: '周维度', selected: 0 },
+                  { labelValue: 'month_key', labelName: '月维度', selected: 0 },
+                ],
+                selectType: 10,
+                selectShowType: 0,
+              },
+              hide: 0,
+              foldType: 0,
+              require: 1,
+            },
+            {
+              tip: '',
+              filterType: 10,
+              timeFilter: {
+                limitMax: 366,
+                defaultDate: 16,
+                quickDates: [6, 16, 21, 36, 41, 46, 51],
+                values: [start, statDate],
+                pattern: 10,
+                timeShowType: 11,
+                disableRange: 0,
+                useDate: 16,
+              },
+              foldType: 0,
+              require: 1,
+              filterField: 'date_key',
+              filterFieldName: '统计时间',
+            },
+          ],
+          orgFilter: { accountOrgCode: ctx.orgCode },
+        },
+        ctx,
+      ) as { detailListVo?: { detailVoList?: Record<string, unknown>[]; total?: number } } | null) ?? {};
+      const vo = data.detailListVo ?? {};
+      total = Number(vo.total ?? 0);
+      const batch = vo.detailVoList ?? [];
+      rows.push(...batch);
+      if (rows.length >= total || !batch.length) break;
+    }
+    return rows;
+  }
+
+  /** 员工矩阵逐日同步：主账户维度 + 员工号维度（幂等 upsert，行 date_key 为准） */
+  async syncStaffMatrix(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
+    const org = ctx ?? (await this.orgs.forBrand());
+    if (!org) throw new Error('无可用星火组织配置');
+    const statDate = date ?? this.syncDate();
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
+      const s = String(v ?? '').replace(/,/g, '').trim();
+      if (!s || s === '-' || s === '--') return 0;
+      if (/万$/.test(s)) return Math.round(parseFloat(s) * 10000) || 0;
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.round(n) : 0;
+    };
+    const str = (v: unknown): string => String(v ?? '').trim();
+    const bool = (v: unknown): boolean | null => {
+      const s = str(v);
+      if (!s) return null;
+      return ['是', 'true', '1', 'y', 'yes'].includes(s.toLowerCase()) || s === '已开通';
+    };
+    const dayOf = (v: unknown): Date =>
+      new Date(`${str(v) || statDate}T00:00:00.000Z`);
+
+    let brandUpserted = 0;
+    let staffUpserted = 0;
+    try {
+      const brandRows = await this.staffMatrixRows('brandDetailList', statDate, STAFF_BRAND_TARGETS, org);
+      for (const r of brandRows) {
+        const m = this.staffRowMap(r);
+        const brandUserId = str(m.get('brand_user_id'));
+        if (!brandUserId) continue;
+        const day = dayOf(m.get('date_key'));
+        const data = {
+          brandUserName: str(m.get('brand_user_name')) || brandUserId,
+          accountType: str(m.get('account_type')) || null,
+          hasOpenKos: bool(m.get('has_open_kos')),
+          openKosTime: str(m.get('brand_open_kos_time')) || null,
+          hasAdsBrand: bool(m.get('has_ads_brand')),
+          rtbAccountNum: num(m.get('rtb_account_num')),
+          rtbNoteNum: num(m.get('rtb_note_num')),
+          rtbIncomeAmt: new Prisma.Decimal(num(m.get('rtb_income_amt'))),
+          adsReadCnt: num(m.get('ads_read_cnt')),
+          kosAccountNum: num(m.get('kos_account_num')),
+          createNoteNum: num(m.get('create_note_num')),
+          socReadCnt: num(m.get('soc_read_cnt')),
+          fansNum: num(m.get('fans_num')),
+          addFansNum: num(m.get('add_fans_num')),
+          lostFansNum: num(m.get('lost_fans_num')),
+          messageOpenCnt: num(m.get('message_open_cnt')),
+          messageDrivingOpenCnt: num(m.get('message_driving_open_cnt')),
+          msgLeadsNum: num(m.get('msg_leads_num')),
+          leadsSuccess: num(m.get('leads_success')),
+          rawJson: r as Prisma.InputJsonValue,
+        };
+        await this.prisma.sparkStaffBrandDaily.upsert({
+          where: {
+            statDate_brandUserId_brandId: { statDate: day, brandUserId, brandId: org.brandId },
+          },
+          create: { statDate: day, brandUserId, brandId: org.brandId, ...data },
+          update: data,
+        });
+        brandUpserted += 1;
+      }
+
+      const staffRows = await this.staffMatrixRows('staffDetailList', statDate, STAFF_USER_TARGETS, org);
+      for (const r of staffRows) {
+        const m = this.staffRowMap(r);
+        const userId = str(m.get('user_id'));
+        if (!userId) continue;
+        const day = dayOf(m.get('date_key'));
+        const data = {
+          brandUserId: str(m.get('brand_user_id')) || '',
+          brandUserName: str(m.get('brand_user_name')) || null,
+          staffName: str(m.get('staff_name')) || null,
+          nickname: str(m.get('nickname')) || null,
+          accountType: str(m.get('account_type')) || null,
+          bindDate: str(m.get('bind_date')) || null,
+          staffArea: str(m.get('staff_area')) || null,
+          staffLabel: str(m.get('staff_label')) || null,
+          rtbNoteNum: num(m.get('rtb_note_num')),
+          rtbIncomeAmt: new Prisma.Decimal(num(m.get('rtb_income_amt'))),
+          adsReadCnt: num(m.get('ads_read_cnt')),
+          createNoteNum: num(m.get('create_note_num')),
+          socImpCnt: num(m.get('soc_imp_cnt')),
+          socClickCnt: num(m.get('soc_click_cnt')),
+          socEnageCnt: num(m.get('soc_enage_cnt')),
+          fansNum: num(m.get('fans_num')),
+          addFansNum: num(m.get('add_fans_num')),
+          lostFansNum: num(m.get('lost_fans_num')),
+          messageOpenCnt: num(m.get('message_open_cnt')),
+          messageDrivingOpenCnt: num(m.get('message_driving_open_cnt')),
+          msgLeadsNum: num(m.get('msg_leads_num')),
+          leadsSuccess: num(m.get('leads_success')),
+          rawJson: r as Prisma.InputJsonValue,
+        };
+        await this.prisma.sparkStaffUserDaily.upsert({
+          where: {
+            statDate_userId_brandId: { statDate: day, userId, brandId: org.brandId },
+          },
+          create: { statDate: day, userId, brandId: org.brandId, ...data },
+          update: data,
+        });
+        staffUpserted += 1;
+      }
+
+      const result: SyncResult = {
+        syncType: 'staff_matrix',
+        statDate,
+        status: 'success',
+        fetched: brandRows.length + staffRows.length,
+        upserted: brandUpserted + staffUpserted,
+        accountsAdded: 0,
+        accountsRemoved: 0,
+        message: `brand=${brandUpserted} staff=${staffUpserted}`,
+        brandId: org.brandId,
+      };
+      await this.prisma.sparkSyncLog.create({ data: result });
+      return result;
+    } catch (error) {
+      await this.prisma.sparkSyncLog.create({
+        data: {
+          syncType: 'staff_matrix',
+          statDate,
+          status: 'failed',
+          message: String((error as Error).message).slice(0, 400),
+          brandId: org.brandId,
+        },
+      });
+      throw error;
+    }
+  }
+
+  /** 窗口聚合口径：流量型指标求和（FLOW）；存量/累计型取窗口内最新一天（SNAPSHOT） */
+  private static readonly STAFF_FLOW_KEYS = [
+    'rtbNoteNum',
+    'rtbIncomeAmt',
+    'adsReadCnt',
+    'createNoteNum',
+    'addFansNum',
+    'lostFansNum',
+    'messageOpenCnt',
+    'messageDrivingOpenCnt',
+    'msgLeadsNum',
+    'leadsSuccess',
+  ];
+
+  private staffWindowAgg(
+    rows: Record<string, unknown>[],
+  ): Record<string, unknown> {
+    const sorted = [...rows].sort(
+      (a, b) => (b.statDate as Date).getTime() - (a.statDate as Date).getTime(),
+    );
+    const latest = sorted[0] ?? {};
+    const out: Record<string, unknown> = {};
+    for (const k of SparkService.STAFF_FLOW_KEYS) {
+      out[k] = rows.reduce(
+        (acc, r) => acc + Number(r[k] ?? 0),
+        0,
+      );
+    }
+    for (const k of [
+      'fansNum',
+      'socReadCnt',
+      'socImpCnt',
+      'socClickCnt',
+      'socEnageCnt',
+      'kosAccountNum',
+      'rtbAccountNum',
+    ]) {
+      out[k] = Number(latest[k] ?? 0);
+    }
+    // 身份字段取最新一天
+    for (const k of [
+      'brandUserId',
+      'brandUserName',
+      'userId',
+      'staffName',
+      'nickname',
+      'accountType',
+      'bindDate',
+      'staffArea',
+      'staffLabel',
+      'hasOpenKos',
+      'openKosTime',
+      'hasAdsBrand',
+    ]) {
+      if (latest[k] !== undefined) out[k] = latest[k];
+    }
+    out.statDate = latest.statDate;
+    return out;
+  }
+
+  /** 员工矩阵 · 组织日汇总（趋势 + 最新口径卡） */
+  async staffMatrixSummary(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+  }) {
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
+    const { start, end } = this.staffWindow(query);
+    const rows = await this.prisma.sparkStaffBrandDaily.findMany({
+      where: { brandId, statDate: { gte: start, lte: end } },
+      orderBy: { statDate: 'asc' },
+    });
+    const byDay = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const k = dayKey08(r.statDate);
+      const list = byDay.get(k) ?? [];
+      list.push(r as unknown as Record<string, unknown>);
+      byDay.set(k, list);
+    }
+    const days = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, list]) => {
+        const agg = this.staffWindowAgg(list);
+        return {
+          date: day,
+          bind_brand_num: list.length,
+          open_kos_brand_num: list.filter((r) => r.hasOpenKos === true).length,
+          kos_account_num: agg.kosAccountNum,
+          rtb_account_num: agg.rtbAccountNum,
+          create_note_num: agg.createNoteNum,
+          soc_read_cnt: agg.socReadCnt,
+          fans_num: agg.fansNum,
+          add_fans_num: agg.addFansNum,
+          message_open_cnt: agg.messageOpenCnt,
+          message_driving_open_cnt: agg.messageDrivingOpenCnt,
+          msg_leads_num: agg.msgLeadsNum,
+          leads_success: agg.leadsSuccess,
+          rtb_income_amt: agg.rtbIncomeAmt,
+        };
+      });
+    const latest = days[days.length - 1] ?? {};
+    return { brand_id: brandId, start, end, latest, days };
+  }
+
+  /** 员工矩阵 · 主账户维度窗口聚合（分页 + 关键字 + 权限/投广筛选 + 排序） */
+  async staffMatrixBrands(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    keyword?: string;
+    hasOpenKos?: string;
+    hasAds?: string;
+    sortField?: string;
+    sortOrder?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
+    const { start, end } = this.staffWindow(query);
+    const where: Prisma.SparkStaffBrandDailyWhereInput = {
+      brandId,
+      statDate: { gte: start, lte: end },
+      ...(query.keyword
+        ? { brandUserName: { contains: query.keyword, mode: 'insensitive' } }
+        : {}),
+      ...(query.hasOpenKos === 'true' || query.hasOpenKos === 'false'
+        ? { hasOpenKos: query.hasOpenKos === 'true' }
+        : {}),
+      ...(query.hasAds === 'true' || query.hasAds === 'false'
+        ? { hasAdsBrand: query.hasAds === 'true' }
+        : {}),
+    };
+    const rows = await this.prisma.sparkStaffBrandDaily.findMany({
+      where,
+      orderBy: { statDate: 'asc' },
+    });
+    const byKey = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const list = byKey.get(r.brandUserId) ?? [];
+      list.push(r as unknown as Record<string, unknown>);
+      byKey.set(r.brandUserId, list);
+    }
+    let list = [...byKey.values()].map((group) => this.staffWindowAgg(group));
+    const sortField = [
+      'createNoteNum',
+      'socReadCnt',
+      'rtbIncomeAmt',
+      'kosAccountNum',
+      'msgLeadsNum',
+      'messageOpenCnt',
+      'messageDrivingOpenCnt',
+      'fansNum',
+      'addFansNum',
+      'adsReadCnt',
+      'leadsSuccess',
+    ].includes(query.sortField ?? '')
+      ? (query.sortField as string)
+      : 'createNoteNum';
+    list.sort((a, b) => Number(b[sortField] ?? 0) - Number(a[sortField] ?? 0));
+    const total = list.length;
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(query.page_size ?? 20) || 20));
+    list = list.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      brand_id: brandId,
+      start,
+      end,
+      total,
+      page,
+      page_size: pageSize,
+      list: list.map((g, i) => ({ rank: (page - 1) * pageSize + i + 1, ...g })),
+    };
+  }
+
+  /** 员工矩阵 · 员工号维度窗口聚合（分页 + 关键字 + 排序） */
+  async staffMatrixUsers(query: {
+    brandId?: string;
+    start?: string;
+    end?: string;
+    keyword?: string;
+    sortField?: string;
+    sortOrder?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
+    const { start, end } = this.staffWindow(query);
+    const where: Prisma.SparkStaffUserDailyWhereInput = {
+      brandId,
+      statDate: { gte: start, lte: end },
+      ...(query.keyword
+        ? {
+            OR: [
+              { nickname: { contains: query.keyword, mode: 'insensitive' } },
+              { staffName: { contains: query.keyword, mode: 'insensitive' } },
+              { brandUserName: { contains: query.keyword, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+    const rows = await this.prisma.sparkStaffUserDaily.findMany({
+      where,
+      orderBy: { statDate: 'asc' },
+    });
+    const byKey = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const list = byKey.get(r.userId) ?? [];
+      list.push(r as unknown as Record<string, unknown>);
+      byKey.set(r.userId, list);
+    }
+    let list = [...byKey.values()].map((group) => this.staffWindowAgg(group));
+    const sortField = [
+      'createNoteNum',
+      'socImpCnt',
+      'socClickCnt',
+      'socEnageCnt',
+      'rtbIncomeAmt',
+      'msgLeadsNum',
+      'messageOpenCnt',
+      'messageDrivingOpenCnt',
+      'fansNum',
+      'addFansNum',
+      'leadsSuccess',
+    ].includes(query.sortField ?? '')
+      ? (query.sortField as string)
+      : 'socImpCnt';
+    list.sort((a, b) => Number(b[sortField] ?? 0) - Number(a[sortField] ?? 0));
+    const total = list.length;
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(query.page_size ?? 20) || 20));
+    list = list.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      brand_id: brandId,
+      start,
+      end,
+      total,
+      page,
+      page_size: pageSize,
+      list: list.map((g, i) => ({ rank: (page - 1) * pageSize + i + 1, ...g })),
+    };
+  }
+
+  /** 员工矩阵查询窗口（默认近 7 天，与星火后台周窗一致） */
+  private staffWindow(query: { start?: string; end?: string }) {
+    const end = query.end
+      ? new Date(`${query.end}T23:59:59.999+08:00`)
+      : new Date(Date.now() - 86400000);
+    const start = query.start
+      ? new Date(`${query.start}T00:00:00.000+08:00`)
+      : new Date(end.getTime() - 6 * 86400000);
+    return { start, end };
   }
 
   /** upsert SparkAccount 镜像并返回新增数；不在此轮出现的账户置 active=false */

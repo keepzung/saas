@@ -92,6 +92,7 @@ const MODULE_TREE = [
           { name: '经销商排行', path: '/kox_df/operation-analysis/dealer-ranking' },
           { name: '账号排行', path: '/kox_df/operation-analysis/author-ranking' },
           { name: '笔记排行', path: '/kox_df/operation-analysis/note-ranking' },
+          { name: '员工矩阵分析', path: '/kox_df/operation-analysis/staff-matrix' },
         ],
       },
       {

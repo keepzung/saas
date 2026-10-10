@@ -35,3 +35,12 @@ export const createSparkProject = (data, brandId) =>
 
 export const deleteSparkProject = (id) =>
   request.delete(`/spark/projects/${id}`);
+
+export const getStaffMatrixSummary = (params) =>
+  request.get('/spark/staff/summary', { params });
+
+export const getStaffMatrixBrands = (params) =>
+  request.get('/spark/staff/brands', { params });
+
+export const getStaffMatrixUsers = (params) =>
+  request.get('/spark/staff/users', { params });

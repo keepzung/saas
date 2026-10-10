@@ -60,6 +60,8 @@ export class SparkController {
         results.push(await this.sparkService.syncCampaign(dto?.date, ctx));
       } else if (type === 'notes') {
         results.push(await this.sparkService.syncNotes(dto?.date, noteOpts, ctx));
+      } else if (type === 'staff_matrix' || type === 'staff') {
+        results.push(await this.sparkService.syncStaffMatrix(dto?.date, ctx));
       } else {
         results.push({
           brandId,
@@ -69,6 +71,47 @@ export class SparkController {
       }
     }
     return brandIds.length === 1 ? results[0] : results;
+  }
+
+  @Get('spark/staff/summary')
+  staffSummary(@Query() query: { brandId?: string; start?: string; end?: string }) {
+    return this.sparkService.staffMatrixSummary(query);
+  }
+
+  @Get('spark/staff/brands')
+  staffBrands(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      keyword?: string;
+      hasOpenKos?: string;
+      hasAds?: string;
+      sortField?: string;
+      sortOrder?: string;
+      page?: string;
+      page_size?: string;
+    },
+  ) {
+    return this.sparkService.staffMatrixBrands(query);
+  }
+
+  @Get('spark/staff/users')
+  staffUsers(
+    @Query()
+    query: {
+      brandId?: string;
+      start?: string;
+      end?: string;
+      keyword?: string;
+      sortField?: string;
+      sortOrder?: string;
+      page?: string;
+      page_size?: string;
+    },
+  ) {
+    return this.sparkService.staffMatrixUsers(query);
   }
 
   @Get('spark/status')

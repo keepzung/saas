@@ -161,6 +161,11 @@ const routes = [
         meta: { title: '笔记排行' },
       },
       {
+        path: '/kox_df/operation-analysis/staff-matrix',
+        component: () => import('../views/kox/KoxStaffMatrixView.vue'),
+        meta: { title: '员工矩阵分析' },
+      },
+      {
         path: '/kox_df/operation-analysis/dealer-ranking',
         component: () => import('../views/kox/KoxDealerOperationView.vue'),
         meta: { title: '经销商排行' },
