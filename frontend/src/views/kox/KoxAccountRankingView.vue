@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="账号排行" :subtitle="isDf ? '账号表现与私信转化' : '按 KOS 留资分层排序'">
+  <PageWrapper title="账号表现" :subtitle="isMdd ? 'KOS 账号综合排序' : isDf ? '账号表现与私信转化' : '按 KOS 留资分层排序'">
     <template #extra>
       <a-radio-group v-model:value="quick" size="small" @change="onQuickChange">
         <a-radio-button value="7">近7天</a-radio-button>
@@ -119,6 +119,7 @@ const router = useRouter();
 const route = useRoute();
 const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
+const isMdd = computed(() => Number(auth.currentBrandId) === 5);
 const CROWNS = ['👑', '🥈', '🥉'];
 
 const quick = ref('7');
@@ -147,6 +148,23 @@ const ncol = (title, key, width = 96) => ({
 });
 
 const columns = computed(() => {
+  if (isMdd.value) {
+    // Morgandada：对齐客户看板「账号表现分析」——KOS 账号综合排序（CES/新粉率/私信三件套/内容）
+    return [
+      { title: '排名', key: 'rank', width: 64, fixed: 'left' },
+      { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
+      ncol('CES综合得分', 'ces', 110),
+      ncol('新粉率', 'fans_rate', 90),
+      { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
+      ncol('私信连接数', 'pm_inquiries', 104),
+      ncol('私信开口数', 'pm_openings', 104),
+      ncol('私信留资数', 'pm_leads', 104),
+      ncol('内容发布数', 'item_cnt', 104),
+      ncol('内容曝光数', 'exposure_sum', 110),
+      { title: '所属门店/团队', key: 'store', dataIndex: 'store_name', width: 200, ellipsis: true },
+      { title: '操作', key: 'action', width: 90, fixed: 'right' },
+    ];
+  }
   if (isDf.value) {
     return [
       { title: '排名', key: 'rank', width: 64, fixed: 'left' },
@@ -229,6 +247,7 @@ async function reload() {
   try {
     const res = await getKoxAccountRanking({
       ...dateParams(),
+      ...(isMdd.value ? { metric: 'ces' } : {}),
       page: pagination.value.current,
       page_size: pagination.value.pageSize,
     });
@@ -282,7 +301,7 @@ function exportDetail() {
   const rows = list.value.map((r, i) => ({
     排名: (pagination.value.current - 1) * pagination.value.pageSize + i + 1,
     账号: r.nickname,
-    分层: r.tier_label,
+    ...(isMdd.value ? { CES综合得分: r.ces, 新粉率: r.fans_rate } : { 分层: r.tier_label }),
     ...(isTesla.value
       ? {}
       : { 粉丝数: r.fans, 账号标签: r.account_tag ?? '', 账号类型: r.account_type }),

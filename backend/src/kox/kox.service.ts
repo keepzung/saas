@@ -2227,7 +2227,7 @@ export class KoxService {
     for (let t = new Date(`${dayKey08(start)}T00:00:00+08:00`).getTime(); t <= new Date(`${dayKey08(end)}T00:00:00+08:00`).getTime(); t += 86400000) {
       days.push(new Date(t).toISOString().slice(0, 10));
     }
-    const trendMap = new Map(days.map((d) => [d, { date: d, note_cnt: 0, view_sum: 0, interaction_sum: 0, ad_cost: 0, lead_cnt: 0 }]));
+    const trendMap = new Map(days.map((d) => [d, { date: d, note_cnt: 0, view_sum: 0, interaction_sum: 0, ad_cost: 0, ad_leads: 0, lead_cnt: 0 }]));
     for (const x of notes) {
       if (!x.publishTime) continue;
       const row = trendMap.get(dayKey08(x.publishTime));
@@ -2239,7 +2239,10 @@ export class KoxService {
     }
     for (const x of campRows) {
       const row = trendMap.get(dayKey08(x.statDate));
-      if (row) row.ad_cost += n(x.fee);
+      if (row) {
+        row.ad_cost += n(x.fee);
+        row.ad_leads += n(x.msgLeadsNum);
+      }
     }
     for (const x of leads) {
       const at = x.sessionCreatedAt ?? x.lastMessageAt;

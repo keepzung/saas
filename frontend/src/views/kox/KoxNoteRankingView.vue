@@ -113,6 +113,57 @@
       </a-card>
     </div>
 
+    <a-card v-if="isMdd" :bordered="false" size="small">
+      <template #title>
+        <div class="card-header">
+          <span class="bar"></span>
+          <span class="title">合规内容 / 违规内容检测</span>
+          <a-radio-group v-model:value="complianceState" size="small" class="wc-tabs" @change="onComplianceStateChange">
+            <a-radio-button value="all">全部内容</a-radio-button>
+            <a-radio-button value="ok">合规内容</a-radio-button>
+            <a-radio-button value="violation">违规内容</a-radio-button>
+          </a-radio-group>
+          <span class="muted mini">违禁词库规则扫描（标题+正文），仅供参考</span>
+        </div>
+      </template>
+      <div class="compliance-stats">
+        <div class="block-card"><div class="block-content"><div class="block-value">{{ complianceSummary.total }}</div><div class="block-label">检测笔记</div></div></div>
+        <div class="block-card"><div class="block-content"><div class="block-value" style="color:#16a34a">{{ complianceSummary.ok }}</div><div class="block-label">合规内容</div></div></div>
+        <div class="block-card"><div class="block-content"><div class="block-value" style="color:#dc2626">{{ complianceSummary.violation }}</div><div class="block-label">违规内容</div></div></div>
+      </div>
+      <a-table
+        :columns="complianceColumns"
+        :data-source="complianceData?.list ?? []"
+        :loading="complianceLoading"
+        :pagination="{ pageSize: 8, showSizeChanger: false, size: 'small' }"
+        row-key="note_id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'title'">
+            <div class="note-title-cell">
+              <img v-if="record.cover_url" class="note-cover-img" :src="record.cover_url" alt="" referrerpolicy="no-referrer" />
+              <div class="note-title-text">
+                <a v-if="record.note_url" class="title-link" :href="record.note_url" target="_blank" rel="noreferrer">{{ record.title }}</a>
+                <span v-else>{{ record.title }}</span>
+                <div class="muted mini">@{{ record.author_name }} · {{ (record.publish_time || '').slice(0, 10) }}</div>
+              </div>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'state'">
+            <a-tag v-if="record.state === 'violation'" color="error">违规 {{ record.violation_cnt }} 处</a-tag>
+            <a-tag v-else color="success">合规</a-tag>
+          </template>
+          <template v-else-if="column.key === 'violations'">
+            <a-tooltip v-if="record.violations?.length" :title="record.violations.map((v) => `${v.group}：${v.word}`).join('、')">
+              <span class="violation-words">{{ record.violations.map((v) => v.word).slice(0, 4).join('、') }}{{ record.violations.length > 4 ? '…' : '' }}</span>
+            </a-tooltip>
+            <span v-else class="muted mini">-</span>
+          </template>
+        </template>
+      </a-table>
+    </a-card>
+
     <a-card :bordered="false" size="small">
       <template #title>
         <div class="summary-row">
@@ -268,7 +319,7 @@ import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
-import { getKoxAccounts, getKoxNotes, getKoxNotesSummary, getKoxWordcloud } from '../../api/kox';
+import { getKoxAccounts, getKoxNotes, getKoxNotesSummary, getKoxWordcloud, getMddNoteCompliance } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
@@ -276,6 +327,7 @@ const route = useRoute();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
 // 特斯拉：内容分类 tag 意义有限 + 表单线索无笔记级数据源，按客户要求隐藏
 const isTesla = computed(() => Number(auth.currentBrandId ?? 0) === 6);
+const isMdd = computed(() => Number(auth.currentBrandId ?? 0) === 5);
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 
@@ -327,6 +379,27 @@ const mode = ref('loading'); // 'loading' | 'real' | 'demo'
 const realTotal = ref(0);
 const realFacets = ref({ categories: [], models: [] });
 const summaryData = ref(null);
+
+// ─── Morgandada 合规检测 ───
+const complianceData = ref(null);
+const complianceLoading = ref(false);
+const complianceState = ref('all');
+function onComplianceStateChange() {
+  loadCompliance();
+}
+const complianceSummary = computed(() => ({
+  total: complianceData.value?.total ?? 0,
+  ok: complianceData.value?.ok_cnt ?? 0,
+  violation: complianceData.value?.violation_cnt ?? 0,
+}));
+const complianceColumns = [
+  { title: '内容', key: 'title', width: 380 },
+  { title: '类型', dataIndex: 'note_type', key: 'note_type', width: 90 },
+  { title: '检测状态', key: 'state', width: 100 },
+  { title: '命中违禁词', key: 'violations', width: 220 },
+  { title: '阅读数', dataIndex: 'views', key: 'views', width: 90, align: 'right' },
+  { title: '互动数', dataIndex: 'interaction', key: 'interaction', width: 90, align: 'right' },
+];
 
 const typeOptions = computed(() =>
   mode.value === 'real'
@@ -752,6 +825,7 @@ function onDaysChange() {
   page.value = 1;
   if (mode.value === 'real') loadReal();
   else regenerate();
+  loadCompliance();
 }
 
 function onFilterChange() {
@@ -944,9 +1018,28 @@ function onResize() {
   wcChart?.resize();
 }
 
+async function loadCompliance() {
+  if (!isMdd.value) return;
+  complianceLoading.value = true;
+  try {
+    const params = {};
+    if (days.value === 7 || days.value === 30) {
+      params.start = dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD');
+      params.end = dayjs().format('YYYY-MM-DD');
+    }
+    if (complianceState.value !== 'all') params.state = complianceState.value;
+    complianceData.value = await getMddNoteCompliance(params);
+  } catch {
+    /* 合规检测加载失败不影响主列表 */
+  } finally {
+    complianceLoading.value = false;
+  }
+}
+
 onMounted(async () => {
   const qAuthor = route.query?.author;
   if (qAuthor) authorKw.value = String(qAuthor);
+  loadCompliance();
   loading.value = true;
   try {
     const probe = await getKoxNotes(
@@ -987,6 +1080,18 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.compliance-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.violation-words {
+  color: #dc2626;
+  font-size: 12px;
+}
+
 .overview-blocks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

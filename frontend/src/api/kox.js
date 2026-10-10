@@ -54,3 +54,9 @@ export const getKoxDealerSnapshot = (params) =>
 
 export const getKoxRegionAdSnapshot = (params) =>
   request.get('/kox/region-ad-snapshot', { params });
+
+export const getMddOverview = (params) =>
+  request.get('/kox/mdd/overview', { params });
+
+export const getMddNoteCompliance = (params) =>
+  request.get('/kox/mdd/note-compliance', { params });
