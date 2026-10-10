@@ -29,42 +29,9 @@ const SPARK_DEFAULT_BRAND_ID = 2;
 
 /** 员工矩阵分析视图（MCC cookie 直连，无需专业号登录态） */
 const STAFF_VIEW_ALIAS = 'mcc_assets_staffMatrix_analysisView';
+const STAFF_BIZ_CODE = 'mcc_assets_staffMatrix';
 const STAFF_MAX_PAGES = 20;
 const STAFF_PAGE_SIZE = 200;
-/** 主账户维度行指标（brandDetailList） */
-const STAFF_BRAND_TARGETS = [
-  'rtb_account_num',
-  'rtb_note_num',
-  'rtb_income_amt',
-  'ads_read_cnt',
-  'kos_account_num',
-  'create_note_num',
-  'soc_read_cnt',
-  'fans_num',
-  'add_fans_num',
-  'lost_fans_num',
-  'message_open_cnt',
-  'message_driving_open_cnt',
-  'msg_leads_num',
-  'leads_success',
-];
-/** 员工号维度行指标（staffDetailList） */
-const STAFF_USER_TARGETS = [
-  'rtb_note_num',
-  'rtb_income_amt',
-  'ads_read_cnt',
-  'create_note_num',
-  'soc_imp_cnt',
-  'soc_click_cnt',
-  'soc_enage_cnt',
-  'fans_num',
-  'add_fans_num',
-  'lost_fans_num',
-  'message_open_cnt',
-  'message_driving_open_cnt',
-  'msg_leads_num',
-  'leads_success',
-];
 
 export interface SyncResult {
   syncType: string;
@@ -882,13 +849,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return m;
   }
 
-  /** 员工矩阵视图分页拉取（7 天窗口锚定 statDate；行按自身 date_key 落库） */
+  /** 员工矩阵视图分页拉取（7 天窗口锚定 statDate；行按自身 date_key 落库）。
+   * dynamicTargets 必须传视图全量指标码（含维度码），传子集会退化为单行空维度聚合 */
   private async staffMatrixRows(
     chart: 'brandDetailList' | 'staffDetailList',
     statDate: string,
     targets: string[],
     ctx: SparkOrgCtx,
   ): Promise<Record<string, unknown>[]> {
+    if (!targets.length) return [];
     const start = new Date(
       new Date(`${statDate}T00:00:00+08:00`).getTime() - 6 * 86400000,
     ).toISOString().slice(0, 10);
@@ -955,6 +924,32 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     return rows;
   }
 
+  /** 拉取视图全量指标码（含维度码；detail 请求必须携带全量，否则服务端退化为单行聚合） */
+  private async staffMatrixTargetCodes(ctx: SparkOrgCtx): Promise<string[]> {
+    const cfg = (await this.api.visionDetailList(
+      {
+        viewAlias: STAFF_VIEW_ALIAS,
+        chart: '',
+        bizCode: STAFF_BIZ_CODE,
+      },
+      ctx,
+    ) as Record<string, unknown> | null) ?? {};
+    const codes = new Set<string>();
+    const walk = (o: unknown) => {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) {
+        o.forEach(walk);
+        return;
+      }
+      for (const [k, v] of Object.entries(o)) {
+        if (k === 'targetCode' && typeof v === 'string') codes.add(v);
+        walk(v);
+      }
+    };
+    walk(cfg);
+    return [...codes];
+  }
+
   /** 员工矩阵逐日同步：主账户维度 + 员工号维度（幂等 upsert，行 date_key 为准） */
   async syncStaffMatrix(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
     const org = ctx ?? (await this.orgs.forBrand());
@@ -980,7 +975,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     let brandUpserted = 0;
     let staffUpserted = 0;
     try {
-      const brandRows = await this.staffMatrixRows('brandDetailList', statDate, STAFF_BRAND_TARGETS, org);
+      const targets = await this.staffMatrixTargetCodes(org);
+      const brandRows = await this.staffMatrixRows('brandDetailList', statDate, targets, org);
       for (const r of brandRows) {
         const m = this.staffRowMap(r);
         const brandUserId = str(m.get('brand_user_id'));
@@ -1018,7 +1014,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         brandUpserted += 1;
       }
 
-      const staffRows = await this.staffMatrixRows('staffDetailList', statDate, STAFF_USER_TARGETS, org);
+      const staffRows = await this.staffMatrixRows('staffDetailList', statDate, targets, org);
       for (const r of staffRows) {
         const m = this.staffRowMap(r);
         const userId = str(m.get('user_id'));
