@@ -575,12 +575,13 @@ function renderWordcloud() {
     series: [
       {
         type: 'wordCloud',
-        // 客户标注：词语填满卡片内 95% 的居中圆形区域（圆心与提及车型环形圆心同水平线）
-        shape: 'circle',
-        width: '95%',
-        height: '95%',
-        left: '2.5%',
-        top: '2.5%',
+        // 客户红框标注（2026-10）：词语填满卡片内的扁椭圆区域（宽约 86%、高约 80%）；
+        // square 形状=矩形铺满（近似扁椭圆），其他品牌保持 circle
+        shape: isTesla.value ? 'square' : 'circle',
+        width: '86%',
+        height: '80%',
+        left: '7%',
+        top: '4%',
         sizeRange: [13, 56],
         rotationRange: [0, 0],
         gridSize: 6,
@@ -673,7 +674,8 @@ function renderCharts() {
       series: [
         {
           type: 'pie',
-          radius: ['42%', '70%'],
+          // 客户红框标注：环形图外径约 440px（容器高 460 → 48%），圆心略偏左给右侧图例留位
+          radius: ['27%', '48%'],
           center: ['42%', '50%'],
           data: pieData,
           label: {
@@ -1270,10 +1272,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-/* 图表容器与词云图等高（760px）且底部锚定：两卡等高 + 图表等高 → 圆心必处同一水平线 */
+/* 图表容器与词云图等高（460px）且底部锚定：两卡等高 + 图表等高 → 圆心必处同一水平线 */
 .mention-model-chart {
   width: 100%;
-  height: 760px;
+  height: 460px;
   margin-top: auto;
 }
 
@@ -1465,7 +1467,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 词云 + 提及车型 同行（客户红框占比：词云约 46.5% / 车型约 53.5%），等高、下端齐平；单卡存在时自动占满整行 */
+/* 词云 + 提及车型 同行等宽等高（客户 2026-10 红框：两卡宽度约相等、卡片缩小）；单卡存在时自动占满整行 */
 .wc-model-row {
   display: flex;
   gap: 12px;
@@ -1475,12 +1477,6 @@ onBeforeUnmount(() => {
 .wc-model-row > .ant-card {
   flex: 1 1 0;
   min-width: 0;
-}
-.wc-model-row > .wordcloud-card {
-  flex: 46.5 1 0;
-}
-.wc-model-row > .mention-model-card {
-  flex: 53.5 1 0;
 }
 @media (max-width: 1100px) {
   .wc-model-row {
@@ -1504,9 +1500,9 @@ onBeforeUnmount(() => {
 .wordcloud-chart {
   height: 560px;
 }
-/* 特斯拉：词云图与车型图等高（760px）且底部锚定 → 圆心同水平线 */
+/* 特斯拉：卡片缩小（客户红框 2026-10）——图表容器 460px、底部锚定，词云与车型图等高 → 圆心同水平线 */
 .wordcloud-chart.tall {
-  height: 760px;
+  height: 460px;
   margin-top: auto;
 }
 .wc-tabs {
