@@ -63,14 +63,29 @@
         </a-card>
       </a-col>
       <a-col :xs="24" :md="12">
-        <a-card size="small" title="线索转化">
+        <a-card size="small">
+          <template #title>
+            <a-tooltip :title="ov.lead_funnel?.scope_note || '线索 = 星火聚光投放私信三数 + 自然笔记私信（随区间与筛选联动）'">
+              <span>线索转化</span>
+            </a-tooltip>
+          </template>
           <div class="kv-grid">
-            <div class="kv"><span>私信咨询数</span><b>{{ fmt(ov.lead?.total_pm_inquiries_sum) }}</b></div>
-            <div class="kv"><span>私信开口数</span><b>{{ fmt(ov.lead?.total_pm_openings_sum) }}</b></div>
-            <div class="kv"><span>私信留资</span><b>{{ fmt(ov.lead?.total_pm_leads_sum) }}</b></div>
-            <div class="kv"><span>线索率</span><b>{{ ov.lead?.lead_rate ?? 0 }}%</b></div>
-            <div class="kv"><span>组件点击</span><b>{{ fmt(ov.lead?.tool_click_cnt_sum) }}</b></div>
-            <div class="kv"><span>表单线索</span><b>{{ fmt(ov.lead?.form_leads_sum) }}</b></div>
+            <div class="kv"><span>私信咨询数</span><b>{{ fmt(ov.lead_funnel?.pm_inquiries) }}</b></div>
+            <div class="kv"><span>私信开口数</span><b>{{ fmt(ov.lead_funnel?.pm_openings) }}</b></div>
+            <div class="kv"><span>私信留资</span><b>{{ fmt(ov.lead_funnel?.pm_leads) }}</b></div>
+            <div class="kv"><span>线索率</span><b>{{ ov.lead_funnel?.lead_rate ?? 0 }}%</b></div>
+            <div class="kv">
+              <a-tooltip title="组件点击暂无数据源（星火笔记/投放口径均未含该指标）">
+                <span>组件点击</span>
+              </a-tooltip>
+              <b>—</b>
+            </div>
+            <div class="kv">
+              <a-tooltip title="表单线索暂无数据源（专业号表单工具未接入）">
+                <span>表单线索</span>
+              </a-tooltip>
+              <b>—</b>
+            </div>
           </div>
         </a-card>
       </a-col>
@@ -89,7 +104,12 @@
         </a-card>
       </a-col>
       <a-col :xs="24" :md="12">
-        <a-card size="small" title="直播运营">
+        <a-card size="small">
+          <template #title>
+            <a-tooltip title="直播数据源尚未接入（星火 MCC / 来鼓均未提供直播数据），暂显示 0">
+              <span>直播运营</span>
+            </a-tooltip>
+          </template>
           <div class="kv-grid">
             <div class="kv"><span>开播账号</span><b>{{ fmt(ov.live?.live_account_num) }}</b></div>
             <div class="kv"><span>直播场次</span><b>{{ fmt(ov.live?.live_count) }}</b></div>
