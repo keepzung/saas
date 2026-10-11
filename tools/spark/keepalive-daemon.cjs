@@ -154,12 +154,26 @@ async function probeMccApi(cookie) {
 
 async function probeMcc(cookie) {
   const api = await probeMccApi(cookie);
-  if (!api.alive) return api;
-  // 活跃时顺带页面 GET 收 Set-Cookie 做会话续期（与原有续期逻辑兼容）
-  try {
-    const page = await probeUrl('https://mcc.xiaohongshu.com/micro/aurora-data', cookie);
-    if (page.setCookies?.length) api.setCookies = [...(api.setCookies ?? []), ...page.setCookies];
-  } catch {}
+  if (api.alive) {
+    // 活跃时顺带页面 GET 收 Set-Cookie 做会话续期（与原有续期逻辑兼容）
+    try {
+      const page = await probeUrl('https://mcc.xiaohongshu.com/micro/aurora-data', cookie);
+      if (page.setCookies?.length) api.setCookies = [...(api.setCookies ?? []), ...page.setCookies];
+    } catch {}
+    return api;
+  }
+  // MCC 多节点/WAF 偶发拦 401/902（同 cookie 并发请求可能成功）→ 单次失败不判死，连测 3 次全败才确认
+  if (api.dead) {
+    for (let i = 0; i < 2; i += 1) {
+      await sleep(3000);
+      const again = await probeMccApi(cookie);
+      api.status = again.status;
+      api.setCookies = again.setCookies ?? api.setCookies;
+      if (again.alive) return again;
+      api.note = again.note;
+    }
+    api.note = `连续3次判定失效（${api.note}）`;
+  }
   return api;
 }
 
