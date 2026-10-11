@@ -123,7 +123,8 @@ async function probeMccApi(cookie) {
       method,
       redirect: 'manual',
       signal: AbortSignal.timeout(30000),
-      headers: { Cookie: cookie || '', 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9' },
+      // Origin/Referer 必须携带：裸 API 请求会被 WAF 偶发拦成 401/902（假死）——与 SparkApiClient 请求头对齐
+      headers: { Cookie: cookie || '', 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9', Origin: 'https://mcc.xiaohongshu.com', Referer: 'https://mcc.xiaohongshu.com/micro/aurora-data' },
     });
     const text = await res.text();
     let body = null;
