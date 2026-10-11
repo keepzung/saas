@@ -7,6 +7,9 @@
       <a-button @click="orgRouterPush">
         <ApartmentOutlined /> 组织管理
       </a-button>
+      <a-button v-if="auth.user?.role === 'ADMIN'" @click="openQuotaDrawer">
+        <ThunderboltOutlined /> 算力发放
+      </a-button>
       <a-button type="primary" @click="openCreate">
         <PlusOutlined /> 新建账号
       </a-button>
@@ -331,6 +334,70 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 算力发放（仅超管） -->
+    <a-drawer v-model:open="quotaOpen" title="算力发放（内容工厂 AI 配额）" width="480" destroy-on-close>
+      <a-space direction="vertical" style="width: 100%" :size="14">
+        <a-select
+          v-model:value="quotaBrandId"
+          :options="brandOptions"
+          placeholder="选择工作区"
+          style="width: 100%"
+          @change="loadQuota"
+        />
+        <template v-if="quotaSummary">
+          <div class="quota-stats">
+            <div class="qs-item">
+              <div class="qs-num">{{ quotaSummary.available.toLocaleString() }}</div>
+              <div class="qs-label">可用算力</div>
+            </div>
+            <div class="qs-item">
+              <div class="qs-num">{{ quotaSummary.used.toLocaleString() }}</div>
+              <div class="qs-label">已用</div>
+            </div>
+            <div class="qs-item">
+              <div class="qs-num">{{ quotaSummary.total.toLocaleString() }}</div>
+              <div class="qs-label">总量</div>
+            </div>
+          </div>
+          <a-input-number
+            v-model:value="quotaAmount"
+            style="width: 100%"
+            :precision="0"
+            placeholder="发放填正数 / 调减填负数，如 500 或 -200"
+          />
+          <a-input v-model:value="quotaRemark" :maxlength="50" placeholder="备注（可选，会记入操作日志）" />
+          <a-button type="primary" block :loading="quotaSaving" :disabled="!quotaBrandId || !quotaAmount" @click="submitQuotaGrant">
+            确认调整
+          </a-button>
+          <div v-if="quotaSummary.recent_logs?.length">
+            <div class="muted small" style="margin-bottom: 6px">最近变动（{{ quotaSummary.recent_logs.length }} 条）</div>
+            <a-table
+              size="small"
+              :data-source="quotaSummary.recent_logs"
+              :pagination="false"
+              row-key="id"
+              :columns="quotaLogColumns"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'delta'">
+                  <span :style="{ color: record.delta > 0 ? '#389e0d' : '#cf1322', fontWeight: 600 }">
+                    {{ record.delta > 0 ? `+${record.delta}` : record.delta }}
+                  </span>
+                </template>
+                <template v-else-if="column.key === 'kind'">
+                  {{ QUOTA_KIND_LABEL[record.kind] ?? record.kind }}
+                </template>
+                <template v-else-if="column.key === 'created_at'">
+                  {{ dayjs(record.created_at).format('MM-DD HH:mm') }}
+                </template>
+              </template>
+            </a-table>
+          </div>
+        </template>
+        <a-skeleton v-else active />
+      </a-space>
+    </a-drawer>
   </PageWrapper>
 </template>
 
@@ -342,6 +409,7 @@ import {
   DownloadOutlined,
   PlusOutlined,
   TeamOutlined,
+  ThunderboltOutlined,
   UploadOutlined,
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
@@ -357,6 +425,7 @@ import {
 } from '../../api/user';
 import { parseUserWorkbook } from '../../utils/xlsx-import';
 import { useAuthStore } from '../../stores/auth';
+import { getQuota, grantQuota } from '../../api/contentpro';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -829,6 +898,55 @@ async function doResetPassword() {
   }
 }
 
+// ── 算力发放（仅超管） ────────────────────────────────────────
+const QUOTA_KIND_LABEL = { consume: '生成', refund: '退回', grant: '调整' };
+const quotaLogColumns = [
+  { title: '变动', key: 'delta', width: 70 },
+  { title: '类型', key: 'kind', width: 70 },
+  { title: '备注', dataIndex: 'remark', ellipsis: true },
+  { title: '时间', key: 'created_at', width: 100 },
+];
+const quotaOpen = ref(false);
+const quotaBrandId = ref(null);
+const quotaSummary = ref(null);
+const quotaAmount = ref(null);
+const quotaRemark = ref('');
+const quotaSaving = ref(false);
+
+const openQuotaDrawer = () => {
+  quotaOpen.value = true;
+  if (!quotaBrandId.value && brandOptions.value.length) {
+    quotaBrandId.value = auth.currentBrandId ?? brandOptions.value[0]?.value ?? null;
+  }
+  loadQuota();
+};
+
+const loadQuota = async () => {
+  if (!quotaBrandId.value) return;
+  quotaSummary.value = null;
+  quotaSummary.value = await getQuota({ brandId: quotaBrandId.value }).catch(() => null);
+};
+
+const submitQuotaGrant = async () => {
+  const amount = Number(quotaAmount.value);
+  if (!amount) {
+    message.warning('请输入非 0 的调整额度（发放正数 / 调减负数）');
+    return;
+  }
+  quotaSaving.value = true;
+  try {
+    await grantQuota({ amount, remark: quotaRemark.value || undefined }, { brandId: quotaBrandId.value });
+    message.success(`已${amount > 0 ? '发放' : '调减'} ${Math.abs(amount)} 算力`);
+    quotaAmount.value = null;
+    quotaRemark.value = '';
+    await loadQuota();
+  } catch (e) {
+    message.error(e.message || '操作失败');
+  } finally {
+    quotaSaving.value = false;
+  }
+};
+
 onMounted(load);
 </script>
 
@@ -880,5 +998,31 @@ onMounted(load);
 .brand-role-select {
   width: 140px;
   flex-shrink: 0;
+}
+
+.quota-stats {
+  display: flex;
+  gap: 10px;
+}
+
+.qs-item {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.qs-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.qs-label {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
 }
 </style>
