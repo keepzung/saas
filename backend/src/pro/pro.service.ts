@@ -167,12 +167,37 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
     }
     this.syncing.add(brandId);
     try {
-      const { windows } = await this.fetchProData(brandId, cfg.storageState);
       const statDate = this.yesterday();
-
       let staffUpserted = 0;
       let avatarsUpdated = 0;
       const syncedTypes: number[] = [];
+      // 日档补漏：凌晨同步时平台昨日（T-1）单日数据常未出（staff 0），20h 去重导致当天不再重试
+      // → 分区永久缺失。此处检查前天（T-2）分区，为空则顺带补拉（T-2 数据必然已出数）。
+      const t2 = this.daysAgo(2);
+      const t2CatchUp: { data: ProWindowData | null } = { data: null };
+      const { windows } = await this.withProPage(brandId, cfg.storageState, async (page) => {
+        const windows: Record<number, ProWindowData> = {};
+        for (const dateType of [1, 2, 3, DAY_DATE_TYPE]) {
+          const win = this.windowFor(dateType);
+          const fetched = await this.fetchWindow(page, dateType, win);
+          if (fetched) {
+            windows[dateType] = fetched;
+            this.logger.log(`brand ${brandId} 专业号拉取 dateType=${dateType}：staff ${fetched.staff.length}`);
+          }
+        }
+        const t2Count = await this.prisma.proKosStaff.count({
+          where: { brandId, dateType: DAY_DATE_TYPE, statDate: t2 },
+        });
+        if (t2Count === 0) {
+          const fetched = await this.fetchWindow(page, DAY_DATE_TYPE, { start: t2, end: t2 });
+          if (fetched && fetched.staff.length > 0) {
+            t2CatchUp.data = fetched;
+            this.logger.log(`brand ${brandId} 日档补漏 ${this.dayStr(t2)}：staff ${fetched.staff.length}`);
+          }
+        }
+        return { windows };
+      });
+
       for (const dateType of [1, 2, 3, DAY_DATE_TYPE]) {
         const fetched = windows[dateType];
         if (!fetched) continue;
@@ -181,6 +206,13 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
         const r = await this.upsertSnapshot(brandId, dateType, statDate, win, fetched);
         staffUpserted += r.staffUpserted;
         avatarsUpdated += r.avatarsUpdated;
+      }
+      // T-2 日档补漏入库
+      if (t2CatchUp.data) {
+        const win = { start: t2, end: t2 };
+        const r = await this.upsertSnapshot(brandId, DAY_DATE_TYPE, t2, win, t2CatchUp.data);
+        staffUpserted += r.staffUpserted;
+        syncedTypes.push(DAY_DATE_TYPE);
       }
 
       await this.prisma.proOrgConfig.update({
@@ -470,24 +502,6 @@ export class ProService implements OnModuleInit, OnModuleDestroy {
       if (staff.length >= total || rows.length === 0) break;
     }
     return { overview: overview?.data ?? null, staff };
-  }
-
-  private async fetchProData(
-    brandId: number,
-    storageStateJson: string,
-  ): Promise<{ windows: Record<number, ProWindowData> }> {
-    return this.withProPage(brandId, storageStateJson, async (page) => {
-      const windows: Record<number, ProWindowData> = {};
-      for (const dateType of [1, 2, 3, DAY_DATE_TYPE]) {
-        const win = this.windowFor(dateType);
-        const fetched = await this.fetchWindow(page, dateType, win);
-        if (fetched) {
-          windows[dateType] = fetched;
-          this.logger.log(`brand ${brandId} 专业号拉取 dateType=${dateType}：staff ${fetched.staff.length}`);
-        }
-      }
-      return { windows };
-    });
   }
 
   private resolveChromium(): string | null {
