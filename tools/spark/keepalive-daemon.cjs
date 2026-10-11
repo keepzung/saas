@@ -115,8 +115,51 @@ async function probePartner(cookie) {
   }
 }
 
+async function probeMccApi(cookie) {
+  // API 级探活为准：页面 GET 恒 200（客户端 JS 才跳登录）导致「假活」；
+  // board 最新分区接口登录态死亡时返回 902/401，业务码可精确判定
+  const once = async (method) => {
+    const res = await fetch('https://mcc.xiaohongshu.com/api/mcc/board/get_table_latest_calculate_date?tableName=rtb_account_day', {
+      method,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30000),
+      headers: { Cookie: cookie || '', 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9' },
+    });
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch {}
+    return { res, body };
+  };
+  try {
+    let { res, body } = await once('GET');
+    if (res.status === 405) ({ res, body } = await once('POST'));
+    const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    if (res.status === 401 || res.status === 403) {
+      return { alive: false, dead: true, setCookies, status: res.status, note: '登录已过期(http=401)' };
+    }
+    const code = body?.code;
+    if (code === 902 || /login|passport|登录已过期/i.test(String(body?.msg ?? ''))) {
+      return { alive: false, dead: true, setCookies, status: res.status, note: `登录已过期(code=${code})` };
+    }
+    if (code === 0 && body?.data?.date) {
+      return { alive: true, dead: false, setCookies, status: res.status, note: `mcc alive, calc=${body.data.date}` };
+    }
+    // 非明确死亡的异常响应：计失败但不触发重登
+    return { alive: false, dead: false, setCookies, status: res.status, note: `异常响应 code=${code} msg=${String(body?.msg ?? '').slice(0, 40)}` };
+  } catch (e) {
+    return { alive: false, dead: false, netError: true, setCookies: [], status: undefined, note: `api probe network: ${String(e).slice(0, 60)}` };
+  }
+}
+
 async function probeMcc(cookie) {
-  return probeUrl('https://mcc.xiaohongshu.com/micro/aurora-data', cookie);
+  const api = await probeMccApi(cookie);
+  if (!api.alive) return api;
+  // 活跃时顺带页面 GET 收 Set-Cookie 做会话续期（与原有续期逻辑兼容）
+  try {
+    const page = await probeUrl('https://mcc.xiaohongshu.com/micro/aurora-data', cookie);
+    if (page.setCookies?.length) api.setCookies = [...(api.setCookies ?? []), ...page.setCookies];
+  } catch {}
+  return api;
 }
 
 /** partner 无头账密重登（滑块出现则失败 → need_manual_login） */
