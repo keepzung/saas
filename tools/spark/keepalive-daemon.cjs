@@ -117,14 +117,14 @@ async function probePartner(cookie) {
 
 async function probeMccApi(cookie) {
   // API 级探活为准：页面 GET 恒 200（客户端 JS 才跳登录）导致「假活」；
-  // board 最新分区接口登录态死亡时返回 902/401，业务码可精确判定
+  // 与 SparkApiClient.ping 完全同参（表名/Referer），登录态死亡返回 902/401
   const once = async (method) => {
-    const res = await fetch('https://mcc.xiaohongshu.com/api/mcc/board/get_table_latest_calculate_date?tableName=rtb_account_day', {
+    const res = await fetch('https://mcc.xiaohongshu.com/api/mcc/board/get_table_latest_calculate_date?tableName=redapp.app_ads_crm_mcc_org_brand_note_df', {
       method,
       redirect: 'manual',
       signal: AbortSignal.timeout(30000),
       // Origin/Referer 必须携带：裸 API 请求会被 WAF 偶发拦成 401/902（假死）——与 SparkApiClient 请求头对齐
-      headers: { Cookie: cookie || '', 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9', Origin: 'https://mcc.xiaohongshu.com', Referer: 'https://mcc.xiaohongshu.com/micro/aurora-data' },
+      headers: { Cookie: cookie || '', 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9', Origin: 'https://mcc.xiaohongshu.com', Referer: 'https://mcc.xiaohongshu.com/micro/clues-data' },
     });
     const text = await res.text();
     let body = null;
