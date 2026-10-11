@@ -268,7 +268,7 @@
                 <InboxOutlined /> 添加到内容包
               </a-button>
               <a-button block @click="copyText"><CopyOutlined /> 复制文案</a-button>
-              <a-button block @click="downloadImages"><DownloadOutlined /> 下载图片</a-button>
+              <a-button block :loading="downloadingImg" @click="downloadImages"><DownloadOutlined /> 下载图片</a-button>
             </a-space>
 
             <div v-if="relayQr" class="qr-card">
@@ -350,6 +350,7 @@ import {
   getPackagesPro,
   createPackagePro,
   moveToPackage,
+  downloadImagesZip,
 } from '../../api/contentpro';
 import CoverEditor from './CoverEditor.vue';
 
@@ -718,14 +719,34 @@ const confirmAddToPackage = async () => {
   }
 };
 
-const downloadImages = () => {
-  images.value.forEach((img, i) => {
-    const a = document.createElement('a');
-    a.href = img.url;
-    a.download = `${titles.value[selectedTitle.value] ?? 'note'}-${i + 1}.jpg`;
-    a.target = '_blank';
-    a.click();
-  });
+const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+const downloadingImg = ref(false);
+
+const saveBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
+const downloadImages = async () => {
+  if (!images.value.length) return;
+  if (isWeChat) {
+    message.warning('微信内不支持下载：点右上角 ··· 选「在浏览器打开」后再下载图片');
+    return;
+  }
+  downloadingImg.value = true;
+  try {
+    const blob = await downloadImagesZip({ urls: images.value.map((x) => x.url) });
+    saveBlob(blob, 'note-images.zip');
+    message.success(`已打包 ${images.value.length} 张配图`);
+  } catch (e) {
+    message.error(e?.message ?? '打包下载失败');
+  } finally {
+    downloadingImg.value = false;
+  }
 };
 
 const goStep = (n) => {

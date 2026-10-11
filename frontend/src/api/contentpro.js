@@ -182,3 +182,10 @@ export const voidContentTask = (id, params) =>
 
 export const getMyMobileTasks = (params) =>
   request.get('/content-pro/mobile/my-tasks', { params });
+
+// 配图打包下载：服务端抓图打 zip，绕开浏览器跨域/多文件下载限制
+export const downloadImagesZip = (data) =>
+  request.post('/content-pro/images/download-zip', data, {
+    responseType: 'blob',
+    timeout: 120000,
+  });

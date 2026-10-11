@@ -96,7 +96,7 @@
           <SendOutlined /> 保存草稿，去小红书发布
         </a-button>
         <a-button block @click="copyText"><CopyOutlined /> 复制内容到小红书</a-button>
-        <a-button block :disabled="!selectedImages.length" @click="downloadImages"><DownloadOutlined /> 保存图片</a-button>
+        <a-button block :disabled="!selectedImages.length" :loading="downloadingImg" @click="downloadImages"><DownloadOutlined /> 保存图片</a-button>
       </a-space>
       <div v-if="published" class="pub-ok">
         已存入历史记录。打开小红书 App → 发布图文 → 粘贴文案 + 选择已保存图片即可。
@@ -120,6 +120,7 @@ import {
   getXhsHistoryDetail,
   getContentTaskDetail,
   aiHealth,
+  downloadImagesZip,
 } from '../../api/contentpro';
 
 const route = useRoute();
@@ -255,14 +256,34 @@ const copyText = async () => {
   message.success('已复制，去小红书粘贴发布');
 };
 
-const downloadImages = () => {
-  selectedImages.value.forEach((url, i) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `note-${i + 1}.jpg`;
-    a.target = '_blank';
-    a.click();
-  });
+const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+const downloadingImg = ref(false);
+
+const saveBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
+const downloadImages = async () => {
+  if (!selectedImages.value.length) return;
+  if (isWeChat) {
+    message.warning('微信内不支持下载：点右上角 ··· 选「在浏览器打开」后再保存图片');
+    return;
+  }
+  downloadingImg.value = true;
+  try {
+    const blob = await downloadImagesZip({ urls: selectedImages.value });
+    saveBlob(blob, 'note-images.zip');
+    message.success(`已打包 ${selectedImages.value.length} 张配图，解压后选择上传即可`);
+  } catch (e) {
+    message.error(e?.message ?? '打包下载失败');
+  } finally {
+    downloadingImg.value = false;
+  }
 };
 
 

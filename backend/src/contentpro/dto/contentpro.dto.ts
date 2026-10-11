@@ -144,3 +144,8 @@ export class ContentTaskDto {
   @IsOptional() @IsString() instructions?: string;
   @IsOptional() @IsString() reward?: string;
 }
+
+// ─── 配图打包下载 ────────────────────────────────────────────────────
+export class ImagesZipDto {
+  @IsArray() urls: string[];
+}

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { ZipArchive } from 'archiver';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
@@ -235,6 +236,39 @@ export class ContentproService {
   async deleteStrategy(id: number) {
     await this.prisma.writingStrategy.delete({ where: { id } });
     return { id };
+  }
+
+  // ─── 配图打包下载（zip） ───────────────────────────────────────────
+  /** 服务端抓取图片列表并打包为 zip，绕开浏览器跨域下载限制（最多 20 张） */
+  async downloadImagesZip(dto: { urls: string[] }): Promise<Buffer> {
+    const urls = (dto?.urls ?? [])
+      .filter((u) => /^https?:\/\//.test(u))
+      .slice(0, 20);
+    if (!urls.length) throw new BadRequestException('无可下载的图片');
+    const archive = new ZipArchive({ level: 9 });
+    const chunks: Buffer[] = [];
+    archive.on('data', (c: Buffer) => chunks.push(c));
+    const ended = new Promise<void>((resolve, reject) => {
+      archive.on('end', resolve);
+      archive.on('error', reject);
+    });
+    let added = 0;
+    for (let i = 0; i < urls.length; i += 1) {
+      try {
+        const res = await fetch(urls[i]);
+        if (!res.ok) continue;
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ext = (urls[i].match(/\.(png|jpe?g|webp)(?:$|\?)/i)?.[1] ?? 'jpg').toLowerCase();
+        archive.append(buf, { name: `image-${i + 1}.${ext === 'jpeg' ? 'jpg' : ext}` });
+        added += 1;
+      } catch {
+        /* 单张失败跳过 */
+      }
+    }
+    if (!added) throw new BadRequestException('图片全部下载失败，请稍后重试');
+    await archive.finalize();
+    await ended;
+    return Buffer.concat(chunks);
   }
 
   // ─── 生成历史 ──────────────────────────────────────────────────────

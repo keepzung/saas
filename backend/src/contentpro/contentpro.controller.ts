@@ -10,12 +10,13 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { extname } from 'path';
 import { mkdirSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -28,6 +29,7 @@ import {
   ChuangkitImportDto,
   DispatchDto,
   GenerateArticleDto,
+  ImagesZipDto,
   MaterialImageAssignDto,
   MaterialImageImportDto,
   MaterialSetDto,
@@ -251,6 +253,18 @@ export class ContentproController {
   @Delete('content-pro/history/xhs/:id')
   deleteHistory(@Param('id', ParseIntPipe) id: number) {
     return this.service.deleteHistory(id);
+  }
+
+  /** 配图打包下载：服务端抓图打 zip，绕开浏览器跨域/多文件下载限制 */
+  @Post('content-pro/images/download-zip')
+  async downloadImagesZip(@Body() dto: ImagesZipDto, @Res() res: Response) {
+    const buf = await this.service.downloadImagesZip(dto);
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': 'attachment; filename="note-images.zip"',
+      'Content-Length': String(buf.length),
+    });
+    res.send(buf);
   }
 
   // ─── 批量图文 ────────────────────────────────────────────────────
