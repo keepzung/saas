@@ -326,9 +326,9 @@ async function keepBrand(org) {
   }
   const latency = Date.now() - t0;
 
-  // 续期：Set-Cookie 合并回写
+  // 续期：Set-Cookie 合并回写（仅探活成功时——401/902 响应的 Set-Cookie 是 WAF/登出指令，回写会污染有效 cookie）
   let cookieUpdated = false;
-  if (r.setCookies?.length) {
+  if (r.alive && r.setCookies?.length) {
     const merged = mergeCookies(org.cookie, r.setCookies);
     if (merged && merged !== org.cookie) {
       await prisma.sparkOrgConfig.update({ where: { brandId }, data: { cookie: merged } }).catch(() => {});
