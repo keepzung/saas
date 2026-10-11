@@ -184,15 +184,15 @@
               :key="img.url"
               class="sel-cell"
               draggable="true"
-              @dragstart="dragIndex = i"
+              @dragstart="onDragStart($event, i)"
               @dragover.prevent
               @drop="onDrop(i)"
             >
               <span v-if="i === 0" class="cover-tag">封面</span>
-              <img :src="img.url" class="sel-img" />
+              <img :src="img.url" class="sel-img" draggable="false" />
               <div class="sel-ops">
-                <span @click="move(i, -1)"><ArrowLeftOutlined /></span>
-                <span @click="removeImage(i)"><DeleteOutlined /></span>
+                <span class="op-btn" title="前移一位" @mousedown.stop @click.stop="move(i, -1)"><ArrowLeftOutlined /></span>
+                <span class="op-btn" title="移除该图" @mousedown.stop @click.stop="removeImage(i)"><DeleteOutlined /></span>
               </div>
             </div>
             <div
@@ -245,7 +245,7 @@
       <template v-else-if="step === 5">
         <div class="publish-layout">
           <div class="phone-card">
-            <img v-if="images[0]" :src="images[0]" class="pc-cover" />
+            <img v-if="images[0]" :src="images[0].url" class="pc-cover" />
             <div class="pc-title">{{ titles[selectedTitle] }}</div>
             <div class="pc-body">{{ content }}</div>
             <div class="pc-tags">
@@ -272,7 +272,7 @@
             </a-space>
 
             <div v-if="relayQr" class="qr-card">
-              <div class="qr-title">扫描二维码 一键发布到小红书</div>
+              <div class="qr-title">扫码把这篇草稿带到手机上发布</div>
               <img :src="relayQr" class="qr-img" />
               <div class="qr-hint need">需手机已安装小红书，且已登录</div>
               <div class="qr-hint"> 苹果手机 - 使用微信扫码 · 安卓手机 - 使用相机扫码</div>
@@ -579,6 +579,15 @@ const move = (i, d) => {
   const arr = [...images.value];
   [arr[i], arr[j]] = [arr[j], arr[i]];
   images.value = arr;
+};
+
+const onDragStart = (e, i) => {
+  if (e?.target?.closest?.('.sel-ops')) {
+    e.preventDefault();
+    dragIndex.value = -1;
+    return;
+  }
+  dragIndex.value = i;
 };
 
 const onDrop = (i) => {
@@ -1193,6 +1202,17 @@ onMounted(async () => {
   background: rgba(15, 23, 42, 0.55);
   color: #fff;
   font-size: 14px;
+}
+
+.sel-ops .op-btn {
+  cursor: pointer;
+  padding: 4px 16px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
+.sel-ops .op-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .material-panel {

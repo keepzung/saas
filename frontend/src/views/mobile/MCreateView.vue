@@ -93,7 +93,7 @@
       </div>
       <a-space direction="vertical" style="width: 100%; margin-top: 12px" :size="10">
         <a-button type="primary" block size="large" :loading="publishing" @click="publish">
-          <SendOutlined /> 保存并发布小红书
+          <SendOutlined /> 保存草稿，去小红书发布
         </a-button>
         <a-button block @click="copyText"><CopyOutlined /> 复制内容到小红书</a-button>
         <a-button block :disabled="!selectedImages.length" @click="downloadImages"><DownloadOutlined /> 保存图片</a-button>
