@@ -344,7 +344,11 @@ async function keepBrand(org) {
   if (!r.alive && !r.netError) {
     st.consecutiveFails = (st.consecutiveFails || 0) + 1;
     const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
-    const canTry = st.consecutiveFails >= 2 && (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs);
+    const canTry =
+      st.consecutiveFails >= 2 &&
+      (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs) &&
+      // mcc 无头重登历史全部被风控拦（超时/滑块），不浪费时间与风控暴露——恢复走人工有头登录 push-cookie-prod
+      org.channel !== 'mcc';
     if (canTry) {
       st.lastReloginAt = Date.now();
       console.log(`[${nowIso()}] brand${brandId} 失效，尝试自动重登 (${org.channel}) ...`);
