@@ -274,8 +274,8 @@
             <div v-if="relayQr" class="qr-card">
               <div class="qr-title">扫码把这篇草稿带到手机上发布</div>
               <img :src="relayQr" class="qr-img" />
-              <div class="qr-hint need">需手机已安装小红书，且已登录</div>
-              <div class="qr-hint"> 苹果手机 - 使用微信扫码 · 安卓手机 - 使用相机扫码</div>
+              <div class="qr-hint scan">安卓：相机扫一扫 ｜ iPhone：微信扫一扫</div>
+              <div class="qr-hint">扫码打开手机版页面，复制文案、保存图片，最后到小红书 App 粘贴发布</div>
               <div class="qr-link">
                 <a :href="relayUrl" target="_blank">{{ relayUrl }}</a>
                 <a-button size="small" @click="copy(relayUrl)">复制链接</a-button>
@@ -1393,11 +1393,10 @@ onMounted(async () => {
   text-align: center;
 }
 
-.qr-hint.need {
-  background: #fff1f0;
-  color: #cf1322;
-  border-radius: 6px;
-  padding: 3px 10px;
+.qr-hint.scan {
+  color: #3456e6;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .qr-link {
