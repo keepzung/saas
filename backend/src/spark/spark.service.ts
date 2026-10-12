@@ -2146,8 +2146,6 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       agg.set(r.noteId, cur);
     }
 
-    const r2v = (v: number) => Math.round(v * 100) / 100;
-    const keyword = (query.keyword ?? '').trim().toLowerCase();
     let list = [...agg.entries()].map(([noteId, a]) => {
       const m = metaByNoteId.get(noteId);
       return {
