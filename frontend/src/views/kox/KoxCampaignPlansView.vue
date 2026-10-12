@@ -320,34 +320,13 @@ const accountRows = ref([]);
 const accountTotal = ref(0);
 const exporting = ref(false);
 
-// 特斯拉：近30天（本月）总消耗用平台月口径快照（真实完整），其余场景用日存档合计
-const isCurrentMonthWindow = computed(() => {
-  if (range.value?.[0] && range.value?.[1]) {
-    return range.value[0].isSame(dayjs().startOf('month'), 'day') && range.value[1].isSame(dayjs(), 'day');
-  }
-  return days.value === 30 && dayjs().date() <= 31;
-});
-const heroFee = computed(() => {
-  if (isTesla.value && platform.value?.month_fee > 0 && isCurrentMonthWindow.value) {
-    return platform.value.month_fee;
-  }
-  return summary.value.fee ?? 0;
-});
-const heroFeeScopeNote = computed(() => {
-  if (isTesla.value && platform.value?.month_fee > 0 && isCurrentMonthWindow.value) {
-    return '平台本月消耗口径快照（本周/本月至今，合作伙伴平台盯盘助手，剔官号子账户），完整覆盖本月；日明细仅自 09-25 起存档';
-  }
-  return '';
-});
+// 客户 2026-10 确认：以聚光「标准投笔记报表」为唯一消耗口径，不再使用平台盯盘月快照
+const heroFee = computed(() => summary.value.fee ?? 0);
+const heroFeeScopeNote = computed(() => '');
 const heroLeadCost = computed(() => {
   if (!summary.value.msg_leads) return '—';
-  // 平台月口径消耗与日存档留资口径不一致时不混算成本
-  if (heroFee.value !== (summary.value.fee ?? 0)) return '—';
   return fmtNum(summary.value.msg_lead_cost);
 });
-const snapshotAtText = computed(() =>
-  platform.value?.snapshot_at ? dayjs(platform.value.snapshot_at).format('MM-DD HH:mm') : '-',
-);
 
 const consumeEl = ref(null);
 const leadsEl = ref(null);
