@@ -2131,13 +2131,13 @@ export class KoxService {
     // 汇总卡私信三数 = 筛选结果中去重作者的 G 值加总（随筛选缩小；无筛选 = 全部基线账号）
     if (g) {
       const authorKeys = new Set(
-        rows.map((n) => (n.accountId != null ? `a${n.accountId}` : `n:${n.authorName ?? ''}`)),
+        rows.map((n) => (n.accountId != null ? `a:${n.accountId}` : `n:${n.authorName ?? ''}`)),
       );
       let enter = 0;
       let open = 0;
       let leads = 0;
       for (const key of authorKeys) {
-        const v = key.startsWith('a:') ? g.byAcc.get(Number(key.slice(1))) : g.byNick.get(key.slice(2));
+        const v = key.startsWith('a:') ? g.byAcc.get(Number(key.slice(2))) : g.byNick.get(key.slice(2));
         if (v) {
           enter += v.enter;
           open += v.open;
