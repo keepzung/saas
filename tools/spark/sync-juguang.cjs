@@ -318,10 +318,15 @@ function monthSegments(start, end) {
   let consecutiveJumpFails = 0;
 
   let hasNextPage = true;
+  // 跨页按 id 去重（客户 2026-10 反馈消耗翻倍根因）：列表翻页间排序不稳定，
+  // 同一子账户可能在相邻页重复出现，不去重会整份笔记报表重复拉取、同笔记同日 fee 累加翻倍
+  const seenAccIds = new Set();
   for (let pg = 0; pg < 6 && hasNextPage; pg++) {
   const pageAccounts = await enumeratePage();
   accountTotal += pageAccounts.length;
   for (const acc of pageAccounts) {
+    if (seenAccIds.has(acc.id)) { console.log(`[${acc.name}] 跨页重复行跳过（id 已同步）`); continue; }
+    seenAccIds.add(acc.id);
     if (acc.status === 'frozen') { console.log(`[${acc.name}] 冻结跳过`); continue; }
     if (process.env.JG_TARGET && !acc.name.includes(process.env.JG_TARGET)) { console.log(`[${acc.name}] JG_TARGET 跳过`); continue; }
     if (consecutiveJumpFails >= 2) {
