@@ -115,7 +115,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../stores/auth';
-import { brandTheme, BRAND_HIDDEN_MENUS } from '../config/brands';
+import { brandTheme, BRAND_HIDDEN_MENUS, BRAND_WORKSPACE_TABS } from '../config/brands';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -144,14 +144,32 @@ const layoutVars = computed(() => ({
 }));
 const categories = computed(() => {
   const hidden = BRAND_HIDDEN_MENUS[auth.currentBrandId] ?? [];
-  if (!hidden.length) return auth.moduleTree;
-  return auth.moduleTree
-    .filter((cat) => !hidden.includes(cat.name))
-    .map((cat) => ({
-      ...cat,
-      children: (cat.children ?? []).filter((g) => !hidden.includes(g.name)),
-    }))
-    .filter((cat) => (cat.children ?? []).length > 0);
+  let list = !hidden.length
+    ? auth.moduleTree
+    : auth.moduleTree
+        .filter((cat) => !hidden.includes(cat.name))
+        .map((cat) => ({
+          ...cat,
+          children: (cat.children ?? []).filter((g) => !hidden.includes(g.name)),
+        }))
+        .filter((cat) => (cat.children ?? []).length > 0);
+  // 配置了顶部工作区 Tab 的品牌（东风/格力）：KOX 分类下可见页面若全部属于其他 Tab
+  // （如员工只有 内容创作任务，无任何 KOX 页面），卡片标题改用该 Tab 名，避免出现"KOX"字样
+  const tabs = BRAND_WORKSPACE_TABS[auth.currentBrandId];
+  if (tabs?.length) {
+    list = list.map((cat) => {
+      if (!cat.name.includes('KOX')) return cat;
+      const leaves = [];
+      for (const g of cat.children ?? []) {
+        if (g.path) leaves.push(g.path);
+        for (const f of g.children ?? []) if (f.path) leaves.push(f.path);
+      }
+      if (!leaves.length) return cat;
+      const hit = tabs.find((t) => t.key !== 'kox' && leaves.every((p) => p.startsWith(t.prefix)));
+      return hit ? { ...cat, name: hit.name } : cat;
+    });
+  }
+  return list;
 });
 const isAdmin = computed(() => auth.user?.admin_flag === 1);
 const adminPath = '/users/manage';

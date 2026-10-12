@@ -71,9 +71,9 @@
       </a-layout-header>
 
       <!-- 顶部工作区 Tab（东风奕境/格力：智能内容工厂Pro | KOX运营管理中心 | 内容创作任务） -->
-      <div v-if="workspaceTabs" class="workspace-tabbar" :class="{ 'is-mobile': isMobile }">
+      <div v-if="visibleWorkspaceTabs" class="workspace-tabbar" :class="{ 'is-mobile': isMobile }">
         <button
-          v-for="t in workspaceTabs"
+          v-for="t in visibleWorkspaceTabs"
           :key="t.key"
           type="button"
           class="workspace-tab"
@@ -280,6 +280,22 @@ const theme = computed(() => brandTheme(auth.currentBrandId));
 
 // 顶部工作区 Tab（仅东风奕境/格力），按路由前缀推导激活态
 const workspaceTabs = computed(() => BRAND_WORKSPACE_TABS[auth.currentBrandId] ?? null);
+// 按权限过滤 Tab：前缀下没有任何可见页面的 Tab 直接隐藏（如员工无 KOX 页面则不显示 KOX 运营管理中心）
+const visibleWorkspaceTabs = computed(() => {
+  const tabs = workspaceTabs.value;
+  if (!tabs) return null;
+  const paths = [];
+  for (const cat of auth.moduleTree) {
+    for (const g of cat.children ?? []) {
+      if (g.path) paths.push(g.path);
+      for (const f of g.children ?? []) if (f.path) paths.push(f.path);
+    }
+  }
+  // moduleTree 为空 = 全量权限用户（超管），不做隐藏
+  if (!paths.length) return tabs;
+  const filtered = tabs.filter((t) => paths.some((p) => p.startsWith(t.prefix)));
+  return filtered.length ? filtered : tabs;
+});
 
 // 内容工厂算力徽章（quota-refresh 事件由生成页面触发刷新）
 const factoryQuota = ref(null);

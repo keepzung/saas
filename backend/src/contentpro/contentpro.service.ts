@@ -19,6 +19,33 @@ export class ContentproService {
     private quota: QuotaService,
   ) {}
 
+  /** 上传根目录（与 contentpro.controller.ts 保持一致；zip 打包本地 /uploads/ 文件用） */
+  private uploadRoot(): string {
+    return process.env.UPLOAD_ROOT
+      ? process.env.UPLOAD_ROOT
+      : require('path').resolve(__dirname, '..', '..', 'uploads');
+  }
+
+  /** 解析图片来源：外链走 fetch，本站 /uploads/ 直接读磁盘（含路径越界防护） */
+  private async fetchImageBuffer(url: string): Promise<Buffer | null> {
+    if (url.startsWith('/uploads/')) {
+      const fs = await import('fs');
+      const path = await import('path');
+      const target = path.resolve(this.uploadRoot(), url);
+      const root = path.resolve(this.uploadRoot());
+      if (!target.startsWith(root)) return null;
+      try {
+        return fs.readFileSync(target);
+      } catch {
+        return null;
+      }
+    }
+    if (!/^https?:\/\//.test(url)) return null;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  }
+
   // ─── 素材库 ────────────────────────────────────────────────────────
   async tags(brandId: number) {
     const [list, counts] = await Promise.all([
@@ -136,14 +163,18 @@ export class ContentproService {
   async importImages(brandId: number, dto: { urls: string[]; setId?: number | null; typeId?: number | null; productNodeId?: number | null }) {
     let added = 0;
     for (const url of dto.urls) {
-      if (!/^https?:\/\//.test(url)) continue;
-      const exists = await this.prisma.materialImage.findFirst({ where: { brandId, url } });
+      // 接受外链 http(s) 与本站上传的 /uploads/ 相对路径（上传接口返回相对路径，此前被静默跳过导致"上传成功但不入库"）
+      const normalized = String(url ?? '').trim();
+      const isExternal = /^https?:\/\//.test(normalized);
+      const isLocalUpload = normalized.startsWith('/uploads/');
+      if (!isExternal && !isLocalUpload) continue;
+      const exists = await this.prisma.materialImage.findFirst({ where: { brandId, url: normalized } });
       if (exists) continue;
       await this.prisma.materialImage.create({
         data: {
           brandId,
-          url,
-          name: decodeURIComponent(url.split('/').pop() ?? '素材图').slice(0, 80),
+          url: normalized,
+          name: decodeURIComponent(normalized.split('/').pop() ?? '素材图').slice(0, 80),
           setId: dto.setId ?? null,
           typeId: dto.typeId ?? null,
           productNodeId: dto.productNodeId ?? null,
@@ -239,10 +270,11 @@ export class ContentproService {
   }
 
   // ─── 配图打包下载（zip） ───────────────────────────────────────────
-  /** 服务端抓取图片列表并打包为 zip，绕开浏览器跨域下载限制（最多 20 张） */
+  /** 服务端抓取图片列表并打包为 zip，绕开浏览器跨域下载限制（最多 20 张；支持外链与本站 /uploads/ 文件） */
   async downloadImagesZip(dto: { urls: string[] }): Promise<Buffer> {
     const urls = (dto?.urls ?? [])
-      .filter((u) => /^https?:\/\//.test(u))
+      .map((u) => String(u ?? '').trim())
+      .filter((u) => /^https?:\/\//.test(u) || u.startsWith('/uploads/'))
       .slice(0, 20);
     if (!urls.length) throw new BadRequestException('无可下载的图片');
     const archive = new ZipArchive({ level: 9 });
@@ -255,9 +287,8 @@ export class ContentproService {
     let added = 0;
     for (let i = 0; i < urls.length; i += 1) {
       try {
-        const res = await fetch(urls[i]);
-        if (!res.ok) continue;
-        const buf = Buffer.from(await res.arrayBuffer());
+        const buf = await this.fetchImageBuffer(urls[i]);
+        if (!buf?.length) continue;
         const ext = (urls[i].match(/\.(png|jpe?g|webp)(?:$|\?)/i)?.[1] ?? 'jpg').toLowerCase();
         archive.append(buf, { name: `image-${i + 1}.${ext === 'jpeg' ? 'jpg' : ext}` });
         added += 1;
