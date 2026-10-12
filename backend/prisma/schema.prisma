@@ -82,6 +82,7 @@ model User {
   koxTasksCreated KoxTask[]     @relation("KoxTaskCreator")
   campaignProjects KoxCampaignProject[] @relation("CampaignProjectCreator")
   contentTasksCreated ContentTask[] @relation("ContentTaskCreator")
+  contentTaskTargets ContentTaskTarget[] @relation("ContentTaskTargetUser")
   createdById     Int?
   createdBy       User?         @relation("UserCreator", fields: [createdById], references: [id])
   createdUsers    User[]        @relation("UserCreator")
@@ -1176,11 +1177,15 @@ model ContentTaskTarget {
   id        Int         @id @default(autoincrement())
   taskId    Int
   task      ContentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  accountId Int
-  account   KosAccount  @relation("ContentTaskTargetAccount", fields: [accountId], references: [id], onDelete: Cascade)
+  accountId Int?
+  account   KosAccount? @relation("ContentTaskTargetAccount", fields: [accountId], references: [id], onDelete: Cascade)
+  userId    Int?
+  user      User?       @relation("ContentTaskTargetUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, accountId])
+  @@unique([taskId, userId])
   @@index([accountId])
+  @@index([userId])
 }
 
 // ─── 专业号平台通道（pro.xiaohongshu.com，特斯拉 KOS 矩阵数据）─────────

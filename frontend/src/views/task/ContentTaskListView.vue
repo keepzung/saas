@@ -44,9 +44,12 @@
               <div class="tp-sub">{{ t.account_finished }}/{{ t.account_total }} 账号有产出 · 笔记 {{ t.note_total }} 篇</div>
             </div>
             <div class="tcard-ops">
-              <a-button size="small" type="primary" @click="goDetail(t)">查看详情</a-button>
-              <a-button v-if="t.effective_status !== 'voided'" size="small" danger @click="voidTask(t)">任务作废</a-button>
-              <a-button size="small" @click="exportTask(t)">导出数据</a-button>
+              <template v-if="!isEmployee">
+                <a-button size="small" type="primary" @click="goDetail(t)">查看详情</a-button>
+                <a-button v-if="t.effective_status !== 'voided'" size="small" danger @click="voidTask(t)">任务作废</a-button>
+                <a-button size="small" @click="exportTask(t)">导出数据</a-button>
+              </template>
+              <span v-else class="muted-hint">请在手机端领取任务并创作</span>
             </div>
           </div>
         </div>
@@ -62,7 +65,8 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'name'">
-              <a @click="goDetail(record)">{{ record.name }}</a>
+              <a v-if="!isEmployee" @click="goDetail(record)">{{ record.name }}</a>
+              <span v-else>{{ record.name }}</span>
             </template>
             <template v-else-if="column.key === 'status'">
               <span class="tcard-status" :class="record.effective_status">{{ statusLabel(record.effective_status) }}</span>
@@ -75,7 +79,16 @@
         <div v-if="viewMode === 'card' && list.length" class="tl-footer">
           <a-pagination v-model:current="page" :total="total" :page-size="pageSize" @change="load" />
         </div>
-        <a-empty v-if="!list.length && !loading" description="暂无任务，点击「派发新任务」创建" />
+        <a-empty
+          v-if="!list.length && !loading"
+          :description="
+            isEmployee
+              ? scopedInfo.unbound
+                ? '暂无指派给你的任务；如列表持续为空，请联系管理员确认任务指派或矩阵号绑定'
+                : '暂无指派给你的任务'
+              : '暂无任务，点击「派发新任务」创建'
+          "
+        />
       </a-spin>
     </div>
   </PageWrapper>
@@ -107,6 +120,10 @@ const dateRange = ref(null);
 const hideVoided = ref(true);
 const viewMode = ref('card');
 
+// 员工（SALES）只读视角：仅看指派给自己的任务，不出现管理操作
+const isEmployee = computed(() => auth.user?.role === 'SALES');
+const scopedInfo = ref({ scoped: false, unbound: false });
+
 const columns = [
   { title: '任务名称', key: 'name', dataIndex: 'name' },
   { title: '团队', key: 'team', dataIndex: 'team' },
@@ -120,8 +137,10 @@ const columns = [
 
 const statusLabel = (s) => ({ active: '进行中', expired: '已截止', voided: '已作废' }[s] ?? s);
 const platformLabel = (p) => ({ xhs: '小红书', douyin: '抖音' }[p] ?? p ?? '小红书');
-const teamLabel = (t) =>
-  t.scope_type === 'regions' && t.regions?.length ? t.regions.join('、') : '全部大区';
+const teamLabel = (t) => {
+  if (t.scope_type === 'users') return '指定员工';
+  return t.scope_type === 'regions' && t.regions?.length ? t.regions.join('、') : '全部大区';
+};
 const typeLabel = (types) => {
   if (!types?.length) return '不限';
   const map = { KOS: '仅KOS', KOB: '仅KOB',素人: '仅素人' };
@@ -152,6 +171,7 @@ const load = async () => {
     }
     list.value = rows;
     total.value = res?.total ?? 0;
+    scopedInfo.value = { scoped: !!res?.scoped, unbound: !!res?.unbound };
   } finally {
     loading.value = false;
   }
@@ -332,5 +352,11 @@ onMounted(load);
   margin-top: 12px;
   display: flex;
   gap: 8px;
+}
+
+.muted-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  align-self: center;
 }
 </style>

@@ -180,6 +180,10 @@ export const getContentTaskDetail = (id, params) =>
 export const voidContentTask = (id, params) =>
   request.post(`/content-tasks/${id}/void`, {}, { params });
 
+// 任务候选人：工作区内成员（发任务"指定员工"用）
+export const getTaskCandidates = (params) =>
+  request.get('/content-pro/task-candidates', { params });
+
 export const getMyMobileTasks = (params) =>
   request.get('/content-pro/mobile/my-tasks', { params });
 

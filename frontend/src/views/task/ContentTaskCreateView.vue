@@ -20,9 +20,10 @@
         </div>
         <div class="form-row">
           <span class="form-label"><i>*</i> 参与任务的团队：</span>
-          <a-radio-group v-model:value="form.scopeType">
+          <a-radio-group v-model:value="form.scopeType" @change="onScopeChange">
             <a-radio value="all">全部大区</a-radio>
             <a-radio value="regions">指定大区</a-radio>
+            <a-radio value="users">指定员工</a-radio>
           </a-radio-group>
           <a-select
             v-if="form.scopeType === 'regions'"
@@ -32,8 +33,19 @@
             placeholder="选择大区"
             :options="regionOptions"
           />
+          <a-select
+            v-if="form.scopeType === 'users'"
+            v-model:value="form.userIds"
+            mode="multiple"
+            show-search
+            allow-clear
+            style="width: 420px"
+            placeholder="按姓名 / 手机号搜索并选择员工"
+            :options="candidateOptions"
+            :filter-option="filterCandidate"
+          />
         </div>
-        <div class="form-row">
+        <div class="form-row" v-if="form.scopeType !== 'users'">
           <span class="form-label"><i>*</i> 账号类型：</span>
           <a-radio-group v-model:value="form.accountType">
             <a-radio value="">不限</a-radio>
@@ -48,8 +60,9 @@
           <span class="form-hint">所勾选的平台的社媒账号参与与考核</span>
         </div>
         <div class="form-row">
-          <span class="form-label">预估参与账号：</span>
-          <span class="estimate">{{ previewCount }} 个账号将参与该任务</span>
+          <span class="form-label">预估参与：</span>
+          <span v-if="form.scopeType === 'users'" class="estimate">{{ form.userIds.length }} 名员工将参与该任务</span>
+          <span v-else class="estimate">{{ previewCount }} 个账号将参与该任务</span>
         </div>
       </div>
 
@@ -114,7 +127,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { createContentTask } from '../../api/contentpro';
+import { createContentTask, getTaskCandidates } from '../../api/contentpro';
 import { getKoxAccounts } from '../../api/kox';
 import { uploadMaterialImage } from '../../api/contentpro';
 
@@ -127,6 +140,7 @@ const form = ref({
   range: [],
   scopeType: 'all',
   regions: [],
+  userIds: [],
   accountType: '',
   platforms: ['xhs'],
   exampleImages: [],
@@ -137,7 +151,20 @@ const form = ref({
 
 const regionOptions = ref([]);
 const accounts = ref([]);
+const candidates = ref([]);
 const submitting = ref(false);
+
+const candidateOptions = computed(() =>
+  candidates.value.map((c) => ({ label: `${c.name}（${c.phone}）`, value: c.id })),
+);
+const filterCandidate = (input, option) => {
+  const c = candidates.value.find((x) => x.id === option.value);
+  if (!c) return false;
+  return c.name.includes(input.trim()) || c.phone.includes(input.trim());
+};
+const onScopeChange = () => {
+  if (form.value.scopeType !== 'users') form.value.userIds = [];
+};
 
 const previewCount = computed(() => {
   let rows = accounts.value;
@@ -153,6 +180,15 @@ const loadAccounts = async () => {
   accounts.value = res?.list ?? [];
   const facets = res?.region_facets ?? [];
   regionOptions.value = facets.map((r) => ({ label: r, value: r }));
+};
+
+const loadCandidates = async () => {
+  try {
+    const res = await getTaskCandidates({ brandId: brandId.value });
+    candidates.value = res?.list ?? [];
+  } catch {
+    candidates.value = [];
+  }
 };
 
 const uploadExample = async (file) => {
@@ -187,6 +223,10 @@ const submit = async () => {
     message.warning('请至少选择一个大区');
     return;
   }
+  if (form.value.scopeType === 'users' && !form.value.userIds.length) {
+    message.warning('请至少选择一名员工');
+    return;
+  }
   submitting.value = true;
   try {
     const res = await createContentTask(
@@ -197,7 +237,8 @@ const submit = async () => {
         platform: form.value.platforms[0] ?? 'xhs',
         scopeType: form.value.scopeType,
         regions: form.value.scopeType === 'regions' ? form.value.regions : [],
-        accountTypes: form.value.accountType ? [form.value.accountType] : [],
+        accountTypes: form.value.scopeType === 'users' ? [] : form.value.accountType ? [form.value.accountType] : [],
+        userIds: form.value.scopeType === 'users' ? form.value.userIds : undefined,
         exampleImages: form.value.exampleImages,
         exampleLink: form.value.exampleLink || undefined,
         instructions: form.value.instructions || undefined,
@@ -205,7 +246,8 @@ const submit = async () => {
       },
       { brandId: brandId.value },
     );
-    message.success(`任务已创建，${res?.account_total ?? 0} 个账号参与`);
+    const total = (res?.user_total ?? 0) + (res?.account_total ?? 0);
+    message.success(`任务已创建，${total} 个对象参与`);
     router.push('/kox_task/content-task/task-list');
   } catch (e) {
     message.error(e?.response?.data?.msg ?? '创建失败');
@@ -214,7 +256,10 @@ const submit = async () => {
   }
 };
 
-onMounted(loadAccounts);
+onMounted(() => {
+  loadAccounts();
+  loadCandidates();
+});
 </script>
 
 <style scoped>

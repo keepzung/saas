@@ -430,13 +430,20 @@ export class ContentproController {
     @Query('page') page?: string,
     @Query('page_size') page_size?: string,
   ) {
-    const user = req.user as { id: number };
-    return this.service.mobileMyTasks(Number(brandId ?? 1), user.id, { page, page_size });
+    const user = req.user as { id: number; role: string };
+    return this.service.mobileMyTasks(Number(brandId ?? 1), user.id, { page, page_size }, user.role);
   }
 
   // ─── 内容创作任务（任务分发）────────────────────────────────────
+  /** 任务候选人：工作区内成员（姓名/手机号搜索，发任务"指定员工"用） */
+  @Get('content-pro/task-candidates')
+  taskCandidates(@Query('brandId') brandId?: string) {
+    return this.service.taskCandidates(Number(brandId ?? 1));
+  }
+
   @Get('content-tasks')
   contentTasks(
+    @Req() req: Request,
     @Query()
     query: {
       brandId?: string;
@@ -447,7 +454,8 @@ export class ContentproController {
       page_size?: string;
     },
   ) {
-    return this.service.contentTasks({ ...query, brandId: Number(query.brandId ?? 1) });
+    const user = req.user as { id: number; role: string };
+    return this.service.contentTasks({ ...query, brandId: Number(query.brandId ?? 1) }, user);
   }
 
   @Post('content-tasks')
@@ -456,8 +464,8 @@ export class ContentproController {
     @Req() req: Request,
     @Query('brandId') brandId?: string,
   ) {
-    const user = req.user as { id: number };
-    return this.service.createContentTask(Number(brandId ?? 1), dto, user.id);
+    const user = req.user as { id: number; role: string };
+    return this.service.createContentTask(Number(brandId ?? 1), dto, user.id, user.role);
   }
 
   @Get('content-tasks/:id')
@@ -466,7 +474,12 @@ export class ContentproController {
   }
 
   @Post('content-tasks/:id/void')
-  voidContentTask(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
-    return this.service.voidContentTask(Number(brandId ?? 1), id);
+  voidContentTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+  ) {
+    const user = req.user as { id: number; role: string };
+    return this.service.voidContentTask(Number(brandId ?? 1), id, user.role);
   }
 }

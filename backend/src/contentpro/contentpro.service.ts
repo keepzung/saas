@@ -1172,6 +1172,18 @@ export class ContentproService {
     return 'active';
   }
 
+  /** 任务候选人：工作区内全部成员（前端按姓名/手机号搜索） */
+  async taskCandidates(brandId: number) {
+    const members = await this.prisma.brandMember.findMany({ where: { brandId }, select: { userId: true } });
+    const ids = [...new Set(members.map((m) => m.userId))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, nickname: true, phone: true },
+      orderBy: { id: 'asc' },
+    });
+    return { list: users.map((u) => ({ id: u.id, name: u.nickname || u.phone, phone: u.phone })) };
+  }
+
   async contentTasks(query: {
     brandId: number;
     keyword?: string;
@@ -1179,13 +1191,30 @@ export class ContentproService {
     hideVoided?: string;
     page?: string;
     page_size?: string;
-  }) {
+  }, user?: { id: number; role: string }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(50, Number(query.page_size ?? 20) || 20);
     const where: Prisma.ContentTaskWhereInput = { brandId: query.brandId };
     if (query.keyword) where.name = { contains: query.keyword };
     if (query.hideVoided !== '0') where.status = { not: 'voided' };
     if (query.status === 'voided') where.status = 'voided';
+
+    // 员工（SALES）只看到派给自己的任务：指派给我的(userId) ∪ 指派给我绑定矩阵号的(accountId)
+    let scoped = false;
+    let unbound = false;
+    if (user?.role === 'SALES') {
+      scoped = true;
+      const kos = await this.prisma.kosAccount.findFirst({
+        where: { brandId: query.brandId, userId: user.id },
+        select: { id: true },
+      });
+      const myTargets = await this.prisma.contentTaskTarget.findMany({
+        where: { OR: [...(kos ? [{ accountId: kos.id }] : []), { userId: user.id }] },
+        select: { taskId: true },
+      });
+      unbound = !kos;
+      where.id = { in: [...new Set(myTargets.map((t) => t.taskId))] };
+    }
 
     const [total, rows] = await Promise.all([
       this.prisma.contentTask.count({ where }),
@@ -1220,24 +1249,34 @@ export class ContentproService {
         };
       }),
     );
-    return { list, total, page, page_size: pageSize };
+    return { list, total, page, page_size: pageSize, scoped, unbound };
   }
 
   /**
-   * H5「我的任务」：KOS 员工视角，按绑定矩阵账号（KosAccount.userId）过滤。
-   * 未绑定账号（管理员/未绑定员工）返回 scoped=false，前端回退全量列表。
+   * H5「我的任务」：员工视角，派给我的 = 指定员工的(userId) ∪ 指派给我绑定矩阵号的(accountId)。
+   * 未绑定矩阵号且无直接指派的员工不再回退全量：返回 unbound=true，前端显示绑定引导。
+   * 管理员（未绑定）保持 scoped=false，前端回退全量列表便于管理者预览。
    */
-  async mobileMyTasks(brandId: number, userId: number, query: { page?: string; page_size?: string }) {
+  async mobileMyTasks(brandId: number, userId: number, query: { page?: string; page_size?: string }, role?: string) {
     const kos = await this.prisma.kosAccount.findFirst({
       where: { brandId, userId },
       select: { id: true, nickname: true, storeName: true, accountTag: true },
     });
-    if (!kos) return { scoped: false, my_account: null, list: [], total: 0, page: 1, page_size: 0 };
+    const myUserTargets = await this.prisma.contentTaskTarget.findMany({
+      where: { userId },
+      select: { taskId: true },
+    });
+    if (!kos && !myUserTargets.length) {
+      if (role === 'SALES') {
+        return { scoped: true, unbound: true, my_account: null, list: [], total: 0, page: 1, page_size: 0 };
+      }
+      return { scoped: false, my_account: null, list: [], total: 0, page: 1, page_size: 0 };
+    }
 
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(50, Number(query.page_size ?? 20) || 20);
     const targets = await this.prisma.contentTaskTarget.findMany({
-      where: { accountId: kos.id },
+      where: { OR: [...(kos ? [{ accountId: kos.id }] : []), { userId }] },
       select: { taskId: true },
     });
     const taskIds = [...new Set(targets.map((t) => t.taskId))];
@@ -1258,9 +1297,18 @@ export class ContentproService {
     const list = await Promise.all(
       rows.map(async (t) => {
         const progress = await this.taskProgress(t.id, t.startTime, t.endTime);
-        const myNotes = await this.prisma.koxNote.count({
-          where: { accountId: kos.id, publishTime: { gte: t.startTime, lte: t.endTime } },
-        });
+        // 完成口径与任务进度一致：绑定账号取其发布笔记数；未绑定回退系统内提交草稿数
+        const kosNotes = kos
+          ? await this.prisma.koxNote.count({
+              where: { accountId: kos.id, publishTime: { gte: t.startTime, lte: t.endTime } },
+            })
+          : 0;
+        const mySubs = kos
+          ? 0
+          : await this.prisma.xhsHistory.count({
+              where: { contentTaskId: t.id, createdById: userId, uploadTime: { gte: t.startTime, lte: t.endTime } },
+            });
+        const myNotes = kos ? kosNotes : mySubs;
         return {
           id: t.id,
           name: t.name,
@@ -1279,7 +1327,9 @@ export class ContentproService {
     );
     return {
       scoped: true,
-      my_account: { id: kos.id, nickname: kos.nickname, storeName: kos.storeName, accountTag: kos.accountTag },
+      my_account: kos
+        ? { id: kos.id, nickname: kos.nickname, storeName: kos.storeName, accountTag: kos.accountTag }
+        : null,
       list,
       total,
       page,
@@ -1287,31 +1337,71 @@ export class ContentproService {
     };
   }
 
-  /** 完成度：参与账号在任务周期内的 KoxNote 发布数（自动统计口径） */
+  /** 完成度：统一口径 = 参与矩阵号在任务周期内的小红书发布笔记数；
+   *  指定员工的目标取其绑定账号的发布数据（未绑定回退系统内提交草稿数） */
   private async taskProgress(taskId: number, startTime: Date, endTime: Date) {
     const targets = await this.prisma.contentTaskTarget.findMany({
       where: { taskId },
-      include: { account: { select: { id: true } } },
+      include: { account: { select: { id: true } }, user: { select: { id: true } }, task: { select: { brandId: true } } },
     });
-    const accountIds = targets.map((x) => x.account.id);
-    if (!accountIds.length) {
+    const brandId = targets[0]?.task?.brandId ?? 0;
+    const accountIds = targets.filter((x) => x.accountId && x.account).map((x) => x.account!.id);
+    const userIds = [...new Set(targets.filter((x) => x.userId && x.user).map((x) => x.user!.id))];
+    if (!accountIds.length && !userIds.length) {
       return { account_total: 0, account_finished: 0, note_total: 0, completion_rate: 0 };
     }
-    const grouped = await this.prisma.koxNote.groupBy({
-      by: ['accountId'],
-      where: {
-        accountId: { in: accountIds },
-        publishTime: { gte: startTime, lte: endTime },
-      },
-      _count: { _all: true },
-    });
-    const noteTotal = grouped.reduce((s, g) => s + g._count._all, 0);
-    const finished = grouped.length;
+    const grouped = accountIds.length
+      ? await this.prisma.koxNote.groupBy({
+          by: ['accountId'],
+          where: {
+            accountId: { in: accountIds },
+            publishTime: { gte: startTime, lte: endTime },
+          },
+          _count: { _all: true },
+        })
+      : [];
+    // 员工维度：优先绑定账号的发布数据（与账号口径一致，去重避免与账号目标重复计数）
+    const boundKos = userIds.length
+      ? await this.prisma.kosAccount.findMany({
+          where: { brandId, userId: { in: userIds } },
+          select: { id: true, userId: true },
+        })
+      : [];
+    const boundMap = new Map(boundKos.map((b) => [b.userId, b.id]));
+    const boundKosIds = [...new Set(boundKos.map((b) => b.id))].filter((id) => !accountIds.includes(id));
+    const boundGroups = boundKosIds.length
+      ? await this.prisma.koxNote.groupBy({
+          by: ['accountId'],
+          where: { accountId: { in: boundKosIds }, publishTime: { gte: startTime, lte: endTime } },
+          _count: { _all: true },
+        })
+      : [];
+    const boundDoneUserIds = boundKos
+      .filter((b) => boundGroups.some((g) => g.accountId === b.id))
+      .map((b) => b.userId);
+    // 未绑定矩阵号的员工：回退按系统内提交草稿数
+    const unboundUserIds = userIds.filter((id) => !boundMap.has(id));
+    const userGroups = unboundUserIds.length
+      ? await this.prisma.xhsHistory.groupBy({
+          by: ['createdById'],
+          where: {
+            contentTaskId: taskId,
+            createdById: { in: unboundUserIds },
+            uploadTime: { gte: startTime, lte: endTime },
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const accountNoteTotal = grouped.reduce((s, g) => s + g._count._all, 0);
+    const boundNoteTotal = boundGroups.reduce((s, g) => s + g._count._all, 0);
+    const userSubTotal = userGroups.reduce((s, g) => s + g._count._all, 0);
+    const finished = grouped.length + boundDoneUserIds.length + userGroups.length;
+    const accountTotal = accountIds.length + userIds.length;
     return {
-      account_total: accountIds.length,
+      account_total: accountTotal,
       account_finished: finished,
-      note_total: noteTotal,
-      completion_rate: accountIds.length ? Math.round((finished / accountIds.length) * 10000) / 100 : 0,
+      note_total: accountNoteTotal + boundNoteTotal + userSubTotal,
+      completion_rate: accountTotal ? Math.round((finished / accountTotal) * 10000) / 100 : 0,
     };
   }
 
@@ -1327,7 +1417,11 @@ export class ContentproService {
     exampleLink?: string;
     instructions?: string;
     reward?: string;
-  }, userId: number) {
+    userIds?: number[];
+  }, userId: number, role?: string) {
+    if (role && !['ADMIN', 'MANAGER'].includes(role)) {
+      throw new ForbiddenException('仅管理员可创建任务');
+    }
     const start = new Date(dto.startTime);
     const end = new Date(dto.endTime);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
@@ -1335,25 +1429,44 @@ export class ContentproService {
     }
     if (end <= start) throw new BadRequestException('结束时间必须晚于开始时间');
 
+    // 指定员工（姓名/手机号挑选的登录账号）：需属于当前工作区
+    const targetUserIds = [...new Set((dto.userIds ?? []).map(Number).filter(Boolean))];
+    let validUsers: { id: number }[] = [];
+    if (targetUserIds.length) {
+      validUsers = await this.prisma.user.findMany({
+        where: { id: { in: targetUserIds }, brandMembers: { some: { brandId } } },
+        select: { id: true },
+      });
+    }
+
+    const scopeType = dto.scopeType ?? 'all';
     const accountWhere: Prisma.KosAccountWhereInput = { brandId, status: 'enabled' };
+    if (scopeType === 'accounts' || scopeType === 'all') {
+      // 按矩阵号圈选（all = 全部启用账号）
+    }
     const types = (dto.accountTypes ?? []).filter((x) => x && x !== '不限');
     if (types.length) accountWhere.accountType = { in: types };
-    if ((dto.scopeType ?? 'all') === 'regions') {
+    if (scopeType === 'regions') {
       const regions = dto.regions ?? [];
       if (!regions.length) throw new BadRequestException('指定大区模式下至少选择一个大区');
       accountWhere.regionName = { in: regions };
     }
-    const accounts = await this.prisma.kosAccount.findMany({
-      where: accountWhere,
-      select: { id: true },
-    });
+    const accounts = scopeType === 'users'
+      ? []
+      : await this.prisma.kosAccount.findMany({
+          where: accountWhere,
+          select: { id: true },
+        });
+    if (!accounts.length && !validUsers.length) {
+      throw new BadRequestException('请至少选择一个派发对象（矩阵号或员工）');
+    }
 
     const task = await this.prisma.contentTask.create({
       data: {
         brandId,
         name: dto.name,
         platform: dto.platform ?? 'xhs',
-        scopeType: dto.scopeType ?? 'all',
+        scopeType: scopeType === 'users' ? 'users' : scopeType,
         regions: dto.regions ?? [],
         accountTypes: dto.accountTypes ?? [],
         startTime: start,
@@ -1374,7 +1487,15 @@ export class ContentproService {
         });
       }
     }
-    return { id: task.id, account_total: accounts.length };
+    if (validUsers.length) {
+      for (let i = 0; i < validUsers.length; i += 500) {
+        await this.prisma.contentTaskTarget.createMany({
+          data: validUsers.slice(i, i + 500).map((u) => ({ taskId: task.id, userId: u.id })),
+          skipDuplicates: true,
+        });
+      }
+    }
+    return { id: task.id, account_total: accounts.length, user_total: validUsers.length };
   }
 
   async contentTaskDetail(brandId: number, id: number) {
@@ -1387,9 +1508,10 @@ export class ContentproService {
         account: {
           select: { id: true, nickname: true, accountType: true, regionName: true, storeName: true, authorId: true },
         },
+        user: { select: { id: true, nickname: true, phone: true } },
       },
     });
-    const ids = targets.map((x) => x.account.id);
+    const ids = targets.filter((x) => x.accountId && x.account).map((x) => x.account!.id);
     const notes = ids.length
       ? await this.prisma.koxNote.groupBy({
           by: ['accountId'],
@@ -1398,6 +1520,34 @@ export class ContentproService {
         })
       : [];
     const noteMap = new Map(notes.map((n) => [n.accountId, n._count._all]));
+    // 员工维度：完成口径 = 其绑定矩阵号的发布笔记数（未绑定回退系统内提交草稿数）
+    const userTargets = targets.filter((x) => x.userId && x.user);
+    const userIds = userTargets.map((x) => x.user!.id);
+    const boundKos = userIds.length
+      ? await this.prisma.kosAccount.findMany({
+          where: { brandId: t.brandId, userId: { in: userIds } },
+          select: { id: true, userId: true },
+        })
+      : [];
+    const boundMap = new Map(boundKos.map((b) => [b.userId, b.id]));
+    const boundKosIds = [...new Set(boundKos.map((b) => b.id))].filter((id) => !ids.includes(id));
+    const boundGroups = boundKosIds.length
+      ? await this.prisma.koxNote.groupBy({
+          by: ['accountId'],
+          where: { accountId: { in: boundKosIds }, publishTime: { gte: t.startTime, lte: t.endTime } },
+          _count: { _all: true },
+        })
+      : [];
+    const boundNoteMap = new Map(boundGroups.map((n) => [n.accountId, n._count._all]));
+    const unboundUserIds = userIds.filter((id) => !boundMap.has(id));
+    const userSubs = unboundUserIds.length
+      ? await this.prisma.xhsHistory.groupBy({
+          by: ['createdById'],
+          where: { contentTaskId: t.id, createdById: { in: unboundUserIds }, uploadTime: { gte: t.startTime, lte: t.endTime } },
+          _count: { _all: true },
+        })
+      : [];
+    const userSubMap = new Map(userSubs.map((n) => [n.createdById, n._count._all]));
     // H5 扫码接力的产出笔记（挂任务的生成历史）
     const h5Notes = await this.prisma.xhsHistory.findMany({
       where: { contentTaskId: t.id },
@@ -1425,19 +1575,35 @@ export class ContentproService {
       ...progress,
       h5_note_total: h5Notes.length,
       h5_notes: h5Notes,
-      accounts: targets.map((x) => ({
-        account_id: x.account.id,
-        nickname: x.account.nickname,
-        account_type: x.account.accountType,
-        region: x.account.regionName,
-        store: x.account.storeName,
-        note_count: noteMap.get(x.account.id) ?? 0,
-        finished: (noteMap.get(x.account.id) ?? 0) > 0,
-      })),
+      accounts: targets
+        .filter((x) => x.accountId && x.account)
+        .map((x) => ({
+          account_id: x.account!.id,
+          nickname: x.account!.nickname,
+          account_type: x.account!.accountType,
+          region: x.account!.regionName,
+          store: x.account!.storeName,
+          note_count: noteMap.get(x.account!.id) ?? 0,
+          finished: (noteMap.get(x.account!.id) ?? 0) > 0,
+        })),
+      users: userTargets.map((x) => {
+        const myKosId = boundMap.get(x.user!.id);
+        const noteCount = myKosId ? boundNoteMap.get(myKosId) ?? 0 : userSubMap.get(x.user!.id) ?? 0;
+        return {
+          user_id: x.user!.id,
+          nickname: x.user!.nickname,
+          phone: x.user!.phone,
+          note_count: noteCount,
+          finished: noteCount > 0,
+        };
+      }),
     };
   }
 
-  async voidContentTask(brandId: number, id: number) {
+  async voidContentTask(brandId: number, id: number, role?: string) {
+    if (role && !['ADMIN', 'MANAGER'].includes(role)) {
+      throw new ForbiddenException('仅管理员可作废任务');
+    }
     const t = await this.prisma.contentTask.findUnique({ where: { id } });
     if (!t || t.brandId !== brandId) throw new NotFoundException('任务不存在');
     if (t.status === 'voided') throw new BadRequestException('任务已作废');

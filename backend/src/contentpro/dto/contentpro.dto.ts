@@ -139,6 +139,7 @@ export class ContentTaskDto {
   @IsOptional() @IsString() scopeType?: string;
   @IsOptional() regions?: string[];
   @IsOptional() accountTypes?: string[];
+  @IsOptional() userIds?: number[];
   @IsOptional() exampleImages?: string[];
   @IsOptional() @IsString() exampleLink?: string;
   @IsOptional() @IsString() instructions?: string;
