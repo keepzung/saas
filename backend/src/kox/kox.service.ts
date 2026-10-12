@@ -2128,11 +2128,25 @@ export class KoxService {
         pm_leads_sum: 0,
       },
     );
-    // 汇总卡私信三数 = G 全量合计（窗口 × 全部基线账号，与账号表现分析同源同值）
+    // 汇总卡私信三数 = 筛选结果中去重作者的 G 值加总（随筛选缩小；无筛选 = 全部基线账号）
     if (g) {
-      totals.pm_inquiries_sum = g.totals.enter;
-      totals.pm_openings_sum = g.totals.open;
-      totals.pm_leads_sum = g.totals.leads;
+      const authorKeys = new Set(
+        rows.map((n) => (n.accountId != null ? `a${n.accountId}` : `n:${n.authorName ?? ''}`)),
+      );
+      let enter = 0;
+      let open = 0;
+      let leads = 0;
+      for (const key of authorKeys) {
+        const v = key.startsWith('a:') ? g.byAcc.get(Number(key.slice(1))) : g.byNick.get(key.slice(2));
+        if (v) {
+          enter += v.enter;
+          open += v.open;
+          leads += v.leads;
+        }
+      }
+      totals.pm_inquiries_sum = enter;
+      totals.pm_openings_sum = open;
+      totals.pm_leads_sum = leads;
     }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
