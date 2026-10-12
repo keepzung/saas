@@ -143,6 +143,7 @@
           <a-tabs v-model:activeKey="detailTab" size="small" class="detail-tabs" @change="onDetailTabChange">
             <a-tab-pane v-if="!isTesla" key="account" tab="按账号汇总" />
             <a-tab-pane key="note" tab="按笔记汇总" />
+            <a-tab-pane v-if="isTesla" key="author" tab="按作者汇总" />
             <a-tab-pane key="region" tab="区域汇总" />
           </a-tabs>
         </div>
@@ -176,6 +177,17 @@
         />
         <span v-if="isTesla" class="muted small">仅展示投放笔记 · 口径：聚光笔记报表按笔记ID去重求和（窗口内逐日聚合）</span>
         <span v-else class="muted small">口径：聚光笔记效果数据（近30天累计快照），非投放消耗拆分</span>
+      </div>
+      <div v-if="detailTab === 'author'" class="note-filter-row">
+        <a-input-search
+          v-model:value="noteKeyword"
+          size="small"
+          style="width: 200px"
+          placeholder="搜索作者 / 笔记标题"
+          allow-clear
+          @search="loadAuthorTab"
+        />
+        <span v-if="isTesla" class="muted small">口径：聚光笔记报表按基线账号归属 · 笔记数=该作者窗口内被投流笔记数 · 未匹配基线的以报表作者名单列</span>
       </div>
       <div v-if="detailTab === 'region'" class="note-filter-row">
         <a-radio-group v-model:value="regionGroupby" size="small" @change="loadRegionTab">
@@ -225,7 +237,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <div class="note-cell">
-              <img class="note-thumb" :src="record.cover" alt="" loading="lazy" />
+              <img class="note-thumb" :src="record.cover" alt="" loading="lazy" @error="onNoteCoverErr(record)" />
               <div class="note-meta">
                 <a v-if="record.note_url" :href="record.note_url" target="_blank" rel="noopener noreferrer" class="c-name">{{ record.title }}</a>
                 <span v-else class="c-name">{{ record.title }}</span>
@@ -249,7 +261,32 @@
       </a-table>
 
       <a-table
-        v-else
+        v-else-if="detailTab === 'author'"
+        :columns="authorColumns"
+        :data-source="authorRows"
+        :loading="authorLoading"
+        :pagination="false"
+        row-key="author"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'author'">
+            <div class="c-name">{{ record.author }}</div>
+            <div v-if="!record.matched" class="muted small">未匹配基线（报表作者）</div>
+          </template>
+          <template v-else-if="column.key === 'fee'">
+            <span class="fee-num">¥{{ fmtNum(record.fee) }}</span>
+          </template>
+          <template v-else-if="column.key === 'ctr'">
+            {{ record.ctr != null ? `${record.ctr}%` : '-' }}
+          </template>
+          <template v-else-if="column.key === 'msg_lead_cost'">
+            {{ record.msg_leads ? `¥${record.msg_lead_cost}` : '-' }}
+          </template>
+        </template>
+      </a-table>
+
+      <a-table
+        v-else-if="detailTab === 'region'"
         :columns="regionColumns"
         :data-source="regionRows"
         :loading="regionLoading"
@@ -374,6 +411,8 @@ async function reload() {
   if (detailTab.value === 'note') {
     notePage.value = 1;
     loadNoteTab();
+  } else if (detailTab.value === 'author') {
+    loadAuthorTab();
   } else if (detailTab.value === 'region') {
     loadRegionTab();
   }
@@ -421,6 +460,8 @@ async function probeAndLoad() {
     if (detailTab.value === 'note') {
       notePage.value = 1;
       loadNoteTab();
+    } else if (detailTab.value === 'author') {
+      loadAuthorTab();
     } else if (detailTab.value === 'region') {
       loadRegionTab();
     }
@@ -637,6 +678,26 @@ async function exportAll() {
       }
     }
 
+    if (mode.value === 'real' && detailTab.value === 'author') {
+      const res = await getSparkCampaignNotes(authorParams());
+      sheets.push({
+        name: '按作者汇总',
+        rows: (res.list ?? []).map((a) => ({
+          作者: a.author,
+          笔记数: a.note_count,
+          消耗: a.fee,
+          曝光: a.impression,
+          点击: a.click,
+          点击率: `${a.ctr ?? 0}%`,
+          互动: a.interaction,
+          私信进线: a.msg_inquiries,
+          私信开口: a.msg_openings,
+          私信留资: a.msg_leads,
+          留资成本CPL: a.msg_leads ? a.msg_lead_cost : '-',
+        })),
+      });
+    }
+
     if (mode.value === 'real' && detailTab.value === 'region') {
       await loadRegionTab();
       sheets.push({
@@ -785,6 +846,53 @@ function onNoteTableChange(pag) {
   loadNoteTab();
 }
 
+function onNoteCoverErr(record) {
+  record.cover = `/images/kox-notes/note${((record.id?.length ?? 0) % 5) + 1}.webp`;
+}
+
+/* ---------- 按作者汇总 ---------- */
+const authorRows = ref([]);
+const authorLoading = ref(false);
+
+const authorColumns = [
+  { key: 'author', title: '作者（KOS 账号）', width: 240 },
+  { title: '笔记数', dataIndex: 'note_count', width: 90, sorter: (a, b) => a.note_count - b.note_count },
+  { key: 'fee', title: '消耗', dataIndex: 'fee', width: 110, sorter: (a, b) => a.fee - b.fee },
+  { title: '曝光', dataIndex: 'impression', width: 100, sorter: (a, b) => a.impression - b.impression },
+  { title: '点击', dataIndex: 'click', width: 90, sorter: (a, b) => a.click - b.click },
+  { key: 'ctr', title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
+  { title: '互动', dataIndex: 'interaction', width: 80, sorter: (a, b) => a.interaction - b.interaction },
+  { title: '私信进线', dataIndex: 'msg_inquiries', width: 95, sorter: (a, b) => a.msg_inquiries - b.msg_inquiries },
+  { title: '私信开口', dataIndex: 'msg_openings', width: 95, sorter: (a, b) => a.msg_openings - b.msg_openings },
+  { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
+  { key: 'msg_lead_cost', title: '留资成本', dataIndex: 'msg_lead_cost', width: 95, sorter: (a, b) => a.msg_lead_cost - b.msg_lead_cost },
+];
+
+function authorParams() {
+  const hasRange = range.value?.[0] && range.value?.[1];
+  return {
+    brandId: auth.currentBrandId ?? 2,
+    start: hasRange ? range.value[0].format('YYYY-MM-DD') : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
+    end: hasRange ? range.value[1].format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+    ...(noteKeyword.value ? { keyword: noteKeyword.value.trim() } : {}),
+    group: 'author',
+    page: 1,
+    page_size: 200,
+  };
+}
+
+async function loadAuthorTab() {
+  authorLoading.value = true;
+  try {
+    const res = await getSparkCampaignNotes(authorParams());
+    authorRows.value = (res.list ?? []).map((a) => ({ ...a }));
+  } catch {
+    authorRows.value = [];
+  } finally {
+    authorLoading.value = false;
+  }
+}
+
 /* ---------- 区域汇总 ---------- */
 const regionRows = ref([]);
 const regionLoading = ref(false);
@@ -829,6 +937,8 @@ function onDetailTabChange() {
   if (detailTab.value === 'note') {
     notePage.value = 1;
     loadNoteTab();
+  } else if (detailTab.value === 'author') {
+    loadAuthorTab();
   } else if (detailTab.value === 'region') {
     loadRegionTab();
   }

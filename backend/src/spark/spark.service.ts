@@ -777,6 +777,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const accountId =
         byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
 
+      // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）
+      if (org.brandId === 5 && !accountId) continue;
+
       const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
       const rtbRaw = String(pick('is_rtb_adver') ?? '').trim();
       const isRtbAdver = rtbRaw
@@ -2003,6 +2006,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     page?: string;
     page_size?: string;
     brandId?: string;
+    group?: string;
   }) {
     const brandId = query.brandId ? Number(query.brandId) : SPARK_DEFAULT_BRAND_ID;
     if (brandId !== 6) {
@@ -2025,6 +2029,92 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.koxJuguangNoteDaily.findMany({
       where: { brandId: 6, day: { gte: start, lte: end } },
     });
+
+    const r2v = (v: number) => Math.round(v * 100) / 100;
+    const keyword = (query.keyword ?? '').trim().toLowerCase();
+
+    // ── 按作者汇总（客户 2026-10 新增）：同一窗口 C 行按笔记归属作者（KoxNote→基线账号昵称，
+    //    回退报表 creator）聚合；笔记数=该作者窗口内被投流笔记数；与按笔记汇总同源同窗 ──
+    if (query.group === 'author') {
+      const [kos, notes] = await Promise.all([
+        this.prisma.kosAccount.findMany({
+          where: { brandId: 6, status: 'enabled' },
+          select: { id: true, nickname: true },
+        }),
+        this.prisma.koxNote.findMany({
+          where: { brandId: 6 },
+          select: { noteId: true, title: true, authorName: true, accountId: true },
+        }),
+      ]);
+      const metaByNoteId = new Map(notes.map((n) => [n.noteId, n]));
+      const accById = new Map(kos.map((k) => [k.id, k]));
+      const accByNick = new Map(kos.map((k) => [k.nickname, k]));
+
+      type AuthorAgg = {
+        fee: number; impression: number; click: number; interaction: number;
+        inq: number; open: number; leads: number;
+        noteIds: Set<string>; matched: boolean;
+      };
+      const byAuthor = new Map<string, AuthorAgg>();
+      const authorOf = (noteId: string, creator: string | null): { name: string; matched: boolean } | null => {
+        const m = metaByNoteId.get(noteId);
+        const acc = (m?.accountId != null ? accById.get(m.accountId) : undefined) ?? accByNick.get(m?.authorName ?? '');
+        if (acc) return { name: acc.nickname, matched: true };
+        const fb = (m?.authorName ?? creator ?? '').trim();
+        return fb ? { name: fb, matched: false } : null;
+      };
+      for (const r of rows) {
+        const m0 = metaByNoteId.get(r.noteId);
+        const t0 = (m0?.title ?? r.title ?? '').toLowerCase();
+        const c0 = (m0?.authorName ?? r.creator ?? '').toLowerCase();
+        if (keyword && !t0.includes(keyword) && !c0.includes(keyword)) continue; // 关键词按笔记标题/作者过滤后再聚合
+        const who = authorOf(r.noteId, r.creator);
+        if (!who) continue;
+        const cur = byAuthor.get(who.name) ?? {
+          fee: 0, impression: 0, click: 0, interaction: 0, inq: 0, open: 0, leads: 0,
+          noteIds: new Set<string>(), matched: who.matched,
+        };
+        cur.fee += Number(r.fee);
+        cur.impression += Number(r.impression);
+        cur.click += Number(r.click);
+        cur.interaction += Number(r.interaction);
+        cur.inq += Number(r.msgInquiries);
+        cur.open += Number(r.msgOpenings);
+        cur.leads += Number(r.msgLeads);
+        cur.noteIds.add(r.noteId);
+        cur.matched = who.matched;
+        byAuthor.set(who.name, cur);
+      }
+      let list = [...byAuthor.entries()].map(([author, a]) => ({
+        author,
+        matched: a.matched,
+        note_count: a.noteIds.size,
+        fee: r2v(a.fee),
+        impression: a.impression,
+        click: a.click,
+        ctr: a.impression ? r2v((a.click / a.impression) * 100) : 0,
+        interaction: a.interaction,
+        msg_inquiries: a.inq,
+        msg_openings: a.open,
+        msg_leads: a.leads,
+        msg_lead_cost: a.leads ? r2v(a.fee / a.leads) : 0,
+      }));
+      list.sort((a, b) => b.fee - a.fee);
+      const total = list.length;
+      const page = Math.max(1, Number(query.page ?? 1) || 1);
+      const pageSize = Math.min(200, Math.max(1, Number(query.page_size ?? 10) || 10));
+      return {
+        start: dayKey08(start),
+        end: dayKey08(end),
+        total,
+        page,
+        page_size: pageSize,
+        list: list.slice((page - 1) * pageSize, page * pageSize),
+        metric_note:
+          '按作者汇总=聚光「标准投笔记报表」逐笔记按日聚合→基线账号归属（作者=基线账号昵称；未匹配基线的以报表作者名单独成行）；笔记数=该作者窗口内被投流笔记数',
+      };
+    }
+
     const notes = await this.prisma.koxNote.findMany({
       where: { brandId: 6 },
       select: {
