@@ -48,14 +48,22 @@ export class UserService {
     if (operatorRole === 'ADMIN') return;
     const target = await this.prisma.user.findUnique({
       where: { id: targetId },
-      select: { role: true, createdById: true },
+      select: { role: true, createdById: true, brandMembers: { select: { brandId: true } } },
     });
     if (!target) throw new NotFoundException('用户不存在');
     if (target.role === 'ADMIN') {
       throw new ForbiddenException('项目管理员不可操作超级管理员账号');
     }
-    if (targetId !== operatorId && target.createdById !== operatorId) {
-      throw new ForbiddenException('项目管理员仅可操作自己创建的账号');
+    if (targetId === operatorId || target.createdById === operatorId) return;
+    // 同工作区成员也可操作（如平台统一导入的账号交由项目管理员日常管理）
+    const mine = await this.prisma.brandMember.findMany({
+      where: { userId: operatorId },
+      select: { brandId: true },
+    });
+    const myBrandIds = mine.map((m) => m.brandId);
+    const shares = target.brandMembers.some((m) => myBrandIds.includes(m.brandId));
+    if (!shares) {
+      throw new ForbiddenException('项目管理员仅可操作自己创建的账号或同工作区成员');
     }
   }
 
@@ -155,12 +163,25 @@ export class UserService {
 
   async listUsers(operatorId: number) {
     const operatorRole = await this.assertOperator(operatorId);
+    let where: Record<string, unknown> = {};
+    if (operatorRole !== 'ADMIN') {
+      // 项目管理员可见：自己创建的 ∪ 自己 ∪ 自己所在工作区的全部成员
+      const myBrands = await this.prisma.brandMember.findMany({
+        where: { userId: operatorId },
+        select: { brandId: true },
+      });
+      const brandIds = myBrands.map((b) => b.brandId);
+      where = {
+        OR: [
+          { createdById: operatorId },
+          { id: operatorId },
+          ...(brandIds.length ? [{ brandMembers: { some: { brandId: { in: brandIds } } } }] : []),
+        ],
+      };
+    }
     const users = await this.prisma.user.findMany({
       orderBy: { id: 'asc' },
-      where:
-        operatorRole === 'ADMIN'
-          ? {}
-          : { OR: [{ createdById: operatorId }, { id: operatorId }] },
+      where,
       select: {
         ...USER_SELECT,
         brandMembers: { select: { brandId: true, roleKey: true } },
@@ -182,16 +203,46 @@ export class UserService {
     };
   }
 
+  /** 表单系统角色 → 工作区角色映射 */
+  private brandRoleKeyOf(role: string): string {
+    if (role === 'ADMIN') return 'brand_admin';
+    if (role === 'MANAGER') return 'agency_executive';
+    return 'kos_operator';
+  }
+
   async createUser(operatorId: number, dto: CreateUserDto) {
     const operatorRole = await this.assertOperator(operatorId);
     if (operatorRole !== 'ADMIN' && dto.role === 'ADMIN') {
       throw new ForbiddenException('仅超级管理员可创建管理员账号');
     }
+
+    // 全局用户池：手机号已注册的用户直接加入当前工作区（跨项目复用），同项目内禁止重复添加
     const exists = await this.prisma.user.findFirst({
       where: { phone: dto.phone },
-      select: { id: true },
+      select: { id: true, role: true },
     });
-    if (exists) throw new BadRequestException('手机号已存在');
+    if (exists) {
+      if (!dto.brandId) {
+        throw new BadRequestException('该手机号已注册。请选择工作区后重试，系统会将其加入当前项目');
+      }
+      if (operatorRole !== 'ADMIN' && exists.role === 'ADMIN') {
+        throw new ForbiddenException('项目管理员不可操作超级管理员账号');
+      }
+      const member = await this.prisma.brandMember.findFirst({
+        where: { userId: exists.id, brandId: dto.brandId },
+        select: { id: true },
+      });
+      if (member) throw new BadRequestException('该用户已加入当前项目，请勿重复添加');
+      // syncBrandMembers 内部会校验非超管只能分配自己所属的工作区
+      await this.syncBrandMembers(
+        exists.id,
+        [{ brandId: dto.brandId, roleKey: this.brandRoleKeyOf(dto.role) }],
+        operatorRole,
+        operatorId,
+      );
+      const adopted = await this.prisma.user.findUnique({ where: { id: exists.id }, select: USER_SELECT });
+      return { ...adopted, adopted: true };
+    }
 
     const user = await this.prisma.user.create({
       data: {
@@ -206,7 +257,15 @@ export class UserService {
       },
       select: USER_SELECT,
     });
-    return user;
+    if (dto.brandId) {
+      await this.syncBrandMembers(
+        user.id,
+        [{ brandId: dto.brandId, roleKey: this.brandRoleKeyOf(dto.role) }],
+        operatorRole,
+        operatorId,
+      );
+    }
+    return { ...user, adopted: false };
   }
 
   async updateUser(operatorId: number, id: number, dto: UpdateUserDto) {

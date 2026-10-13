@@ -37,6 +37,11 @@ export class CreateUserDto {
   @Matches(/^1\d{10}$/, { message: '手机号格式不正确' })
   phone: string;
 
+  /** 当前工作区：新账号直接挂入；手机号已注册时将其加入该工作区（跨项目复用） */
+  @IsOptional()
+  @IsInt()
+  brandId?: number;
+
   @IsString()
   @MinLength(8, { message: '密码至少 8 位' })
   @MaxLength(64)

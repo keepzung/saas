@@ -835,13 +835,18 @@ async function save() {
       });
       message.success('已保存');
     } else {
-      await createUser({
+      const res = await createUser({
         phone: form.phone,
         password: form.password,
         nickname: form.nickname || undefined,
         role: form.role,
+        brandId: auth.currentBrandId ?? undefined,
       });
-      message.success('账号已创建，可继续分配权限');
+      message.success(
+        res?.adopted
+          ? '该用户已在平台注册，已将其加入当前项目'
+          : '账号已创建，可在「分配权限」中随时调整可见模块与所属品牌',
+      );
     }
     drawerOpen.value = false;
     load();
