@@ -143,7 +143,13 @@
         <div class="hot-scroll">
           <div v-for="(n, i) in hotList" :key="n.id" class="hot-card" @click="openNote(n)">
             <div class="hot-cover">
-              <img v-if="n.cover_url" :src="n.cover_url" loading="lazy" />
+              <img
+                v-if="n.cover_url"
+                :src="n.cover_url"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                @error="onCoverError(n)"
+              />
               <div v-else class="hot-cover-ph">{{ (n.title || '#').slice(0, 1) }}</div>
               <span :class="['rank-tag', i < 3 ? `top${i + 1}` : '']">{{ i + 1 }}</span>
             </div>
@@ -184,6 +190,10 @@ const adSeries = ref('ad_cost');
 
 const ov = ref({});
 const hotList = ref([]);
+// 封面加载失败（如 CDN 防盗链变更）时回退首字占位
+function onCoverError(n) {
+  n.cover_url = '';
+}
 
 let opsChart = null;
 let adChart = null;
