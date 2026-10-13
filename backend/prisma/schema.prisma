@@ -69,26 +69,26 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  company        Company        @relation(fields: [companyId], references: [id])
-  customers      Customer[]
-  orders         Order[]
-  brandMembers   BrandMember[]
-  ownedProjects   Project[]     @relation("ProjectOwner")
-  createdProjects Project[]     @relation("ProjectCreator")
-  kolOwned       KolCreator[]   @relation("KolOwner")
-  kolCreated     KolCreator[]   @relation("KolCreator")
-  kolReviews     KolReview[]    @relation("KolReviewOperator")
-  kolLogs        KolLog[]       @relation("KolLogOperator")
-  koxTasksCreated KoxTask[]     @relation("KoxTaskCreator")
-  campaignProjects KoxCampaignProject[] @relation("CampaignProjectCreator")
-  contentTasksCreated ContentTask[] @relation("ContentTaskCreator")
-  contentTaskTargets ContentTaskTarget[] @relation("ContentTaskTargetUser")
-  createdById     Int?
-  createdBy       User?         @relation("UserCreator", fields: [createdById], references: [id])
-  createdUsers    User[]        @relation("UserCreator")
-  orgId           Int?
-  org             BrandOrg?     @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  kosAccount      KosAccount?
+  company             Company              @relation(fields: [companyId], references: [id])
+  customers           Customer[]
+  orders              Order[]
+  brandMembers        BrandMember[]
+  ownedProjects       Project[]            @relation("ProjectOwner")
+  createdProjects     Project[]            @relation("ProjectCreator")
+  kolOwned            KolCreator[]         @relation("KolOwner")
+  kolCreated          KolCreator[]         @relation("KolCreator")
+  kolReviews          KolReview[]          @relation("KolReviewOperator")
+  kolLogs             KolLog[]             @relation("KolLogOperator")
+  koxTasksCreated     KoxTask[]            @relation("KoxTaskCreator")
+  campaignProjects    KoxCampaignProject[] @relation("CampaignProjectCreator")
+  contentTasksCreated ContentTask[]        @relation("ContentTaskCreator")
+  contentTaskTargets  ContentTaskTarget[]  @relation("ContentTaskTargetUser")
+  createdById         Int?
+  createdBy           User?                @relation("UserCreator", fields: [createdById], references: [id])
+  createdUsers        User[]               @relation("UserCreator")
+  orgId               Int?
+  org                 BrandOrg?            @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  kosAccount          KosAccount?
 
   @@index([role])
   @@index([companyId])
@@ -147,17 +147,17 @@ model BrandMember {
 }
 
 model ModuleNode {
-  id       Int         @id @default(autoincrement())
+  id       Int          @id @default(autoincrement())
   parentId Int?
-  parent   ModuleNode? @relation("ModuleTree", fields: [parentId], references: [id])
+  parent   ModuleNode?  @relation("ModuleTree", fields: [parentId], references: [id])
   children ModuleNode[] @relation("ModuleTree")
-  key      String      @unique
+  key      String       @unique
   name     String
   icon     String?
   type     ModuleType
   path     String?
-  sort     Int         @default(0)
-  visible  Boolean     @default(true)
+  sort     Int          @default(0)
+  visible  Boolean      @default(true)
 
   @@index([parentId])
 }
@@ -203,17 +203,17 @@ model Order {
 }
 
 model ProjectFolder {
-  id        Int            @id @default(autoincrement())
+  id        Int             @id @default(autoincrement())
   parentId  Int?
-  parent    ProjectFolder? @relation("FolderTree", fields: [parentId], references: [id])
+  parent    ProjectFolder?  @relation("FolderTree", fields: [parentId], references: [id])
   children  ProjectFolder[] @relation("FolderTree")
-  brandId   Int            @default(1)
+  brandId   Int             @default(1)
   name      String
-  sort      Int            @default(0)
-  status    Int            @default(1)
+  sort      Int             @default(0)
+  status    Int             @default(1)
   projects  Project[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@index([brandId])
   @@index([parentId])
@@ -255,22 +255,22 @@ model Project {
 }
 
 model ProjectStats {
-  projectId Int @id
+  projectId Int     @id
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  deliverableCount  Int @default(0)
-  plannedQuantity   Int @default(0)
-  completedQuantity Int @default(0)
+  deliverableCount  Int     @default(0)
+  plannedQuantity   Int     @default(0)
+  completedQuantity Int     @default(0)
   plannedCost       Decimal @default(0) @db.Decimal(14, 2)
   actualCost        Decimal @default(0) @db.Decimal(14, 2)
-  acceptedCount     Int @default(0)
-  riskCount         Int @default(0)
-  relationCount     Int @default(0)
+  acceptedCount     Int     @default(0)
+  riskCount         Int     @default(0)
+  relationCount     Int     @default(0)
 
   quoteDraftAmount         Decimal @default(0) @db.Decimal(14, 2)
-  quoteCollaborationStatus String @default("not_configured")
-  costCompletedCount       Int @default(0)
-  costExpectedCount        Int @default(0)
+  quoteCollaborationStatus String  @default("not_configured")
+  costCompletedCount       Int     @default(0)
+  costExpectedCount        Int     @default(0)
 
   sheetCount       Int @default(0)
   talentTotal      Int @default(0)
@@ -281,18 +281,18 @@ model ProjectStats {
   rejectedCount    Int @default(0)
   unavailableCount Int @default(0)
 
-  executionTotal   Int @default(0)
-  readyToStart     Int @default(0)
-  draftCount       Int @default(0)
-  revisionRequired Int @default(0)
-  internalReview   Int @default(0)
-  brandReview      Int @default(0)
-  readyToPublish   Int @default(0)
-  publishedCount   Int @default(0)
-  overdueCount     Int @default(0)
-  attentionLabel   String @default("暂无待办")
+  executionTotal   Int     @default(0)
+  readyToStart     Int     @default(0)
+  draftCount       Int     @default(0)
+  revisionRequired Int     @default(0)
+  internalReview   Int     @default(0)
+  brandReview      Int     @default(0)
+  readyToPublish   Int     @default(0)
+  publishedCount   Int     @default(0)
+  overdueCount     Int     @default(0)
+  attentionLabel   String  @default("暂无待办")
   attentionCreator String?
-  attentionLevel   String @default("none")
+  attentionLevel   String  @default("none")
 }
 
 model KolCreator {
@@ -324,19 +324,19 @@ model KolCreator {
   cooperationForm   String?
   homePage          String?
 
-  inLibrary       Boolean  @default(false)
-  contactStatus   String   @default("pending")
-  contactPhone    String?
-  contactWechat   String?
-  contactMail     String?
-  remark          String?  @db.Text
-  resourceStatus  Int      @default(1)
-  ownerId         Int?
-  owner           User?    @relation("KolOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  createdById     Int
-  createdBy       User     @relation("KolCreator", fields: [createdById], references: [id])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  inLibrary      Boolean  @default(false)
+  contactStatus  String   @default("pending")
+  contactPhone   String?
+  contactWechat  String?
+  contactMail    String?
+  remark         String?  @db.Text
+  resourceStatus Int      @default(1)
+  ownerId        Int?
+  owner          User?    @relation("KolOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdById    Int
+  createdBy      User     @relation("KolCreator", fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   reviews KolReview[]
 
@@ -348,17 +348,17 @@ model KolCreator {
 }
 
 model KolReview {
-  id           Int       @id @default(autoincrement())
+  id           Int        @id @default(autoincrement())
   creatorId    Int
   creator      KolCreator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  status       String    @default("pending")
+  status       String     @default("pending")
   summary      String
   changes      Json?
   operatorId   Int
-  operator     User      @relation("KolReviewOperator", fields: [operatorId], references: [id])
+  operator     User       @relation("KolReviewOperator", fields: [operatorId], references: [id])
   reviewedAt   DateTime?
   reviewedById Int?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime   @default(now())
 
   @@index([status])
   @@index([creatorId])
@@ -396,25 +396,25 @@ model Product {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  packages    ContentPackage[]
-  batchTasks  BatchTask[]
+  packages   ContentPackage[]
+  batchTasks BatchTask[]
 
   @@index([parentId])
   @@index([brandId])
 }
 
 model ContentPackage {
-  id           Int       @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   name         String
-  workflowType String    @default("pro")
+  workflowType String   @default("pro")
   productId    Int?
-  product      Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
-  brandId      Int       @default(1)
-  reviewMode   Int       @default(1)
-  status       String    @default("active")
+  product      Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  brandId      Int      @default(1)
+  reviewMode   Int      @default(1)
+  status       String   @default("active")
   createdById  Int
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   materials PackageMaterial[]
 
@@ -424,44 +424,44 @@ model ContentPackage {
 }
 
 model PackageMaterial {
-  id             Int       @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   packageId      Int
   package        ContentPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
   title          String
-  content        String    @db.Text
-  tags           String[]  @default([])
-  contentForm    String    @default("image_text")
-  images         String[]  @default([])
-  status         String    @default("draft")
+  content        String         @db.Text
+  tags           String[]       @default([])
+  contentForm    String         @default("image_text")
+  images         String[]       @default([])
+  status         String         @default("draft")
   conversationId String?
   reviewComment  String?
   reviewedById   Int?
   reviewedAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@index([packageId])
   @@index([status])
 }
 
 model BatchTask {
-  id          Int       @id @default(autoincrement())
-  taskName    String
-  status      String    @default("pending")
-  productId   Int?
-  product     Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
-  targetQty   Int       @default(1)
-  successCount Int      @default(0)
-  failedCount Int       @default(0)
-  model      String    @default("random")
-  packageId   Int?
-  config      Json?
-  brandId     Int       @default(1)
-  pointsTotal    Int     @default(0)
-  pointsRefunded Int     @default(0)
-  createdById Int
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id             Int      @id @default(autoincrement())
+  taskName       String
+  status         String   @default("pending")
+  productId      Int?
+  product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  targetQty      Int      @default(1)
+  successCount   Int      @default(0)
+  failedCount    Int      @default(0)
+  model          String   @default("random")
+  packageId      Int?
+  config         Json?
+  brandId        Int      @default(1)
+  pointsTotal    Int      @default(0)
+  pointsRefunded Int      @default(0)
+  createdById    Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([status])
   @@index([productId])
@@ -492,11 +492,11 @@ model KosAccount {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  user          User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  taskRecords    KoxTaskAuthor[]
-  dailyStats     KoxAccountDailyStat[]
-  notes          KoxNote[]
-  contentTaskTargets ContentTaskTarget[] @relation("ContentTaskTargetAccount")
+  user               User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  taskRecords        KoxTaskAuthor[]
+  dailyStats         KoxAccountDailyStat[]
+  notes              KoxNote[]
+  contentTaskTargets ContentTaskTarget[]   @relation("ContentTaskTargetAccount")
 
   @@unique([userId])
   @@index([platform])
@@ -508,39 +508,39 @@ model KosAccount {
 }
 
 model KoxNote {
-  id           Int         @id @default(autoincrement())
-  noteId       String      @unique
-  accountId    Int?
-  account      KosAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  brandId      Int         @default(1)
-  title        String
-  content      String?
-  coverUrl     String?
-  noteUrl      String?
-  noteType     String      @default("normal")
-  publishTime  DateTime?
-  exposure     Int         @default(0)
-  views        Int         @default(0)
-  likes        Int         @default(0)
-  collects     Int         @default(0)
-  comments     Int         @default(0)
-  shares       Int         @default(0)
-  followCount  Int         @default(0)
-  pmInquiries  Int         @default(0)
-  pmOpenings   Int         @default(0)
-  pmLeads      Int         @default(0)
-  formLeads    Int         @default(0)
-  authorName   String?
-  accountType  String?
-  isRtbAdver   Boolean?
+  id            Int         @id @default(autoincrement())
+  noteId        String      @unique
+  accountId     Int?
+  account       KosAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  brandId       Int         @default(1)
+  title         String
+  content       String?
+  coverUrl      String?
+  noteUrl       String?
+  noteType      String      @default("normal")
+  publishTime   DateTime?
+  exposure      Int         @default(0)
+  views         Int         @default(0)
+  likes         Int         @default(0)
+  collects      Int         @default(0)
+  comments      Int         @default(0)
+  shares        Int         @default(0)
+  followCount   Int         @default(0)
+  pmInquiries   Int         @default(0)
+  pmOpenings    Int         @default(0)
+  pmLeads       Int         @default(0)
+  formLeads     Int         @default(0)
+  authorName    String?
+  accountType   String?
+  isRtbAdver    Boolean?
   brandUserName String?
-  category     String?
-  modelTag     String?
-  keyword      String?
-  statDate     DateTime?
-  rawJson      Json?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  category      String?
+  modelTag      String?
+  keyword       String?
+  statDate      DateTime?
+  rawJson       Json?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@index([brandId, publishTime])
   @@index([accountId])
@@ -548,20 +548,20 @@ model KoxNote {
 }
 
 model KoxAccountDailyStat {
-  id             Int      @id @default(autoincrement())
+  id             Int        @id @default(autoincrement())
   accountId      Int
   account        KosAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   statDate       DateTime
-  itemCnt        Int      @default(0)
-  crazyItemCnt   Int      @default(0)
-  exposureSum    Int      @default(0)
-  viewSum        Int      @default(0)
-  diggSum        Int      @default(0)
-  interactionSum Int      @default(0)
-  followCountSum Int      @default(0)
-  pmLeads        Int      @default(0)
-  toolClickCnt   Int      @default(0)
-  createdAt      DateTime @default(now())
+  itemCnt        Int        @default(0)
+  crazyItemCnt   Int        @default(0)
+  exposureSum    Int        @default(0)
+  viewSum        Int        @default(0)
+  diggSum        Int        @default(0)
+  interactionSum Int        @default(0)
+  followCountSum Int        @default(0)
+  pmLeads        Int        @default(0)
+  toolClickCnt   Int        @default(0)
+  createdAt      DateTime   @default(now())
 
   @@unique([accountId, statDate])
   @@index([statDate])
@@ -581,7 +581,7 @@ model KoxTask {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  authors         KoxTaskAuthor[]
+  authors KoxTaskAuthor[]
 
   @@index([status])
   @@index([platform])
@@ -607,35 +607,35 @@ model KoxTaskAuthor {
 }
 
 model KoxDailyStat {
-  id                 Int      @id @default(autoincrement())
-  statDate           DateTime
-  platform           String   @default("all")
-  authorNum          Int      @default(0)
-  itemCnt            Int      @default(0)
-  crazyItemCnt       Int      @default(0)
-  toolItemCntSum     Int      @default(0)
-  followCountSum     Int      @default(0)
-  exposureSum        Int      @default(0)
-  viewSum            Int      @default(0)
-  interactionSum     Int      @default(0)
-  totalPmInquiries   Int      @default(0)
-  totalPmOpenings    Int      @default(0)
-  totalPmLeads       Int      @default(0)
-  toolClickCnt       Int      @default(0)
-  formLeads          Int      @default(0)
-  adCost             Decimal  @default(0) @db.Decimal(14, 2)
-  adViewSum          Int      @default(0)
-  adConversions      Int      @default(0)
-  liveAccountNum     Int      @default(0)
-  liveCount          Int      @default(0)
-  liveValidDuration  Int      @default(0)
-  liveExposureUv     Int      @default(0)
-  liveWatchUv        Int      @default(0)
-  liveToolClickCnt   Int      @default(0)
-  liveTotalLeads     Int      @default(0)
-  liveFormLeads      Int      @default(0)
-  liveCost           Decimal  @default(0) @db.Decimal(14, 2)
-  brandId            Int      @default(1)
+  id                Int      @id @default(autoincrement())
+  statDate          DateTime
+  platform          String   @default("all")
+  authorNum         Int      @default(0)
+  itemCnt           Int      @default(0)
+  crazyItemCnt      Int      @default(0)
+  toolItemCntSum    Int      @default(0)
+  followCountSum    Int      @default(0)
+  exposureSum       Int      @default(0)
+  viewSum           Int      @default(0)
+  interactionSum    Int      @default(0)
+  totalPmInquiries  Int      @default(0)
+  totalPmOpenings   Int      @default(0)
+  totalPmLeads      Int      @default(0)
+  toolClickCnt      Int      @default(0)
+  formLeads         Int      @default(0)
+  adCost            Decimal  @default(0) @db.Decimal(14, 2)
+  adViewSum         Int      @default(0)
+  adConversions     Int      @default(0)
+  liveAccountNum    Int      @default(0)
+  liveCount         Int      @default(0)
+  liveValidDuration Int      @default(0)
+  liveExposureUv    Int      @default(0)
+  liveWatchUv       Int      @default(0)
+  liveToolClickCnt  Int      @default(0)
+  liveTotalLeads    Int      @default(0)
+  liveFormLeads     Int      @default(0)
+  liveCost          Decimal  @default(0) @db.Decimal(14, 2)
+  brandId           Int      @default(1)
 
   @@unique([statDate, platform, brandId])
   @@index([statDate])
@@ -685,24 +685,24 @@ model KoxCampaignDailyStat {
 }
 
 model SparkAccount {
-  id               Int       @id @default(autoincrement())
-  virtualSellerId  String    @unique
-  accountCode      String?
-  accountKind      String    @default("brand")
-  name             String
-  brandUserId      String?
-  agentName        String?
-  advertiserId     String?
-  lastConsumeDate  String?
-  active           Boolean   @default(true)
-  scope            String    @default("dealer")
+  id                Int       @id @default(autoincrement())
+  virtualSellerId   String    @unique
+  accountCode       String?
+  accountKind       String    @default("brand")
+  name              String
+  brandUserId       String?
+  agentName         String?
+  advertiserId      String?
+  lastConsumeDate   String?
+  active            Boolean   @default(true)
+  scope             String    @default("dealer")
   // partner 通道：盯盘助手周/月消耗口径快照（week_cost/month_cost，平台自然周/自然月至今）
-  weekCost         Decimal?  @db.Decimal(14, 2)
-  monthCost        Decimal?  @db.Decimal(14, 2)
+  weekCost          Decimal?  @db.Decimal(14, 2)
+  monthCost         Decimal?  @db.Decimal(14, 2)
   partnerSnapshotAt DateTime?
-  firstSeenAt      DateTime  @default(now())
-  lastSeenAt       DateTime  @default(now())
-  brandId          Int       @default(2)
+  firstSeenAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  brandId           Int       @default(2)
 
   @@index([brandId, active])
   @@index([scope])
@@ -725,70 +725,74 @@ model SparkSyncLog {
   @@index([brandId, syncType, statDate])
 }
 
-/** 星火 MCC 员工矩阵 · 主账户维度日明细（brandDetailList，日分区） */
+/**
+ * 星火 MCC 员工矩阵 · 主账户维度日明细（brandDetailList，日分区）
+ */
 model SparkStaffBrandDaily {
-  id            Int      @id @default(autoincrement())
-  brandId       Int      @default(2)
-  statDate      DateTime
-  brandUserId   String
-  brandUserName String
-  accountType   String?
-  hasOpenKos    Boolean?
-  openKosTime   String?
-  hasAdsBrand   Boolean?
-  rtbAccountNum Int      @default(0)
-  rtbNoteNum    Int      @default(0)
-  rtbIncomeAmt  Decimal  @default(0) @db.Decimal(14, 2)
-  adsReadCnt    Int      @default(0)
-  kosAccountNum Int      @default(0)
-  createNoteNum Int      @default(0)
-  socReadCnt    Int      @default(0)
-  fansNum       Int      @default(0)
-  addFansNum    Int      @default(0)
-  lostFansNum   Int      @default(0)
-  messageOpenCnt         Int @default(0)
-  messageDrivingOpenCnt  Int @default(0)
-  msgLeadsNum            Int @default(0)
-  leadsSuccess           Int @default(0)
-  rawJson       Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                    Int      @id @default(autoincrement())
+  brandId               Int      @default(2)
+  statDate              DateTime
+  brandUserId           String
+  brandUserName         String
+  accountType           String?
+  hasOpenKos            Boolean?
+  openKosTime           String?
+  hasAdsBrand           Boolean?
+  rtbAccountNum         Int      @default(0)
+  rtbNoteNum            Int      @default(0)
+  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
+  adsReadCnt            Int      @default(0)
+  kosAccountNum         Int      @default(0)
+  createNoteNum         Int      @default(0)
+  socReadCnt            Int      @default(0)
+  fansNum               Int      @default(0)
+  addFansNum            Int      @default(0)
+  lostFansNum           Int      @default(0)
+  messageOpenCnt        Int      @default(0)
+  messageDrivingOpenCnt Int      @default(0)
+  msgLeadsNum           Int      @default(0)
+  leadsSuccess          Int      @default(0)
+  rawJson               Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@unique([statDate, brandUserId, brandId])
   @@index([brandId, statDate])
 }
 
-/** 星火 MCC 员工矩阵 · 员工号维度日明细（staffDetailList，日分区） */
+/**
+ * 星火 MCC 员工矩阵 · 员工号维度日明细（staffDetailList，日分区）
+ */
 model SparkStaffUserDaily {
-  id            Int      @id @default(autoincrement())
-  brandId       Int      @default(2)
-  statDate      DateTime
-  brandUserId   String
-  brandUserName String?
-  userId        String
-  staffName     String?
-  nickname      String?
-  accountType   String?
-  bindDate      String?
-  staffArea     String?
-  staffLabel    String?
-  rtbNoteNum    Int      @default(0)
-  rtbIncomeAmt  Decimal  @default(0) @db.Decimal(14, 2)
-  adsReadCnt    Int      @default(0)
-  createNoteNum Int      @default(0)
-  socImpCnt     Int      @default(0)
-  socClickCnt   Int      @default(0)
-  socEnageCnt   Int      @default(0)
-  fansNum       Int      @default(0)
-  addFansNum    Int      @default(0)
-  lostFansNum   Int      @default(0)
-  messageOpenCnt         Int @default(0)
-  messageDrivingOpenCnt  Int @default(0)
-  msgLeadsNum            Int @default(0)
-  leadsSuccess           Int @default(0)
-  rawJson       Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                    Int      @id @default(autoincrement())
+  brandId               Int      @default(2)
+  statDate              DateTime
+  brandUserId           String
+  brandUserName         String?
+  userId                String
+  staffName             String?
+  nickname              String?
+  accountType           String?
+  bindDate              String?
+  staffArea             String?
+  staffLabel            String?
+  rtbNoteNum            Int      @default(0)
+  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
+  adsReadCnt            Int      @default(0)
+  createNoteNum         Int      @default(0)
+  socImpCnt             Int      @default(0)
+  socClickCnt           Int      @default(0)
+  socEnageCnt           Int      @default(0)
+  fansNum               Int      @default(0)
+  addFansNum            Int      @default(0)
+  lostFansNum           Int      @default(0)
+  messageOpenCnt        Int      @default(0)
+  messageDrivingOpenCnt Int      @default(0)
+  msgLeadsNum           Int      @default(0)
+  leadsSuccess          Int      @default(0)
+  rawJson               Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@unique([statDate, userId, brandId])
   @@index([brandId, statDate])
@@ -799,34 +803,34 @@ model SparkStaffUserDaily {
 // partner.xiaohongshu.com 商业化合作伙伴平台（代理商子账户投放主表，如特斯拉/乐允）
 // 首次启动时若无记录且 .env 有 SPARK_COOKIE，则自动引导生成 brand 2 的记录（向后兼容旧部署）
 model SparkOrgConfig {
-  id             Int       @id @default(autoincrement())
-  brandId        Int       @unique
-  orgCode        String
-  email          String?
-  cookie         String    @default("")
-  channel        String    @default("mcc")
+  id              Int       @id @default(autoincrement())
+  brandId         Int       @unique
+  orgCode         String
+  email           String?
+  cookie          String    @default("")
+  channel         String    @default("mcc")
   excludeKeywords String?
-  active         Boolean   @default(true)
-  lastSyncAt     DateTime?
-  remark         String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  active          Boolean   @default(true)
+  lastSyncAt      DateTime?
+  remark          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model KoxCampaignProject {
-  id            Int       @id @default(autoincrement())
+  id            Int                         @id @default(autoincrement())
   name          String
   region        String?
   startDate     DateTime
   endDate       DateTime
-  budget        Decimal?  @db.Decimal(14, 2)
+  budget        Decimal?                    @db.Decimal(14, 2)
   remark        String?
   importedStats Json?
-  brandId       Int       @default(2)
+  brandId       Int                         @default(2)
   createdById   Int
-  createdBy     User      @relation("CampaignProjectCreator", fields: [createdById], references: [id])
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdBy     User                        @relation("CampaignProjectCreator", fields: [createdById], references: [id])
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
   accounts      KoxCampaignProjectAccount[]
 
   @@index([brandId])
@@ -866,56 +870,56 @@ model KoxWeeklySnapshot {
 }
 
 model KoxDealerSnapshot {
-  id           Int      @id @default(autoincrement())
-  brandId      Int      @default(7)
-  dealerName   String
-  regionName   String?
-  cityName     String?
-  tier         String?
-  score        Decimal? @db.Decimal(10, 2)
-  accountCnt   Int      @default(0)
-  publishCnt   Int      @default(0)
-  contentPct   Decimal? @db.Decimal(10, 2)
-  exposure     Int      @default(0)
-  exposurePct  Decimal? @db.Decimal(10, 2)
-  inquiries    Int      @default(0)
-  openings     Int      @default(0)
-  leads        Int      @default(0)
-  leadsPct     Decimal? @db.Decimal(10, 2)
-  deals        Int      @default(0)
-  dealsPct     Decimal? @db.Decimal(10, 2)
-  statMonth    String?
-  rawJson      Json?
-  createdAt    DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  brandId     Int      @default(7)
+  dealerName  String
+  regionName  String?
+  cityName    String?
+  tier        String?
+  score       Decimal? @db.Decimal(10, 2)
+  accountCnt  Int      @default(0)
+  publishCnt  Int      @default(0)
+  contentPct  Decimal? @db.Decimal(10, 2)
+  exposure    Int      @default(0)
+  exposurePct Decimal? @db.Decimal(10, 2)
+  inquiries   Int      @default(0)
+  openings    Int      @default(0)
+  leads       Int      @default(0)
+  leadsPct    Decimal? @db.Decimal(10, 2)
+  deals       Int      @default(0)
+  dealsPct    Decimal? @db.Decimal(10, 2)
+  statMonth   String?
+  rawJson     Json?
+  createdAt   DateTime @default(now())
 
   @@index([brandId, statMonth])
 }
 
 model KoxRegionAdSnapshot {
-  id          Int      @id @default(autoincrement())
-  brandId     Int      @default(7)
-  regionName  String
-  fee         Decimal  @default(0) @db.Decimal(14, 2)
-  accountCnt  Int      @default(0)
-  noteCnt     Int      @default(0)
-  replyRate   Decimal? @db.Decimal(10, 2)
-  inquiries   Int      @default(0)
-  openings    Int      @default(0)
-  leads       Int      @default(0)
-  openRate    Decimal? @db.Decimal(10, 2)
-  openLeadRate Decimal? @db.Decimal(10, 2)
-  inquiryCost Decimal? @db.Decimal(14, 2)
-  openCost    Decimal? @db.Decimal(14, 2)
-  leadCost    Decimal? @db.Decimal(14, 2)
-  statDate    DateTime?
-  rawJson     Json?
-  createdAt   DateTime @default(now())
+  id           Int       @id @default(autoincrement())
+  brandId      Int       @default(7)
+  regionName   String
+  fee          Decimal   @default(0) @db.Decimal(14, 2)
+  accountCnt   Int       @default(0)
+  noteCnt      Int       @default(0)
+  replyRate    Decimal?  @db.Decimal(10, 2)
+  inquiries    Int       @default(0)
+  openings     Int       @default(0)
+  leads        Int       @default(0)
+  openRate     Decimal?  @db.Decimal(10, 2)
+  openLeadRate Decimal?  @db.Decimal(10, 2)
+  inquiryCost  Decimal?  @db.Decimal(14, 2)
+  openCost     Decimal?  @db.Decimal(14, 2)
+  leadCost     Decimal?  @db.Decimal(14, 2)
+  statDate     DateTime?
+  rawJson      Json?
+  createdAt    DateTime  @default(now())
 
   @@index([brandId, statDate])
 }
 
 model KoxCampaignProjectAccount {
-  id              Int    @id @default(autoincrement())
+  id              Int                @id @default(autoincrement())
   projectId       Int
   project         KoxCampaignProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
   virtualSellerId String
@@ -925,22 +929,22 @@ model KoxCampaignProjectAccount {
 }
 
 model InsightContent {
-  id          Int       @id @default(autoincrement())
-  platform    String    @default("douyin")
-  contentType String    @default("note")
+  id          Int      @id @default(autoincrement())
+  platform    String   @default("douyin")
+  contentType String   @default("note")
   title       String
   authorName  String
-  authorType  String    @default("KOC")
+  authorType  String   @default("KOC")
   publishAt   DateTime
-  views       Int       @default(0)
-  likes       Int       @default(0)
-  comments    Int       @default(0)
-  shares      Int       @default(0)
-  collects    Int       @default(0)
-  sentiment   String    @default("neutral")
-  irrelevant  Boolean   @default(false)
-  brandId     Int       @default(1)
-  createdAt   DateTime  @default(now())
+  views       Int      @default(0)
+  likes       Int      @default(0)
+  comments    Int      @default(0)
+  shares      Int      @default(0)
+  collects    Int      @default(0)
+  sentiment   String   @default("neutral")
+  irrelevant  Boolean  @default(false)
+  brandId     Int      @default(1)
+  createdAt   DateTime @default(now())
 
   @@index([brandId])
   @@index([platform])
@@ -966,14 +970,14 @@ model InsightDailyStat {
 }
 
 model InsightReport {
-  id         Int      @id @default(autoincrement())
-  name       String
-  period     String
-  access     String   @default("public")
-  fileSize   Int      @default(0)
-  brandId    Int      @default(1)
+  id          Int      @id @default(autoincrement())
+  name        String
+  period      String
+  access      String   @default("public")
+  fileSize    Int      @default(0)
+  brandId     Int      @default(1)
   createdById Int
-  createdAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   @@index([brandId])
 }
@@ -1100,14 +1104,14 @@ model FactoryPackage {
 }
 
 model PackageClaim {
-  id        Int             @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   packageId Int
-  package   FactoryPackage  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  package   FactoryPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
   historyId Int
-  history   XhsHistory?     @relation("PackageClaimHistory", fields: [historyId], references: [id], onDelete: Cascade)
+  history   XhsHistory?    @relation("PackageClaimHistory", fields: [historyId], references: [id], onDelete: Cascade)
   userId    Int
-  source    String          @default("h5")
-  createdAt DateTime        @default(now())
+  source    String         @default("h5")
+  createdAt DateTime       @default(now())
 
   @@unique([packageId, userId, historyId])
   @@index([userId])
@@ -1202,53 +1206,53 @@ model ProOrgConfig {
 }
 
 model ProKosOverview {
-  id                    Int      @id @default(autoincrement())
-  brandId               Int      @default(6)
+  id                    Int       @id @default(autoincrement())
+  brandId               Int       @default(6)
   statDate              DateTime
-  dateType              Int      @default(2)
+  dateType              Int       @default(2)
   startDate             DateTime?
   endDate               DateTime?
-  kosAccountNum         Int      @default(0)
-  rtbAccountNum         Int      @default(0)
-  createNoteNum         Int      @default(0)
-  rtbNoteNum            Int      @default(0)
-  socReadCnt            Int      @default(0)
-  adsReadCnt            Int      @default(0)
-  messageOpenCnt        Int      @default(0)
-  messageDrivingOpenCnt Int      @default(0)
-  msgLeadsNum           Int      @default(0)
-  leadsSuccess          Int      @default(0)
-  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
-  createdAt             DateTime @default(now())
+  kosAccountNum         Int       @default(0)
+  rtbAccountNum         Int       @default(0)
+  createNoteNum         Int       @default(0)
+  rtbNoteNum            Int       @default(0)
+  socReadCnt            Int       @default(0)
+  adsReadCnt            Int       @default(0)
+  messageOpenCnt        Int       @default(0)
+  messageDrivingOpenCnt Int       @default(0)
+  msgLeadsNum           Int       @default(0)
+  leadsSuccess          Int       @default(0)
+  rtbIncomeAmt          Decimal   @default(0) @db.Decimal(14, 2)
+  createdAt             DateTime  @default(now())
 
   @@unique([brandId, statDate, dateType])
   @@index([brandId])
 }
 
 model ProKosStaff {
-  id                    Int      @id @default(autoincrement())
-  brandId               Int      @default(6)
+  id                    Int       @id @default(autoincrement())
+  brandId               Int       @default(6)
   userId                String
   statDate              DateTime
-  dateType              Int      @default(2)
+  dateType              Int       @default(2)
   nickName              String
   realName              String?
   avatar                String?
   province              String?
   city                  String?
-  createNoteNum         Int      @default(0)
-  rtbNoteNum            Int      @default(0)
-  socImpCnt             Int      @default(0)
-  socClickCnt           Int      @default(0)
-  socEnageCnt           Int      @default(0)
-  messageOpenCnt        Int      @default(0)
-  messageDrivingOpenCnt Int      @default(0)
-  msgLeadsNum           Int      @default(0)
-  leadsSuccess          Int      @default(0)
-  rtbIncomeAmt          Decimal  @default(0) @db.Decimal(14, 2)
+  createNoteNum         Int       @default(0)
+  rtbNoteNum            Int       @default(0)
+  socImpCnt             Int       @default(0)
+  socClickCnt           Int       @default(0)
+  socEnageCnt           Int       @default(0)
+  messageOpenCnt        Int       @default(0)
+  messageDrivingOpenCnt Int       @default(0)
+  msgLeadsNum           Int       @default(0)
+  leadsSuccess          Int       @default(0)
+  rtbIncomeAmt          Decimal   @default(0) @db.Decimal(14, 2)
   interestsStatus       Int?
   bindTime              DateTime?
-  createdAt             DateTime @default(now())
+  createdAt             DateTime  @default(now())
 
   @@unique([brandId, userId, statDate, dateType])
   @@index([brandId, statDate])
@@ -1310,8 +1314,8 @@ model LaiguLead {
   lastMessageAt      DateTime?
   lastClientContent  String?
   staffName          String?
-  advertiserName     String? 
-  isMdd              Boolean  @default(false)
+  advertiserName     String?
+  isMdd              Boolean   @default(false)
   sessionCreatedAt   DateTime?
   sessionEndedAt     DateTime?
   rawJson            Json
@@ -1325,19 +1329,38 @@ model LaiguLead {
   @@index([phone])
 }
 
+// MDD(5) 小红书渠道销售清单（月度 × 门店 × 品系；数据由 MDD 提供 Excel 导入）
+model MddChannelSale {
+  id          Int      @id @default(autoincrement())
+  brandId     Int      @default(5)
+  month       String
+  storeName   String
+  province    String?
+  productLine String
+  quantity    Int      @default(0)
+  amount      Decimal? @db.Decimal(14, 2)
+  remark      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([brandId, month, storeName, productLine])
+  @@index([brandId, month])
+  @@index([brandId, productLine])
+}
+
 model KoxRanfDaily {
-  id             Int      @id @default(autoincrement())
-  brandId        Int      @default(6)
-  day            DateTime @unique
-  fee            Decimal  @default(0) @db.Decimal(14, 2)
-  impression     BigInt   @default(0)
-  click          BigInt   @default(0)
-  interaction    BigInt   @default(0)
-  msgInquiries   BigInt   @default(0)
-  msgOpenings    BigInt   @default(0)
-  msgLeads       BigInt   @default(0)
-  noteCnt        Int      @default(0)
-  fetchedAt      DateTime @default(now()) @updatedAt
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(6)
+  day          DateTime @unique
+  fee          Decimal  @default(0) @db.Decimal(14, 2)
+  impression   BigInt   @default(0)
+  click        BigInt   @default(0)
+  interaction  BigInt   @default(0)
+  msgInquiries BigInt   @default(0)
+  msgOpenings  BigInt   @default(0)
+  msgLeads     BigInt   @default(0)
+  noteCnt      Int      @default(0)
+  fetchedAt    DateTime @default(now()) @updatedAt
 
   @@index([brandId, day])
 }
@@ -1391,21 +1414,21 @@ model ProClueToolStatDaily {
 // 聚光「商业内容管理」按日×子账户合计（特斯拉运营总览内容指标权威口径，窗口感知）
 // 数据源: POST /api/leona/creative_center/noteList 的 noteStatData（sync-juguang-content.cjs --stat-daily 维护）
 model KoxContentStatDaily {
-  id            Int      @id @default(autoincrement())
-  brandId       Int      @default(6)
-  day           DateTime
-  vSellerId     String
-  vSellerName   String?
-  impNum        Int      @default(0)
-  readFeedNum   Int      @default(0)
-  engageCnt     Int      @default(0)
-  followCnt     Int      @default(0)
-  noteNum       Int      @default(0)
-  ziranImpCnt   Int      @default(0)
-  ziranReadCnt  Int      @default(0)
-  tuiguangImpCnt Int     @default(0)
-  tuiguangReadCnt Int    @default(0)
-  fetchedAt     DateTime @default(now()) @updatedAt
+  id              Int      @id @default(autoincrement())
+  brandId         Int      @default(6)
+  day             DateTime
+  vSellerId       String
+  vSellerName     String?
+  impNum          Int      @default(0)
+  readFeedNum     Int      @default(0)
+  engageCnt       Int      @default(0)
+  followCnt       Int      @default(0)
+  noteNum         Int      @default(0)
+  ziranImpCnt     Int      @default(0)
+  ziranReadCnt    Int      @default(0)
+  tuiguangImpCnt  Int      @default(0)
+  tuiguangReadCnt Int      @default(0)
+  fetchedAt       DateTime @default(now()) @updatedAt
 
   @@unique([brandId, day, vSellerId])
   @@index([brandId, day])
@@ -1413,19 +1436,19 @@ model KoxContentStatDaily {
 
 // 聚光「商业内容管理」逐笔记×逐日（窗口内发布的员工笔记；区域数据分析内容指标权威源）
 model KoxContentNoteDaily {
-  id              Int      @id @default(autoincrement())
-  brandId         Int      @default(6)
+  id              Int       @id @default(autoincrement())
+  brandId         Int       @default(6)
   noteId          String
   day             DateTime
-  impNum          Int      @default(0)
-  readFeedNum     Int      @default(0)
-  engageCnt       Int      @default(0)
-  followCnt       Int      @default(0)
+  impNum          Int       @default(0)
+  readFeedNum     Int       @default(0)
+  engageCnt       Int       @default(0)
+  followCnt       Int       @default(0)
   authorName      String?
   vSellerId       String?
   notePublishTime DateTime?
   isRtbAdver      Boolean?
-  fetchedAt       DateTime @default(now()) @updatedAt
+  fetchedAt       DateTime  @default(now()) @updatedAt
 
   @@unique([brandId, noteId, day])
   @@index([brandId, day])
