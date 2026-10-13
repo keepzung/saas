@@ -19,9 +19,15 @@
     </template>
 
     <a-card :bordered="false">
+      <a-input-search
+        v-model:value="searchKw"
+        placeholder="搜索姓名 / 手机号"
+        allow-clear
+        style="width: 240px; margin-bottom: 12px"
+      />
       <a-table
         :columns="columns"
-        :data-source="rows"
+        :data-source="filteredRows"
         :loading="loading"
         :pagination="false"
         row-key="id"
@@ -430,6 +436,14 @@ import { getQuota, grantQuota } from '../../api/contentpro';
 const router = useRouter();
 const auth = useAuthStore();
 const rows = ref([]);
+const searchKw = ref('');
+const filteredRows = computed(() => {
+  const kw = searchKw.value.trim();
+  if (!kw) return rows.value;
+  return rows.value.filter(
+    (r) => (r.nickname || '').includes(kw) || (r.phone || '').includes(kw),
+  );
+});
 const loading = ref(false);
 
 const ROLE_META = {

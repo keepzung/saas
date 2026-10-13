@@ -20,6 +20,14 @@
           <a-radio-button :value="7">近7天</a-radio-button>
           <a-radio-button :value="30">近30天</a-radio-button>
         </a-radio-group>
+        <a-range-picker
+          v-model:value="dateRange"
+          size="small"
+          value-format="YYYY-MM-DD"
+          style="width: 240px"
+          :placeholder="['开始日期', '结束日期']"
+          @change="onDateRangeChange"
+        />
         <a-input-search
           v-model:value="keyword"
           size="small"
@@ -43,17 +51,26 @@
       <div v-for="b in blocks" :key="b.label" class="block-card">
         <div class="block-content">
           <div class="block-value">{{ b.value }}</div>
-          <div class="block-label">{{ b.label }}</div>
+          <div class="block-label">
+            <a-tooltip v-if="b.tip" :title="b.tip">
+              <span>{{ b.label }}<sup style="color: #3456e6">*</sup></span>
+            </a-tooltip>
+            <template v-else>{{ b.label }}</template>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="wc-model-row">
+      <a-card v-if="!isDf && !isTesla" :bordered="false" size="small" title="内容类型效率对比分析" class="type-eff-card">
+        <div ref="typeEffEl" class="type-efficiency-chart" />
+      </a-card>
+
       <a-card v-if="mode === 'real'" :bordered="false" size="small" class="wordcloud-card">
       <template #title>
         <div class="card-header">
           <span class="bar"></span>
-          <span class="title">高频词云</span>
+          <span class="title">内容关键词词云</span>
           <a-radio-group v-model:value="wcSource" size="small" class="wc-tabs" @change="loadWordcloud">
             <a-radio-button value="title">内容词云（标题）</a-radio-button>
             <a-radio-button v-if="isTesla" value="comments">用户词云（评论）</a-radio-button>
@@ -77,7 +94,7 @@
       <div v-if="wcMode === 'cloud' && !wcWords.length" class="muted mini" style="padding: 20px">暂无数据</div>
       </a-card>
 
-      <a-card v-if="!isDf" :bordered="false" size="small" title="提及车型分布" class="mention-model-card">
+      <a-card v-if="!isDf && !isMdd" :bordered="false" size="small" title="提及车型分布" class="mention-model-card">
         <div ref="modelPieEl" class="mention-model-chart" />
       </a-card>
     </div>
@@ -106,12 +123,6 @@
         <div v-if="!cesTop.length" class="empty-feed">暂无数据</div>
       </div>
     </a-card>
-
-    <div v-if="!isDf && !isTesla" class="note-analysis-row">
-      <a-card :bordered="false" size="small" title="内容类型效率对比分析" class="note-analysis-card-left">
-        <div ref="typeEffEl" class="type-efficiency-chart" />
-      </a-card>
-    </div>
 
     <a-card v-if="isMdd" :bordered="false" size="small">
       <template #title>
@@ -366,6 +377,7 @@ function rint(min, max) {
 }
 
 const days = ref(30);
+const dateRange = ref(null);
 const notes = ref([]);
 const accounts = ref([]);
 const loading = ref(false);
@@ -456,15 +468,16 @@ const fmt = (v) => {
 const blocks = computed(() => {
   if (mode.value === 'real' && summaryData.value) {
     const t = summaryData.value.totals;
+    const isMddPm = !!summaryData.value.pm_scope_note;
     return [
       { label: '内容数', value: fmt(t.note_cnt) },
       { label: '互动量', value: fmt(t.interaction_sum) },
       { label: '获得关注数', value: fmt(t.follow_sum) },
       { label: '阅读数', value: fmt(t.view_sum) },
       { label: '曝光量', value: fmt(t.exposure_sum) },
-      { label: '私信进线数', value: fmt(t.pm_inquiries_sum) },
-      { label: '私信开口数', value: fmt(t.pm_openings_sum) },
-      { label: '私信留资数', value: fmt(t.pm_leads_sum) },
+      { label: '私信进线数', value: fmt(t.pm_inquiries_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
+      { label: '私信开口数', value: fmt(t.pm_openings_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
+      { label: '私信留资数', value: fmt(t.pm_leads_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
     ];
   }
   const list = filtered.value;
@@ -524,7 +537,6 @@ let pieChart = null;
 
 // ── 词云（内容标题话题 / 用户评论意图）──
 const wordcloudEl = ref(null);
-let wcChart = null;
 const wcSource = ref('title');
 const wcMetric = ref('count');
 const wcWords = ref([]);
@@ -563,15 +575,19 @@ async function loadWordcloud() {
   }
 }
 
-function renderWordcloud() {
-  if (wcMode.value !== 'cloud' || !wcLibReady || !wordcloudEl.value) return;
-  if (!wcChart) wcChart = echarts.init(wordcloudEl.value);
-  const key = wcMetric.value;
+const wcChartMap = new Map();
+function renderOneWc(el, slot, key, unit) {
+  if (!el) return;
+  let chart = wcChartMap.get(slot);
+  if (!chart) {
+    chart = echarts.init(el);
+    wcChartMap.set(slot, chart);
+  }
   const data = wcWords.value
     .slice(0, 120)
     .map((w) => ({ name: w.word, value: Math.max(1, Math.round(Number(w[key]) || 1)) }));
-  wcChart.setOption({
-    tooltip: { formatter: (p) => `${p.name}：${p.value}${wcMetric.value === 'count' ? '篇' : '互动'}` },
+  chart.setOption({
+    tooltip: { formatter: (p) => `${p.name}：${p.value}${unit}` },
     series: [
       {
         type: 'wordCloud',
@@ -596,8 +612,13 @@ function renderWordcloud() {
       },
     ],
   });
-  wcChart.off('click');
-  wcChart.on('click', (p) => onWordClick(p.name));
+  chart.off('click');
+  chart.on('click', (p) => onWordClick(p.name));
+}
+
+function renderWordcloud() {
+  if (wcMode.value !== 'cloud' || !wcLibReady) return;
+  renderOneWc(wordcloudEl.value, 'single', wcMetric.value, wcMetric.value === 'count' ? '篇' : '互动');
 }
 
 function onWordClick(word) {
@@ -739,10 +760,11 @@ function regenerate() {
 }
 
 function realParams(extra = {}) {
+  const custom = dateRange.value?.length === 2;
   return {
     brandId: auth.currentBrandId ?? undefined,
-    start: dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
-    end: dayjs().format('YYYY-MM-DD'),
+    start: custom ? dateRange.value[0] : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
+    end: custom ? dateRange.value[1] : dayjs().format('YYYY-MM-DD'),
     ...(typeFilter.value !== '全部' ? { category: typeFilter.value } : {}),
     ...(modelFilter.value !== '全部车型' ? { modelTag: modelFilter.value } : {}),
     ...(keyword.value ? { keyword: keyword.value } : {}),
@@ -827,10 +849,18 @@ async function fetchAllRealRows() {
 }
 
 function onDaysChange() {
+  dateRange.value = null;
   page.value = 1;
   if (mode.value === 'real') loadReal();
   else regenerate();
   loadCompliance();
+}
+
+// 自定义日期范围优先于「近7天/近30天」快捷按钮
+function onDateRangeChange() {
+  if (dateRange.value?.length === 2) days.value = null;
+  page.value = 1;
+  onFilterChange();
 }
 
 function onFilterChange() {
@@ -1020,7 +1050,7 @@ async function loadAccounts() {
 function onResize() {
   typeChart?.resize();
   pieChart?.resize();
-  wcChart?.resize();
+  for (const c of wcChartMap.values()) c.resize();
 }
 
 async function loadCompliance() {
@@ -1080,7 +1110,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
   typeChart?.dispose();
   pieChart?.dispose();
-  wcChart?.dispose();
+  for (const c of wcChartMap.values()) c.dispose();
+  wcChartMap.clear();
 });
 </script>
 
@@ -1150,8 +1181,8 @@ onBeforeUnmount(() => {
 
 .type-efficiency-chart {
   width: 100%;
-  height: 400px;
-  margin-top: 16px;
+  height: 480px;
+  margin-top: 8px;
 }
 
 .ces-top-grid {
