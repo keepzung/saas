@@ -69,6 +69,7 @@ async function launchBrowser() {
   } catch {
     const pc = backendRequire('playwright-core');
     const findChromium = () => {
+      if (process.env.CHROMIUM_BIN && fs.existsSync(process.env.CHROMIUM_BIN)) return process.env.CHROMIUM_BIN;
       const bases = [
         process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
         '/root/.cache/ms-playwright',
@@ -88,8 +89,10 @@ async function launchBrowser() {
     chromium = { launch: (opts) => pc.chromium.launch({ ...opts, executablePath: exe ?? undefined }) };
   }
   if (!fs.existsSync(STATE_FILE)) {
-    console.error(`缺少小红书登录态：${STATE_FILE}\n请先执行: node xhs-login-save.cjs state/${path.basename(STATE_FILE)}（扫码登录一次）`);
-    process.exit(2);
+    // 不中断整批：og:image 快路径照常跑，仅跳过浏览器兜底分支（调用方判 null）
+    console.warn(`[warn] 缺少小红书登录态 ${STATE_FILE}，仅用 og:image 采集，浏览器兜底已跳过。`);
+    console.warn('       如需浏览器兜底请先执行: node xhs-login-save.cjs state/auth-mdd.json');
+    return null;
   }
   const browser = await chromium.launch({
     headless: true,
@@ -156,9 +159,11 @@ async function download(url, file) {
   let browserOk = 0;
   let mirrorOk = 0;
   let fail = 0;
+  let skippedNoState = 0;
   let done = 0;
   let ctx = null;
   let browser = null;
+  let browserUnavailable = false;
 
   for (const r of rows) {
     done += 1;
@@ -172,9 +177,20 @@ async function download(url, file) {
     } else if (og && !DRY_RUN && !NO_MIRROR && fs.existsSync(local)) {
       cover = `/uploads/covers/${r.noteId}.jpg`; // 已镜像过
     }
-    // 来源 B：登录态浏览器 DOM
+    // 来源 B：登录态浏览器 DOM（登录态缺失时跳过，不中断）
     if (!cover) {
-      if (!ctx) ({ browser, ctx } = await launchBrowser());
+      if (browserUnavailable) {
+        skippedNoState += 1;
+        continue;
+      }
+      if (!ctx) {
+        ({ browser, ctx } = await launchBrowser());
+        if (!ctx) {
+          browserUnavailable = true;
+          skippedNoState += 1;
+          continue;
+        }
+      }
       cover = await browserCover(ctx, r.noteUrl);
       if (cover) browserOk += 1;
       await sleep(1500 + Math.floor(Math.random() * 1200)); // 限速
@@ -201,6 +217,6 @@ async function download(url, file) {
   }
 
   if (browser) await browser.close().catch(() => {});
-  console.log(`完成：处理 ${done}，og:image ${ogOk}，浏览器 ${browserOk}，镜像 ${mirrorOk}，失败 ${fail}${DRY_RUN ? '（dry-run 未写库）' : ''}`);
+  console.log(`完成：处理 ${done}，og:image ${ogOk}，浏览器 ${browserOk}，镜像 ${mirrorOk}，失败 ${fail}${skippedNoState ? `，缺登录态跳过 ${skippedNoState}` : ''}${DRY_RUN ? '（dry-run 未写库）' : ''}`);
   await p.$disconnect();
 })().catch((e) => { console.error('ERR:', e.message); process.exit(1); });

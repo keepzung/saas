@@ -28,15 +28,6 @@
           @search="onSearch"
         />
         <a-select
-          v-model:value="staffFilter"
-          style="width: 160px"
-          show-search
-          allow-clear
-          placeholder="按 KOS 名称筛选"
-          :options="staffOptions"
-          @change="onSearch"
-        />
-        <a-select
           v-model:value="kosFilter"
           style="width: 180px"
           show-search
@@ -346,7 +337,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { SyncOutlined } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
-import { getLaiguLeadDetail, getLaiguLeads, getLaiguLeadStats, getLaiguStaffFacets, syncLaigu } from '../../api/laigu';
+import { getLaiguLeadDetail, getLaiguLeads, getLaiguLeadStats, syncLaigu } from '../../api/laigu';
 import { getKoxAccounts } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -390,10 +381,6 @@ const syncing = ref(false);
 const kosFilter = ref(undefined);
 const kosOptions = ref([]);
 
-// 按 KOS 名称（客服昵称）筛选：选项来自真实会话数据
-const staffFilter = ref(undefined);
-const staffOptions = ref([]);
-
 const detailOpen = ref(false);
 const detailLoading = ref(false);
 const detail = ref(null);
@@ -425,20 +412,7 @@ function filterParams() {
     params.to = dateRange.value[1];
   }
   if (kosFilter.value) params.kos = kosFilter.value;
-  if (staffFilter.value) params.staff = staffFilter.value;
   return params;
-}
-
-async function loadStaffFacets() {
-  try {
-    const res = await getLaiguStaffFacets(brandParam());
-    staffOptions.value = (res.list ?? []).map((s) => ({
-      label: `${s.name}（${s.count}）`,
-      value: s.name,
-    }));
-  } catch {
-    /* 筛选项加载失败不阻塞 */
-  }
 }
 
 // 已留资会话整行高亮，一眼识别
@@ -659,7 +633,6 @@ onMounted(() => {
   reload();
   loadStats();
   loadKosOptions();
-  loadStaffFacets();
 });
 </script>
 

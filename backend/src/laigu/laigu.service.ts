@@ -514,8 +514,6 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     /** 按 KOS 账号筛选（MDD）：传账号昵称，匹配进线账号 id（subSource=主页 id）或客服昵称 */
     kos?: string;
-    /** 按 KOS 名称（客服昵称）筛选：精确匹配 staffName */
-    staff?: string;
   }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(100, Number(query.page_size ?? 10) || 10);
@@ -530,8 +528,6 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     // 隐藏空会话：客户从未发过消息（0 条客户消息的"空白私信"）
     if (query.hasClientMessage === 'true') where.clientMessageCount = { gt: 0 };
     if (query.source) where.source = query.source;
-    // 按 KOS 名称（客服昵称）筛选：精确匹配
-    if (query.staff) where.staffName = query.staff;
     // 按 KOS 账号筛选：账号主页 id → subSource；昵称 → 客服昵称（客服名数据不全，双判据）
     if (query.kos && brandId === 5) {
       const acc = await this.prisma.kosAccount.findFirst({
@@ -628,24 +624,6 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
     return { total, resourced, with_phone: withPhone, today };
-  }
-
-  /** 私信线索「按 KOS 名称筛选」选项（MDD）：distinct 客服昵称 + 会话数 */
-  async staffFacets(brandIdParam?: string) {
-    const brandId = Number(brandIdParam ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
-    const scope: Prisma.LaiguLeadWhereInput = { brandId };
-    if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') scope.isMdd = true;
-    const rows = await this.prisma.laiguLead.groupBy({
-      by: ['staffName'],
-      where: { ...scope, staffName: { not: null } },
-      _count: { _all: true },
-    });
-    return {
-      list: rows
-        .filter((r): r is typeof r & { staffName: string } => !!r.staffName)
-        .map((r) => ({ name: r.staffName, count: r._count._all }))
-        .sort((a, b) => b.count - a.count),
-    };
   }
 
   /** 用户反馈分析聚合（特斯拉面板）：会话级评论分类/情感/高频话题，规则引擎无外部依赖 */
