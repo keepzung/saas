@@ -3,8 +3,8 @@
 //  1) sessionCreatedAt：来鼓 API 不返回会话创建时间，历史行该字段全为 NULL，
 //     导致按时间窗筛选的 KPI/账号聚合永远查不到数据。
 //     回填规则：rawJson.created_at（API 原始字段，若有）优先，缺失时回退 firstMessageAt。
-//  2) isMdd：归属判定（投放账户白名单 ∪ 小红书账号 id ∪ 客服昵称）在列加入库后变更过时，
-//     对历史行重算归属，避免 isMdd=false 的本品牌会话被过滤。
+//  2) isMdd：归属判定（有投放归因以投放账户白名单为准，特斯拉等其他品牌投放期的会话不并入；
+//     无归因时按 小红书账号id / 客服昵称）对历史行重算，避免本品牌会话被过滤或他牌会话误入。
 // 幂等可重跑；只更新有变化的行。
 // 用法:
 //   node backfill-laigu-session-times.cjs              # 执行
@@ -87,12 +87,16 @@ async function main() {
     // 1.5) 投放账户名：rawJson.ad_info.advertiser_name 优先
     const rawAdv = (raw.ad_info ?? {}).advertiser_name ?? null;
     const adv = r.advertiserName ?? (rawAdv ? String(rawAdv).slice(0, 120) : null);
-    // 2) MDD 归属重算（与 laigu.service.isMddSession 三判据一致）
+    // 2) MDD 归属重算（与 laigu.service.isMddSession 一致）：有投放归因时以投放账户白名单为准
+    //    （特斯拉等其他品牌投放期的会话不并入 MDD）；无归因的自然流量按 账号id/客服昵称。
+    //    Boolean() 兜底：避免 JS 短路产生 null 与布尔比较误判（null !== false 恒真）
     const advertiser = (raw.ad_info ?? {}).advertiser_name;
     const isMdd = BRAND_ID === 5
-      ? (advertiser && MDD_ADVERTISERS.includes(String(advertiser).trim()))
-        || (r.subSource && userIds.has(r.subSource))
-        || (r.staffName && nicknames.has(r.staffName))
+      ? Boolean(
+        advertiser
+          ? MDD_ADVERTISERS.includes(String(advertiser).trim())
+          : (r.subSource && userIds.has(r.subSource)) || (r.staffName && nicknames.has(r.staffName)),
+      )
       : r.isMdd;
     const timeDiff = (sc?.getTime() ?? null) !== (r.sessionCreatedAt?.getTime() ?? null);
     const advDiff = (adv ?? null) !== (r.advertiserName ?? null);

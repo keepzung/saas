@@ -430,10 +430,11 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     return this.mddSetsCache;
   }
 
-  /** Morgandada 归属判定（并集）：投放账户白名单 / 小红书账号 id / 客服昵称 */
+  /** Morgandada 归属判定：有投放归因时以投放账户白名单为准（特斯拉等其他品牌投放期的会话不并入 MDD）；
+   *  无投放归因的自然流量按 小红书账号 id / 客服昵称 归属 */
   private async isMddSession(session: LaiguSession, staffName: string | null): Promise<boolean> {
     const advertiser = (session.ad_info as { advertiser_name?: string } | undefined)?.advertiser_name;
-    if (advertiser && MDD_ADVERTISERS.includes(advertiser.trim())) return true;
+    if (advertiser) return MDD_ADVERTISERS.includes(advertiser.trim());
     const sets = await this.mddAccountSets();
     if (session.sub_source && sets.userIds.has(session.sub_source)) return true;
     if (staffName && sets.nicknames.has(staffName)) return true;
