@@ -165,8 +165,9 @@ const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
 // 仅纯演示品牌显示"功能示意"提示；荣威(2)已接真实数据，特斯拉/东风格力为真实口径
 const isDemo = computed(() => [1, 4, 5].includes(Number(auth.currentBrandId)));
+const isRoewe = computed(() => Number(auth.currentBrandId) === 2);
 // 荣威(2)对客口径为「经销商」，其余共用该页的工作区保持「代理商」
-const dealerLabel = computed(() => (Number(auth.currentBrandId) === 2 ? '经销商' : '代理商'));
+const dealerLabel = computed(() => (isRoewe.value ? '经销商' : '代理商'));
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);
@@ -194,16 +195,20 @@ function onDaysChange() {
   reload();
 }
 
-const columns = computed(() => [
-  { key: 'rank', title: '排名', width: 70 },
-  { key: 'dealer_name', title: dealerLabel.value, width: 180, ellipsis: true },
-  { key: 'tier', title: '分层', width: 80 },
-  { title: '账号数', dataIndex: 'account_num', width: 80 },
-  { key: 'item_cnt', title: '发布数 / 完成度', width: 200 },
-  { title: '曝光量', dataIndex: 'exposure_sum', width: 110, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
-  { key: 'pm_leads', title: '留资数 / 完成度', width: 180 },
-  { key: 'score', title: '综合得分', width: 90, sorter: (a, b) => a.score - b.score },
-]);
+const columns = computed(() => {
+  const cols = [
+    { key: 'rank', title: '排名', width: 70 },
+    { key: 'dealer_name', title: dealerLabel.value, width: 180, ellipsis: true },
+    { key: 'tier', title: '分层', width: 80 },
+    { title: '账号数', dataIndex: 'account_num', width: 80 },
+    { key: 'item_cnt', title: '发布数 / 完成度', width: 200 },
+    { title: '曝光量', dataIndex: 'exposure_sum', width: 110, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
+  ];
+  // 荣威真实留资通道未接入（MCC 侧无留资数据，恒为 0），留资列隐藏；接入专业号获客工具后恢复
+  if (!isRoewe.value) cols.push({ key: 'pm_leads', title: '留资数 / 完成度', width: 180 });
+  cols.push({ key: 'score', title: '综合得分', width: 90, sorter: (a, b) => a.score - b.score });
+  return cols;
+});
 
 const tierCount = computed(() => {
   const map = { 头部: 0, 腰部: 0, 尾部: 0, 沉默: 0 };
