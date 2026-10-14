@@ -1,15 +1,26 @@
 <template>
   <PageWrapper title="反馈分析" subtitle="评论互动与留资转化分析">
     <template #extra>
+      <a-segmented
+        v-if="isMdd"
+        v-model:value="feedbackScope"
+        :options="[
+          { label: '私信分析', value: 'dm' },
+          { label: '评论监控', value: 'comment' },
+          { label: '私信监控', value: 'monitor' },
+        ]"
+        @change="loadData"
+      />
       <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
         <a-radio-button :value="7">近7天</a-radio-button>
         <a-radio-button :value="30">近30天</a-radio-button>
+        <a-radio-button v-if="isMdd" :value="90">近90天</a-radio-button>
       </a-radio-group>
     </template>
 
     <a-card :bordered="false" class="pipeline-card" size="small">
       <div class="pipeline-bar">
-        <span class="pipeline-pulse" :class="{ off: isTesla && !laiguReal }"></span>
+        <span class="pipeline-pulse" :class="{ off: realChannel && !laiguReal }"></span>
         <span class="pipeline-status-text">{{ pipelineStatusText }}</span>
         <a-popover placement="bottomLeft" trigger="hover">
           <template #content>
@@ -97,6 +108,52 @@
         </div>
       </a-card>
     </div>
+
+    <a-card v-if="isMdd && feedbackScope === 'monitor'" :bordered="false" size="small">
+      <template #title>
+        <div class="card-header">
+          <span class="bar"></span>
+          <span class="title">私信内容监控（引流企微 × 话术转化）</span>
+        </div>
+      </template>
+      <div class="monitor-grid">
+        <div class="mblock">
+          <div class="mb-label">引流企微会话</div>
+          <div class="mb-value" style="color: #16a34a">{{ monitorData.wechat_leads }}</div>
+        </div>
+        <div class="mblock">
+          <div class="mb-label">有话术回复会话</div>
+          <div class="mb-value">{{ (monitorData.script_stats || []).reduce((s, v) => s + v.count, 0) }}</div>
+        </div>
+      </div>
+      <div class="script-block">
+        <div class="script-title">客服话术 × 留资转化</div>
+        <div v-for="s in monitorData.script_stats" :key="s.name" class="script-row">
+          <span class="script-name">{{ s.name }}</span>
+          <div class="script-track">
+            <div class="script-bar" :style="{ width: s.conv + '%' }"></div>
+          </div>
+          <span class="script-val">{{ s.count }} 会话 · 留资 {{ s.lead }} · 转化 {{ s.conv }}%</span>
+        </div>
+        <div v-if="!(monitorData.script_stats || []).length" class="muted mini" style="padding: 12px">暂无话术数据</div>
+      </div>
+      <a-table
+        :columns="wechatColumns"
+        :data-source="monitorData.wechat_detail"
+        :pagination="{ pageSize: 8, showSizeChanger: false, size: 'small' }"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'author'">{{ record.author }}</template>
+          <template v-else-if="column.key === 'preview'">{{ record.preview }}</template>
+          <template v-else-if="column.key === 'by'">
+            <a-tag :color="record.by === '客服引导' ? 'blue' : 'default'">{{ record.by }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'time'">{{ (record.time || '').slice(0, 16).replace('T', ' ') }}</template>
+        </template>
+      </a-table>
+    </a-card>
 
     <a-card :bordered="false" size="small">
       <template #title>
@@ -193,6 +250,11 @@ import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const isTesla = Number(auth.currentBrandId) === 6;
+// Morgandada(5) 同样接来鼓私信真实口径（服务端 isMdd 过滤已就绪）
+const isMdd = Number(auth.currentBrandId) === 5;
+const realChannel = isTesla || isMdd;
+// 口径切换（MDD）：私信分析 / 评论监控
+const feedbackScope = ref('dm');
 
 const PAGE_SIZE = 12;
 
@@ -235,6 +297,13 @@ const replyFilter = ref('全部');
 const syncTime = ref(dayjs().format('MM-DD HH:mm'));
 // 服务端全量聚合（明细仅返回最近 500 条样本，统计卡必须用全量口径，否则 7/30 天数据一样）
 const serverStats = ref(null);
+const monitorData = ref({ wechat_leads: 0, script_stats: [], wechat_detail: [] });
+const wechatColumns = [
+  { title: '客户', key: 'author', width: 140 },
+  { title: '最后客户消息', key: 'preview', ellipsis: true },
+  { title: '引流方向', key: 'by', width: 100 },
+  { title: '最近活跃', key: 'time', width: 150 },
+];
 
 function openNoteUrl(url) {
   if (url) window.open(url, '_blank');
@@ -378,7 +447,7 @@ function onFilterChange() {
 }
 
 function onDaysChange() {
-  if (isTesla) loadData();
+  if (realChannel) loadData();
   else regenerate();
 }
 
@@ -388,11 +457,17 @@ async function loadData() {
     const res = await getLaiguFeedbackAnalysis({
       brandId: auth.currentBrandId ?? 6,
       days: days.value,
+      ...(isMdd ? { scope: feedbackScope.value } : {}),
     });
     if ((res.total ?? 0) > 0 && (res.comments ?? []).length > 0) {
       laiguReal.value = true;
       laiguNote.value = res.scope_note ?? '';
       topics.value = res.topics ?? [];
+      monitorData.value = {
+        wechat_leads: res.wechat_leads ?? 0,
+        script_stats: res.script_stats ?? [],
+        wechat_detail: res.wechat_detail ?? [],
+      };
       serverStats.value = {
         total: res.total ?? 0,
         today: res.today ?? 0,
@@ -428,17 +503,24 @@ async function loadData() {
   } catch {
     /* 来鼓通道不可用，回退演示 */
   }
+  // 真实通道（特斯拉/MDD）：失败或空数据一律空态，绝不回退演示（假车数据对客户严重误导）
   laiguReal.value = false;
   serverStats.value = null;
-  laiguNote.value = '来鼓通道未接入（等待渠道凭证配置），当前为演示数据';
   topics.value = [];
+  comments.value = [];
+  page.value = 1;
+  if (realChannel) {
+    laiguNote.value = '来鼓数据暂不可用，请稍后重试';
+    return;
+  }
+  laiguNote.value = '来鼓通道未接入（等待渠道凭证配置），当前为演示数据';
   regenerate();
 }
 
 const pipelineStatusText = computed(() => {
-  if (!isTesla) return '评论采集正常运行';
-  if (laiguReal.value) return '来鼓评论接入正常';
-  return '来鼓通道未接入 · 演示数据';
+  if (!realChannel) return '评论采集正常运行';
+  if (laiguReal.value) return isMdd ? '来鼓私信接入正常' : '来鼓评论接入正常';
+  return '来鼓数据暂不可用 · 稍后重试';
 });
 
 function topicSize(count) {
@@ -455,7 +537,7 @@ function topicColor(count) {
 }
 
 onMounted(() => {
-  if (isTesla) loadData();
+  if (realChannel) loadData();
   else regenerate();
 });
 </script>
