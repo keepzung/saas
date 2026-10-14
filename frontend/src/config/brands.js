@@ -61,6 +61,9 @@ export const BRAND_HIDDEN_MENUS = {
 // 东风奕境(7)/格力(8) 按旧系统菜单命名（saas.marketine.cn 截图复刻）
 // 特斯拉(6)：代理商总览页已按账号拆分为 KOS 运营进度，菜单名对齐
 export const BRAND_MENU_NAME_OVERRIDES = {
+  2: {
+    代理商总览: '经销商排行',
+  },
   6: {
     代理商总览: 'KOS数据进度',
   },

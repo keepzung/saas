@@ -1,7 +1,7 @@
 <template>
   <KoxKosTierView v-if="isTesla" />
   <KoxDfDealerView v-else-if="isDf" />
-  <PageWrapper v-else title="经销商排行" subtitle="代理商运营健康度与转化漏斗">
+  <PageWrapper v-else title="经销商排行" :subtitle="`${dealerLabel}运营健康度与转化漏斗`">
     <template #extra>
       <a-range-picker
         v-model:value="customRange"
@@ -15,67 +15,79 @@
       </a-radio-group>
     </template>
 
-    <NoticeBar v-if="!isMdd">该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
+    <NoticeBar v-if="isDemo">该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
 
-    <a-row :gutter="12" align="stretch" class="funnel-row">
-      <a-col :xs="24" :md="16">
-        <a-card :bordered="false" class="unified-funnel-card funnel-stretch" :body-style="{ padding: 0 }">
-          <div class="unified-funnel-steps">
-            <div class="step-item">
-              <div class="step-icon-wrap"><FileTextOutlined class="step-icon" style="color: #2563eb" /></div>
-              <div class="step-title-wrap">
-                <span class="step-title">内容发布</span>
-                <span class="step-value">{{ fmt(total.item_cnt) }} 篇</span>
-              </div>
-            </div>
-            <div class="step-item">
-              <div class="step-icon-wrap"><SendOutlined class="step-icon" style="color: #d97706" /></div>
-              <div class="step-title-wrap">
-                <span class="step-title">留资获取</span>
-                <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
-              </div>
-            </div>
+    <a-card :bordered="false" class="unified-funnel-card" :body-style="{ padding: 0 }">
+      <div class="unified-funnel-steps">
+        <div class="step-item">
+          <div class="step-icon-wrap"><FileTextOutlined class="step-icon" style="color: #2563eb" /></div>
+          <div class="step-title-wrap">
+            <span class="step-title">内容发布</span>
+            <span class="step-value">{{ fmt(total.item_cnt) }} 篇</span>
           </div>
-          <div class="funnel-cols">
-            <div class="funnel-step-col">
-              <div class="funnel-metric">
-                <span class="fm-label">内容完成度</span>
-                <b class="fm-value">{{ total.item_pct }}%</b>
-              </div>
-              <a-progress
-                :percent="total.item_pct"
-                :show-info="false"
-                :stroke-color="{ from: '#5087ec', to: '#8cc8ff' }"
-              />
-              <div class="funnel-sub">目标 {{ fmt(total.item_target) }} 篇 / 实际 {{ fmt(total.item_cnt) }} 篇</div>
-            </div>
-            <div class="funnel-step-col">
-              <div class="funnel-metric">
-                <span class="fm-label">留资完成度</span>
-                <b class="fm-value">{{ total.leads_pct }}%</b>
-              </div>
-              <a-progress
-                :percent="total.leads_pct"
-                :show-info="false"
-                :stroke-color="{ from: '#f59e0b', to: '#fbbf24' }"
-              />
-              <div class="funnel-sub">线索率 {{ total.lead_rate }}% · 人均 {{ total.per_store_leads }} 条</div>
-            </div>
+        </div>
+        <div class="step-item">
+          <div class="step-icon-wrap"><SendOutlined class="step-icon" style="color: #d97706" /></div>
+          <div class="step-title-wrap">
+            <span class="step-title">留资获取</span>
+            <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
           </div>
-        </a-card>
-      </a-col>
-      <a-col :xs="24" :md="8">
-        <a-card :bordered="false" size="small" title="代理商分层分布" class="tier-card funnel-stretch">
-          <div ref="tierEl" class="tier-chart" />
-        </a-card>
-      </a-col>
-    </a-row>
+        </div>
+      </div>
+      <div class="funnel-cols">
+        <div class="funnel-step-col">
+          <div class="funnel-metric">
+            <span class="fm-label">内容完成度</span>
+            <b class="fm-value">{{ total.item_pct }}%</b>
+          </div>
+          <a-progress
+            :percent="total.item_pct"
+            :show-info="false"
+            :stroke-color="{ from: '#5087ec', to: '#8cc8ff' }"
+          />
+          <div class="funnel-sub">目标 {{ fmt(total.item_target) }} 篇 / 实际 {{ fmt(total.item_cnt) }} 篇</div>
+        </div>
+        <div class="funnel-step-col">
+          <div class="funnel-metric">
+            <span class="fm-label">留资完成度</span>
+            <b class="fm-value">{{ total.leads_pct }}%</b>
+          </div>
+          <a-progress
+            :percent="total.leads_pct"
+            :show-info="false"
+            :stroke-color="{ from: '#f59e0b', to: '#fbbf24' }"
+          />
+          <div class="funnel-sub">线索率 {{ total.lead_rate }}% · 人均 {{ total.per_store_leads }} 条</div>
+        </div>
+      </div>
+    </a-card>
+
+    <div class="insight-row">
+      <a-card :bordered="false" size="small" class="insight-card">
+        <div class="insight-line">
+          <ThunderboltFilled style="color: #2563eb" />
+          <span class="insight-text">
+            头部{{ dealerLabel }} {{ tierCount.头部 }} 家、腰部 {{ tierCount.腰部 }} 家、尾部 {{ tierCount.尾部 }} 家、
+            沉默 {{ tierCount.沉默 }} 家<template v-if="tierCount.沉默 > 0">，建议对 {{ tierCount.沉默 }} 家沉默{{ dealerLabel }}重点激活</template>。
+          </span>
+        </div>
+        <div class="insight-line">
+          <AlertOutlined style="color: #d97706" />
+          <span class="insight-text">
+            留资完成度 {{ total.leads_pct }}%<template v-if="total.leads_pct < 50">，线索获取滞后于月度节奏，建议加强私信承接话术</template>。
+          </span>
+        </div>
+      </a-card>
+      <a-card :bordered="false" size="small" :title="`${dealerLabel}分层分布`" class="tier-card">
+        <div ref="tierEl" class="tier-chart" />
+      </a-card>
+    </div>
 
     <a-card :bordered="false" size="small">
       <template #title>
         <div class="card-header">
           <span class="bar"></span>
-          <span class="title">代理商运营明细</span>
+          <span class="title">{{ dealerLabel }}运营明细</span>
           <span class="muted mini" style="margin-left: 8px">共 {{ rows.length }} 家</span>
         </div>
       </template>
@@ -138,6 +150,8 @@ import dayjs from 'dayjs';
 import {
   FileTextOutlined,
   SendOutlined,
+  ThunderboltFilled,
+  AlertOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
@@ -149,7 +163,10 @@ import { useAuthStore } from '../../stores/auth';
 const auth = useAuthStore();
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
-const isMdd = computed(() => Number(auth.currentBrandId) === 5);
+// 仅纯演示品牌显示"功能示意"提示；荣威(2)已接真实数据，特斯拉/东风格力为真实口径
+const isDemo = computed(() => [1, 4, 5].includes(Number(auth.currentBrandId)));
+// 荣威(2)对客口径为「经销商」，其余共用该页的工作区保持「代理商」
+const dealerLabel = computed(() => (Number(auth.currentBrandId) === 2 ? '经销商' : '代理商'));
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);
@@ -177,17 +194,16 @@ function onDaysChange() {
   reload();
 }
 
-const columns = [
+const columns = computed(() => [
   { key: 'rank', title: '排名', width: 70 },
-  { key: 'dealer_name', title: '代理商', width: 180, ellipsis: true },
+  { key: 'dealer_name', title: dealerLabel.value, width: 180, ellipsis: true },
   { key: 'tier', title: '分层', width: 80 },
   { title: '账号数', dataIndex: 'account_num', width: 80 },
   { key: 'item_cnt', title: '发布数 / 完成度', width: 200 },
   { title: '曝光量', dataIndex: 'exposure_sum', width: 110, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
   { key: 'pm_leads', title: '留资数 / 完成度', width: 180 },
-  { title: '成交数', dataIndex: 'deals', width: 80 },
   { key: 'score', title: '综合得分', width: 90, sorter: (a, b) => a.score - b.score },
-];
+]);
 
 const tierCount = computed(() => {
   const map = { 头部: 0, 腰部: 0, 尾部: 0, 沉默: 0 };
@@ -199,21 +215,16 @@ const total = computed(() => {
   const list = rows.value;
   const item_cnt = list.reduce((s, r) => s + r.item_cnt, 0);
   const pm_leads = list.reduce((s, r) => s + r.pm_leads, 0);
-  const deals = list.reduce((s, r) => s + r.deals, 0);
   const item_target = list.reduce((s, r) => s + r.item_target, 0) || 1;
   const leads_target = list.reduce((s, r) => s + r.leads_target, 0) || 1;
-  const deal_target = list.reduce((s, r) => s + r.deal_target, 0) || 1;
   return {
     item_cnt,
     pm_leads,
-    deals,
     item_target,
     item_pct: Math.min(100, Math.round((item_cnt / item_target) * 100)),
     leads_pct: Math.min(100, Math.round((pm_leads / leads_target) * 100)),
-    deal_pct: Math.min(100, Math.round((deals / deal_target) * 100)),
     lead_rate: item_cnt ? ((pm_leads / item_cnt) * 100).toFixed(1) : '0.0',
     per_store_leads: list.length ? Math.round((pm_leads / list.length) * 10) / 10 : 0,
-    deal_rate: pm_leads ? ((deals / pm_leads) * 100).toFixed(1) : '0.0',
   };
 });
 
@@ -235,17 +246,18 @@ function renderTierChart() {
   if (!tierEl.value) return;
   if (!tierChart) tierChart = echarts.init(tierEl.value);
   const counts = tierCount.value;
+  const label = dealerLabel.value;
   tierChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 90, right: 40, top: 12, bottom: 24 },
     xAxis: { type: 'value' },
     yAxis: {
       type: 'category',
-      data: ['沉默代理商', '尾部代理商', '腰部代理商', '头部代理商'],
+      data: [`沉默${label}`, `尾部${label}`, `腰部${label}`, `头部${label}`],
     },
     series: [
       {
-        name: '代理商数',
+        name: `${label}数`,
         type: 'bar',
         data: [
           { value: counts.沉默, itemStyle: { color: '#94a3b8' } },
@@ -277,25 +289,31 @@ async function reload() {
     rows.value = list.map((r, i) => {
       const item_cnt = Number(r.item_cnt ?? 0);
       const pm_leads = Number(r.pm_leads ?? 0);
-      const item_target = Math.max(4, Math.round(maxItems * 0.75));
-      const leads_target = Math.max(3, Math.round(maxLeads * 0.7));
-      const deals = Math.round(pm_leads * (0.08 + ((i * 7) % 9) / 100));
-      const deal_target = Math.max(1, Math.round(leads_target * 0.15));
-      const item_pct = Math.min(100, Math.round((item_cnt / item_target) * 100));
-      const leads_pct = Math.min(100, Math.round((pm_leads / leads_target) * 100));
-      const deal_pct = Math.min(100, Math.round((deals / deal_target) * 100));
+      // 真实口径（荣威）后端已给目标/得分（周3篇/周5条×账号数折算），优先采用；
+      // 演示口径回退到相对最大值推导，得分 = 内容40% + 留资60%
+      const item_target = Number(r.item_target ?? 0) > 0
+        ? Number(r.item_target)
+        : Math.max(4, Math.round(maxItems * 0.75));
+      const leads_target = Number(r.leads_target ?? 0) > 0
+        ? Number(r.leads_target)
+        : Math.max(3, Math.round(maxLeads * 0.7));
+      const item_pct = Number(r.item_pct ?? 0) > 0
+        ? Math.min(100, Number(r.item_pct))
+        : Math.min(100, Math.round((item_cnt / item_target) * 100));
+      const leads_pct = r.leads_pct != null
+        ? Math.min(100, Math.round(Number(r.leads_pct)))
+        : Math.min(100, Math.round((pm_leads / leads_target) * 100));
       return {
         ...r,
         rank: i + 1,
         tier: tierOf(i, r),
         item_target,
         leads_target,
-        deal_target,
-        deals,
         item_pct,
         leads_pct,
-        deal_pct,
-        score: Math.min(100, Math.round(item_pct * 0.3 + leads_pct * 0.3 + deal_pct * 0.4)),
+        score: Number(r.score ?? 0) > 0
+          ? Number(r.score)
+          : Math.min(100, Math.round(item_pct * 0.4 + leads_pct * 0.6)),
       };
     });
     nextTick(renderTierChart);
@@ -330,7 +348,7 @@ onBeforeUnmount(() => {
 
 .unified-funnel-steps {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
   border-radius: 12px 12px 0 0;
@@ -394,7 +412,7 @@ onBeforeUnmount(() => {
 
 .funnel-cols {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .funnel-step-col {
@@ -432,28 +450,33 @@ onBeforeUnmount(() => {
   color: #94a3b8;
 }
 
-/* 漏斗卡 + 分层分布同一行，等高下端平齐 */
-.funnel-row {
-  align-items: stretch;
+.insight-row {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 12px;
 }
 
-.funnel-row > .ant-col {
-  display: flex;
-}
-
-.funnel-stretch {
-  flex: 1;
-  width: 100%;
+.insight-card {
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  gap: 10px;
 }
 
-.funnel-stretch :deep(.ant-card-body) {
-  flex: 1;
+.insight-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.insight-text {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.8;
 }
 
 .tier-chart {
-  height: 200px;
+  height: 180px;
 }
 
 .card-header {
@@ -547,9 +570,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1200px) {
-  .funnel-row > .ant-col {
-    flex: 0 0 100%;
-    max-width: 100%;
+  .insight-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

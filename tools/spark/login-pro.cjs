@@ -15,10 +15,20 @@ for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/
   const m = line.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2];
 }
-const ACCOUNT = process.env.PRO_ACCOUNT || env.PRO_ACCOUNT;
-const PASSWORD = process.env.PRO_PASSWORD || env.PRO_PASSWORD;
+// 品牌凭据：BRAND=2 时优先 PRO_ACCOUNT_B2/PRO_PASSWORD_B2（多品牌并存），否则共用 PRO_ACCOUNT/PRO_PASSWORD
+const BRAND = (process.env.BRAND || '6').trim();
+const ACCOUNT =
+  process.env[`PRO_ACCOUNT_B${BRAND}`] ||
+  env[`PRO_ACCOUNT_B${BRAND}`] ||
+  process.env.PRO_ACCOUNT ||
+  env.PRO_ACCOUNT;
+const PASSWORD =
+  process.env[`PRO_PASSWORD_B${BRAND}`] ||
+  env[`PRO_PASSWORD_B${BRAND}`] ||
+  process.env.PRO_PASSWORD ||
+  env.PRO_PASSWORD;
 if (!ACCOUNT || !PASSWORD) {
-  console.error('缺少 PRO_ACCOUNT/PRO_PASSWORD（tools/spark/.env）');
+  console.error(`缺少 PRO_ACCOUNT_B${BRAND}/PRO_PASSWORD_B${BRAND} 或 PRO_ACCOUNT/PRO_PASSWORD（tools/spark/.env）`);
   process.exit(1);
 }
 const TAG = (process.env.TAG || 'pro').trim();

@@ -1355,6 +1355,298 @@ export class KoxService {
     };
   }
 
+  /**
+   * 荣威(brand 2) 经销商排行 · 真实门店口径（2026-10 客户确认接真实数据）：
+   * 内容发布/曝光/互动 = KoxNote 真实笔记（publishTime∈窗口，accountId→authorName 归属）
+   * 留资/进线/开口     = 专业号「客户管理-获客工具统计」按日×归属账号（ProClueToolStatDaily，
+   *   留资=私信+服务卡+企微+预约试驾+落地页+微信+APP卡片+其他 8 组件求和，与特斯拉经销商排行同口径）；
+   *   无专业号数据时回退 MCC「员工矩阵」（SparkStaffUserDaily：私信留资/开口/引导开口，cookie 直连）
+   * 目标（特斯拉同款周度口径折算到门店）：每门店 = 账号数 × 周3篇(内容) / 周5条(留资) × days/7
+   * 综合得分 = 内容完成度 40% + 留资完成度 60%
+   * 说明：留资依赖 ProClueToolStatDaily（sync-pro-clues --brand 2 接入前为 0，诚实展示）；
+   *       笔记依赖 MCC 星火同步（SPARK_ACCOUNT_B2 账密接入前止于断更日，诚实展示）
+   */
+  private async rankingRealStore(query: {
+    start?: string;
+    end?: string;
+    brandId?: string;
+    metric?: string;
+    page?: string;
+    page_size?: string;
+  }) {
+    const brandId = 2;
+    // 东八区窗口解析（与 noteFilters 同口径，避免服务器时区漂移）
+    const end =
+      query.end && /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+        ? new Date(`${query.end}T23:59:59.999+08:00`)
+        : new Date();
+    const start =
+      query.start && /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+        ? new Date(`${query.start}T00:00:00.000+08:00`)
+        : new Date(end.getTime() - 29 * 86400000);
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
+    );
+    const METRICS = [
+      'item_cnt',
+      'exposure_sum',
+      'view_sum',
+      'interaction_sum',
+      'digg_sum',
+      'follow_sum',
+      'pm_leads',
+    ] as const;
+    type MetricKey = (typeof METRICS)[number];
+    const metric: MetricKey = (METRICS as readonly string[]).includes(
+      query.metric ?? '',
+    )
+      ? (query.metric as MetricKey)
+      : 'view_sum';
+
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: { brandId, status: 'enabled' },
+      select: {
+        id: true,
+        authorId: true,
+        nickname: true,
+        regionName: true,
+        storeName: true,
+      },
+    });
+    const storeOf = (a: { storeName: string | null }) =>
+      a.storeName ?? '未知门店';
+
+    interface RealAgg {
+      accountIds: Set<number>;
+      regionName: string | null;
+      item_cnt: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_sum: number;
+      digg_sum: number;
+      follow_sum: number;
+      pm_leads: number;
+      pm_inquiries: number;
+      pm_openings: number;
+    }
+    const blankAgg = (regionName: string | null): RealAgg => ({
+      accountIds: new Set<number>(),
+      regionName,
+      item_cnt: 0,
+      exposure_sum: 0,
+      view_sum: 0,
+      interaction_sum: 0,
+      digg_sum: 0,
+      follow_sum: 0,
+      pm_leads: 0,
+      pm_inquiries: 0,
+      pm_openings: 0,
+    });
+    const curMap = new Map<string, RealAgg>();
+    const bump = (
+      store: string,
+      regionName: string | null,
+      accId: number,
+      fn: (g: RealAgg) => void,
+    ) => {
+      const g = curMap.get(store) ?? blankAgg(regionName);
+      g.accountIds.add(accId);
+      if (!g.regionName && regionName) g.regionName = regionName;
+      fn(g);
+      curMap.set(store, g);
+    };
+
+    // 1) 内容指标：真实笔记窗口聚合（accountId 精确归属优先，authorName 兜底）
+    const acctById = new Map(accounts.map((a) => [a.id, a]));
+    const acctByNickname = new Map(accounts.map((a) => [a.nickname, a]));
+    const notes = await this.prisma.koxNote.findMany({
+      where: { brandId, publishTime: { gte: start, lte: end } },
+      select: {
+        accountId: true,
+        authorName: true,
+        exposure: true,
+        views: true,
+        likes: true,
+        collects: true,
+        comments: true,
+        shares: true,
+        followCount: true,
+      },
+    });
+    for (const n of notes) {
+      const acct =
+        (n.accountId != null ? acctById.get(n.accountId) : undefined) ??
+        (n.authorName ? acctByNickname.get(n.authorName) : undefined);
+      if (!acct) continue;
+      bump(storeOf(acct), acct.regionName, acct.id, (g) => {
+        g.item_cnt += 1;
+        g.exposure_sum += n.exposure;
+        g.view_sum += n.views;
+        g.interaction_sum += n.likes + n.collects + n.comments + n.shares;
+        g.digg_sum += n.likes;
+        g.follow_sum += n.followCount;
+      });
+    }
+
+    // 2) 留资/进线/开口：获客工具统计按日×归属账号求和
+    const authorToAcc = new Map(
+      accounts.filter((a) => a.authorId).map((a) => [a.authorId, a]),
+    );
+    const toolRows = await this.prisma.proClueToolStatDaily.findMany({
+      where: {
+        brandId,
+        day: { gte: start, lte: end },
+        belongUserId: { not: '' },
+      },
+      select: {
+        belongUserId: true,
+        consultUserCnt: true,
+        msgChatUserCnt: true,
+        msgLeadsUserCnt: true,
+        serviceCardLeadsUserCnt: true,
+        qwAddLeadsUserCnt: true,
+        bookCompLeadsUserCnt: true,
+        landingPageLeadsUserCnt: true,
+        wechatLeadsUserCnt: true,
+        appCardLeadsUserCnt: true,
+        otherLeadsUserCnt: true,
+      },
+    });
+    const toolAgg = new Map<
+      string,
+      { enter: number; open: number; leads: number }
+    >();
+    for (const r of toolRows) {
+      const cur =
+        toolAgg.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
+      cur.enter += r.consultUserCnt;
+      cur.open += r.msgChatUserCnt;
+      cur.leads +=
+        r.msgLeadsUserCnt +
+        r.serviceCardLeadsUserCnt +
+        r.qwAddLeadsUserCnt +
+        r.bookCompLeadsUserCnt +
+        r.landingPageLeadsUserCnt +
+        r.wechatLeadsUserCnt +
+        r.appCardLeadsUserCnt +
+        r.otherLeadsUserCnt;
+      toolAgg.set(r.belongUserId, cur);
+    }
+    for (const [belong, v] of toolAgg) {
+      const acct = authorToAcc.get(belong);
+      if (!acct) continue;
+      bump(storeOf(acct), acct.regionName, acct.id, (g) => {
+        g.pm_inquiries += v.enter;
+        g.pm_openings += v.open;
+        g.pm_leads += v.leads;
+      });
+    }
+
+    // 2b) 获客工具统计无数据时（未接专业号），回退 MCC「员工矩阵」口径：
+    //     私信留资 msgLeadsNum / 私信开口 messageOpenCnt / 引导开口 messageDrivingOpenCnt（≈进线），
+    //     MCC cookie 直连无需专业号登录态；nickname 归属 KosAccount → 门店
+    let leadsSource = 'pro_clue_tool';
+    if (toolRows.length === 0) {
+      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId, statDate: { gte: start, lte: end } },
+        select: {
+          nickname: true,
+          messageOpenCnt: true,
+          messageDrivingOpenCnt: true,
+          msgLeadsNum: true,
+        },
+      });
+      for (const s of staffRows) {
+        const acct = s.nickname ? acctByNickname.get(s.nickname) : undefined;
+        if (!acct) continue;
+        bump(storeOf(acct), acct.regionName, acct.id, (g) => {
+          g.pm_leads += s.msgLeadsNum;
+          g.pm_openings += s.messageOpenCnt;
+          g.pm_inquiries += s.messageDrivingOpenCnt;
+        });
+      }
+      if (staffRows.length > 0) leadsSource = 'mcc_staff_matrix';
+    }
+
+    // 3) 目标（特斯拉同款周度口径折算到门店）：周3篇内容 / 周5条留资 × days/7 × 账号数
+    const rows = [...curMap.entries()]
+      .map(([store, g]) => {
+        const account_num = g.accountIds.size;
+        const item_target = Math.max(
+          1,
+          Math.round(account_num * ((3 * days) / 7)),
+        );
+        const leads_target = Math.max(
+          1,
+          Math.round(account_num * ((5 * days) / 7)),
+        );
+        const item_pct = Math.min(
+          100,
+          Math.round((g.item_cnt / item_target) * 100),
+        );
+        const leads_pct = Math.min(
+          100,
+          Math.round((g.pm_leads / leads_target) * 100),
+        );
+        return {
+          name: store,
+          region_name: g.regionName,
+          account_num,
+          store_num: account_num,
+          item_cnt: g.item_cnt,
+          exposure_sum: g.exposure_sum,
+          view_sum: g.view_sum,
+          interaction_sum: g.interaction_sum,
+          digg_sum: g.digg_sum,
+          follow_sum: g.follow_sum,
+          pm_leads: g.pm_leads,
+          pm_inquiries: g.pm_inquiries,
+          pm_openings: g.pm_openings,
+          item_target,
+          leads_target,
+          item_pct,
+          leads_pct,
+          score: Math.round(item_pct * 0.4 + leads_pct * 0.6),
+          growth: null as number | null,
+        };
+      })
+      .sort((a, b) => (b[metric] as number) - (a[metric] as number));
+
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Number(query.page_size ?? 20) || 20),
+    );
+    const sum = (pick: (r: (typeof rows)[number]) => number) =>
+      rows.reduce((s, r) => s + pick(r), 0);
+    const summary = {
+      account_num: new Set([...curMap.values()].flatMap((g) => [...g.accountIds]))
+        .size,
+      item_cnt: sum((r) => r.item_cnt),
+      exposure_sum: sum((r) => r.exposure_sum),
+      view_sum: sum((r) => r.view_sum),
+      interaction_sum: sum((r) => r.interaction_sum),
+      pm_leads: sum((r) => r.pm_leads),
+      group_num: rows.length,
+    };
+
+    return {
+      dimension: 'store',
+      metric,
+      metric_source: `real_notes+${leadsSource}`,
+      start: dayKey08(start),
+      end: dayKey08(end),
+      summary,
+      list: rows
+        .slice((page - 1) * pageSize, page * pageSize)
+        .map((r, i) => ({ rank: (page - 1) * pageSize + i + 1, ...r })),
+      total: rows.length,
+      page,
+      page_size: pageSize,
+    };
+  }
+
   async ranking(query: {
     dimension?: string;
     start?: string;
@@ -1366,6 +1658,10 @@ export class KoxService {
     page?: string;
     page_size?: string;
   }) {
+    // 荣威(2)经销商排行（门店维度）走真实数据口径，其余调用保持原口径
+    if (Number(query.brandId) === 2 && query.dimension === 'store') {
+      return this.rankingRealStore(query);
+    }
     const DIMENSIONS = ['region', 'saleArea', 'store', 'account', 'tag'];
     const dimension = DIMENSIONS.includes(query.dimension ?? '')
       ? query.dimension!
@@ -1558,7 +1854,22 @@ export class KoxService {
     let usedNotes = false;
     if (preferNotes) {
       const brandIdNum = Number(query.brandId);
-      const noteCount = await this.prisma.koxNote.count({ where: { brandId: brandIdNum } });
+      // 笔记回退同样遵循查询日期窗口（东八区解析，与 noteFilters 同口径），
+      // 否则筛选近7天/近30天/自定义区间时数据恒为累计值、毫无变化
+      const noteWindow = {
+        brandId: brandIdNum,
+        publishTime: {
+          gte:
+            query.start && /^\d{4}-\d{2}-\d{2}$/.test(query.start)
+              ? new Date(`${query.start}T00:00:00.000+08:00`)
+              : start,
+          lte:
+            query.end && /^\d{4}-\d{2}-\d{2}$/.test(query.end)
+              ? new Date(`${query.end}T23:59:59.999+08:00`)
+              : end,
+        },
+      };
+      const noteCount = await this.prisma.koxNote.count({ where: noteWindow });
       if (noteCount > 0) {
         usedNotes = true;
         metricSource = 'notes_cumulative';
@@ -1579,7 +1890,7 @@ export class KoxService {
         fallbackAccounts = accounts;
         const acctByNickname = new Map(accounts.map((a) => [a.nickname, a]));
         const notes = await this.prisma.koxNote.findMany({
-          where: { brandId: brandIdNum },
+          where: noteWindow,
           select: {
             accountId: true,
             authorName: true,

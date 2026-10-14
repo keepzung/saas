@@ -1,17 +1,21 @@
 #!/usr/bin/env node
-// 专业号「线索经营」同步器（brandId=6）——进线/开口/留资（客户行为三分类）+ 概览卡参考值
+// 专业号「线索经营」同步器——进线/开口/留资（客户行为三分类）+ 概览卡参考值
 // 链路：pro.xiaohongshu.com storageState（DB ProOrgConfig / state 文件）→ 账密兜底（PRO_ACCOUNT/PRO_PASSWORD）
 //       → POST /ads/api/clue/user/list {startTime,endTime,clueEventTypeList:[1|2|3],pageNum,pageSize:1000}
 //       → POST /ads/api/clue/user/statistic（概览卡：进线未开口/开口未留资/留资完成/广告流量/自然流量，全口径参考值）
-// 口径：行为时间=当日，按客户去重；KOS-only = 剔除归属账号官号「特斯拉」(belongUserId=5cad9d230000000011005d41 / belongUserName=特斯拉)
+// 口径：行为时间=当日，按客户去重；KOS-only = 剔除归属账号官号（仅特斯拉 brand 6：
+//       belongUserId=5cad9d230000000011005d41 / belongUserName=特斯拉；其他品牌暂不剔除）
 // 写库：
 //   ProClueDaily   按日聚合（KOS-only 三分类 + 全口径对照 + 概览卡五值）
 //   ProClueUserDay 客户×日明细（三行为标记，任意窗口按客户去重聚合用）
+//   ProClueToolStatDaily 获客工具统计按日×归属账号（经销商排行「留资数」真实口径数据源）
 // 用法:
-//   node sync-pro-clues.cjs                     （增量：最后同步日 ~ 昨天，重抓最后一天容晚到）
-//   node sync-pro-clues.cjs --full              （全量回补 2025-01-01 起）
-//   node sync-pro-clues.cjs --start 2026-09-01 --end 2026-09-30 [--dry-run]
+//   node sync-pro-clues.cjs --brand 2           （荣威增量：最后同步日 ~ 昨天，重抓最后一天容晚到）
+//   node sync-pro-clues.cjs --brand 2 --full    （全量回补 2025-01-01 起）
+//   node sync-pro-clues.cjs --brand 2 --start 2026-09-01 --end 2026-09-30 [--dry-run]
 //   HEADLESS=0 ...（登录人工辅助）
+// 荣威(brand 2)接入步骤：① ProOrgConfig 建行（POST /pro/storage-state 或 push-pro-state.cjs BRAND=2）
+//   ② 本脚本 --brand 2 --full 回补 ③ prod cron 每日增量（参考 deploy/cron-sync-content-stat.sh）
 const fs = require('fs');
 const path = require('path');
 const { createRequire } = require('module');
@@ -47,12 +51,19 @@ try {
   chromium = { launch: (opts) => pc.chromium.launch({ ...opts, executablePath: exe ?? undefined }) };
 }
 
-const BRAND_ID = 6;
+const BRAND_ID = (() => {
+  const i = process.argv.indexOf('--brand');
+  const v = i > -1 ? Number(process.argv[i + 1]) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : 6;
+})();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const CLUE_PAGE = 'https://pro.xiaohongshu.com/enterprise/data/new-clue-management';
-const STATE_FILE = path.join(__dirname, 'state', 'auth-tesla2.json');
+// 登录态文件：brand 6 兼容旧 auth-tesla2.json，其余品牌用 auth-b{brandId}.json
+const STATE_FILE = path.join(__dirname, 'state', BRAND_ID === 6 ? 'auth-tesla2.json' : `auth-b${BRAND_ID}.json`);
 const FULL_START = process.env.PRO_CLUE_FULL_START || '2025-01-01';
-const OFFICIAL_BELONG_ID = '5cad9d230000000011005d41';
+// 官号剔除（KOS-only 口径）：仅特斯拉(6)有官号归属名单；其他品牌暂不剔除
+const OFFICIAL_BELONG_ID = BRAND_ID === 6 ? '5cad9d230000000011005d41' : '';
+const OFFICIAL_BELONG_NAME = BRAND_ID === 6 ? '特斯拉' : '';
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 40;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,7 +91,9 @@ if (fs.existsSync(envB)) {
 const dayAdd = (day, n) => new Date(new Date(`${day}T00:00:00Z`).getTime() + n * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
 const todayCN = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 const yesterdayCN = () => dayAdd(todayCN(), -1);
-const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserName === '特斯拉';
+const isOfficial = (r) =>
+  !!OFFICIAL_BELONG_ID &&
+  (r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserName === OFFICIAL_BELONG_NAME);
 
 (async () => {
   const prisma = new PrismaClient();
@@ -99,8 +112,9 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
   await sleep(5000);
   if (/login|passport/i.test(page.url())) {
     console.log('[login] 账密登录 ...');
-    const USER = process.env.PRO_ACCOUNT || process.env.SPARK_ACCOUNT_TESLA2;
-    const PASS = process.env.PRO_PASSWORD || process.env.SPARK_PASSWORD_TESLA2;
+    // 品牌凭据：优先 PRO_ACCOUNT_B{brand}/PRO_PASSWORD_B{brand}（多品牌并存），否则共用 PRO_ACCOUNT/PRO_PASSWORD
+    const USER = process.env[`PRO_ACCOUNT_B${BRAND_ID}`] || process.env.PRO_ACCOUNT || process.env.SPARK_ACCOUNT_TESLA2;
+    const PASS = process.env[`PRO_PASSWORD_B${BRAND_ID}`] || process.env.PRO_PASSWORD || process.env.SPARK_PASSWORD_TESLA2;
     const userInput = page.locator('input[type="text"], input[placeholder*="账号"], input[placeholder*="邮箱"]').locator('visible=true').first();
     const passInput = page.locator('input[type="password"]').locator('visible=true').first();
     await userInput.fill(USER, { timeout: 15000 }).catch(() => {});
@@ -201,7 +215,7 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
 
   // ── 页面上下文 fetch ──
   const fetchDay = async (day) => {
-    return page.evaluate(async ({ day, OFFICIAL_ID, pageSize, maxPages }) => {
+    return page.evaluate(async ({ day, OFFICIAL_ID, OFFICIAL_NAME, pageSize, maxPages }) => {
       const post = async (p, body) => {
         const r = await fetch('https://pro.xiaohongshu.com/ads/api/clue/' + p, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body),
@@ -226,7 +240,7 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
           for (const r of rows) {
             const p = pick(r);
             if (!p.customerUserId) continue;
-            const official = p.belongUserId === OFFICIAL_ID || p.belongUserName === '特斯拉';
+            const official = !!OFFICIAL_ID && (p.belongUserId === OFFICIAL_ID || (OFFICIAL_NAME && p.belongUserName === OFFICIAL_NAME));
             const cur = users.get(p.customerUserId) ?? { entered: false, opened: false, leads: false, official: true, belongUserId: p.belongUserId, belongUserName: p.belongUserName, sysTagId: p.sysTagId, nickName: p.nickName };
             cur[flag] = true;
             if (!official) cur.official = false;
@@ -260,7 +274,7 @@ const isOfficial = (r) => r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserN
           organic: cards[12] ?? 0,
         },
       };
-    }, { day, OFFICIAL_ID: OFFICIAL_BELONG_ID, pageSize: PAGE_SIZE, maxPages: MAX_PAGES });
+    }, { day, OFFICIAL_ID: OFFICIAL_BELONG_ID, OFFICIAL_NAME: OFFICIAL_BELONG_NAME, pageSize: PAGE_SIZE, maxPages: MAX_PAGES });
   };
 
   let done = 0;
