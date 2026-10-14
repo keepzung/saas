@@ -232,6 +232,21 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 同步来鼓评论（专业号 KOS 评论流，按账号拆分） */
+  /** MDD(5) 专业号昵称集合（评论归属分发用，缓存 5 分钟） */
+  private mddNickCache: { set: Set<string>; at: number } | null = null;
+  private async mddNicknames(): Promise<Set<string>> {
+    if (this.mddNickCache && Date.now() - this.mddNickCache.at < 5 * 60_000) {
+      return this.mddNickCache.set;
+    }
+    const accs = await this.prisma.kosAccount.findMany({
+      where: { brandId: 5 },
+      select: { nickname: true },
+    });
+    const set = new Set(accs.map((a) => a.nickname).filter(Boolean) as string[]);
+    this.mddNickCache = { set, at: Date.now() };
+    return set;
+  }
+
   async syncComments(brandIdParam?: number) {
     const brandId = brandIdParam ?? 6;
     const cfg = await this.gatewayConfig(brandId);
@@ -240,6 +255,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const windowStart = cfg.lastCommentSyncAt
       ? new Date(cfg.lastCommentSyncAt.getTime() - SYNC_OVERLAP_SECONDS * 1000)
       : new Date(now.getTime() - 30 * 86400000);
+    // 评论归属分发：MorganDaDa 专业号的评论写 brand5，其余维持原品牌
+    const mddSet = await this.mddNicknames();
 
     const size = 100;
     let curPage = 1;
@@ -270,6 +287,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         // 封面归一 https（http 会被浏览器混合内容策略拦截）
         let cover = typeof r.cover === 'string' ? r.cover.trim() : null;
         if (cover?.startsWith('http://')) cover = cover.replace(/^http:\/\//, 'https://');
+        const targetBrand =
+          r.entOpenName && mddSet.has(r.entOpenName) ? 5 : brandId;
         const data = {
           noteId: r.noteId ?? null,
           noteTitle: r.noteTitle ?? null,
@@ -284,8 +303,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
           rawJson: r as unknown as Prisma.InputJsonValue,
         };
         await this.prisma.laiguComment.upsert({
-          where: { brandId_commentId: { brandId, commentId: String(r.commentId) } },
-          create: { brandId, commentId: String(r.commentId), ...data },
+          where: { brandId_commentId: { brandId: targetBrand, commentId: String(r.commentId) } },
+          create: { brandId: targetBrand, commentId: String(r.commentId), ...data },
           update: data,
         });
         upserted++;
@@ -586,10 +605,14 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 用户反馈分析聚合（特斯拉面板）：会话级评论分类/情感/高频话题，规则引擎无外部依赖 */
-  async feedbackAnalysis(query: { brandId?: string; days?: string }) {
+  async feedbackAnalysis(query: { brandId?: string; days?: string; scope?: string }) {
     const brandId = Number(query.brandId ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
     const days = Math.min(90, Math.max(1, Number(query.days ?? 30) || 30));
     const since = new Date(Date.now() - days * 86400000);
+    // 口径显式切换：scope=comment 强制走评论口径（MDD 的「评论监控」Tab）
+    if (query.scope === 'comment') {
+      return this.commentFeedback(brandId, days, since);
+    }
 
     // 特斯拉（brand6）：固定使用来鼓评论口径（专业号 KOS 评论流，2026-10 客户确认回退；
     // 私信会话口径代码保留但不再触发）。评论按红框标准过滤：210 基线账号 + 官号「特斯拉」
@@ -617,6 +640,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         messageCount: true,
         clientMessageCount: true,
         staffName: true,
+        rawJson: true,
         lastMessageAt: true,
         sessionCreatedAt: true,
       },
@@ -624,11 +648,11 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       take: 5000,
     });
 
-    const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金'];
-    const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '油耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装'];
-    const INTENT_WORDS = ['展车', '到店', '预约', '下定', '订车', '想买', '想要', '打算', '考虑', '购买', '发我', '私我', '私信', '发一下', '求链接', '滴滴', '联系方式', '什么时候有', '哪里有', '哪里买', '多久有', '蹲一个', '怎么买', '还有货'];
-    const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮'];
-    const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞'];
+    const PRICE_WORDS = ['价格', '多少钱', '多少', '贵吗', '优惠', '便宜', '报价', '几钱', '价位', '拿货价', '批发价', '一件多少', '几个钱'];
+    const PRODUCT_WORDS = ['面料', '材质', '羊绒', '羊毛', '尺码', '码数', '颜色', '款式', '成分', '起球', '缩水', '洗涤', '水洗', '版型', '厚薄', '含棉', '羊羔绒', '双面呢', '童装的厂', '厂家', '货源', '衣服', '套装', '马甲', '外套'];
+    const INTENT_WORDS = ['发我', '私我', '私信', '联系方式', '微信', '加微', '拿货', '进货', '批发', '合作', '代发', '一件代发', '怎么拿', '怎么买', '哪里买', '有货', '补货', '新款', '上新', '什么时候有', '需要的话'];
+    const NEG_WORDS = ['问题', '投诉', '差评', '失望', '质量差', '起球', '褪色', '掉色', '垃圾', '坑', '后悔', '扯皮', '售后'];
+    const POS_WORDS = ['好看', '漂亮', '喜欢', '不错', '质量好', '支持', '厉害', '满意', '舒服', '推荐', '可爱', '质感', '上身'];
 
     const classify = (text: string): { category: string; sentiment: '正面' | '中性' | '负面' } => {
       const s = text ?? '';
@@ -660,6 +684,17 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     dayStart.setHours(0, 0, 0, 0);
     let today = 0;
     const contents: string[] = [];
+    // ── 私信内容监控：引流企微标记 + 客服话术转化 ──
+    const WECHAT_WORDS = ['企业微信', '微信', '加微', '加v', '加V', 'vx', 'vx', 'weixin', 'wechat', '威信'];
+    const SCRIPT_RULES: [string, string[]][] = [
+      ['报价类', ['价格', '元', '价', '优惠', '折', '多少钱']],
+      ['引导到店', ['到店', '门店', '地址', '试穿', '来看', '欢迎', '专柜']],
+      ['产品介绍', ['面料', '材质', '款', '尺码', '版型', '成分', '羊绒', '羊毛']],
+      ['引流加微', ['微信', '加微', '企微', 'vx', 'weixin']],
+    ];
+    let wechatLeads = 0;
+    const wechatDetail: { id: number; author: string; preview: string; time: string; by: string }[] = [];
+    const scriptAgg = new Map<string, { count: number; lead: number }>();
     for (const r of rows) {
       const text = r.lastClientContent ?? '';
       const { category, sentiment } = classify(text);
@@ -672,6 +707,38 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       const lastAt = r.lastMessageAt ?? r.sessionCreatedAt;
       if (lastAt && lastAt >= dayStart) today += 1;
       if (text) contents.push(text);
+      // 引流企微 / 话术分类（基于会话全消息）
+      const allMsgs = ((r.rawJson as { messages?: { role?: string; content?: string }[] })?.messages ?? []) as {
+        role?: string;
+        content?: string;
+      }[];
+      const staffMsgs = allMsgs.filter((m) => m.role !== 'client').map((m) => m.content ?? '');
+      const clientMsgs = allMsgs.filter((m) => m.role === 'client').map((m) => m.content ?? '');
+      const hitWechat = (c: string) => WECHAT_WORDS.some((w) => (c || '').toLowerCase().includes(w));
+      const isLeadSession = r.isResource || !!r.phone;
+      if (staffMsgs.some(hitWechat) || clientMsgs.some(hitWechat)) {
+        wechatLeads += 1;
+        if (wechatDetail.length < 50) {
+          wechatDetail.push({
+            id: r.id,
+            author: r.clientName ?? '匿名用户',
+            preview: text || '（无文字内容）',
+            time: (r.lastMessageAt ?? r.sessionCreatedAt ?? new Date()).toISOString(),
+            by: staffMsgs.some(hitWechat) ? '客服引导' : '客户主动',
+          });
+        }
+      }
+      const lastStaff = staffMsgs[staffMsgs.length - 1] ?? '';
+      let scriptName = '其他';
+      for (const [name, words] of SCRIPT_RULES) {
+        if (words.some((w) => lastStaff.includes(w))) { scriptName = name; break; }
+      }
+      if (lastStaff) {
+        const agg = scriptAgg.get(scriptName) ?? { count: 0, lead: 0 };
+        agg.count += 1;
+        if (isLeadSession) agg.lead += 1;
+        scriptAgg.set(scriptName, agg);
+      }
       if (detail.length < 500) {
         detail.push({
           id: r.id,
@@ -685,6 +752,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         });
       }
     }
+    // 明细按时间倒序（lastMessageAt 为空的会话排在前面的 Postgres 默认行为会打乱时间线）
+    detail.sort((a, b) => b.time.localeCompare(a.time));
     const total = rows.length;
     const pct = (n: number) => (total ? Math.round((n / total) * 1000) / 10 : 0);
     return {
@@ -706,6 +775,18 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         .sort((a, b) => b.count - a.count),
       comments: detail,
       topics: extractKeywords(contents, 30),
+      // 私信内容监控（引流企微 + 话术转化）
+      wechat_leads: wechatLeads,
+      wechat_detail: wechatDetail,
+      wechat_note: '引流=会话消息中提及微信/企微/加微等关键词；话术=客服最后一条回复的关键词分类',
+      script_stats: [...scriptAgg.entries()]
+        .map(([name, v]) => ({
+          name,
+          count: v.count,
+          lead: v.lead,
+          conv: v.count ? Math.round((v.lead / v.count) * 1000) / 10 : 0,
+        }))
+        .sort((a, b) => b.count - a.count),
       scope_note:
         brandId === 6
           ? '数据源=来鼓私信会话（用户最后一条消息），仅统计特斯拉坐席组（剔除上汽大众等其他品牌坐席）；分类/情感为关键词规则引擎判定'
@@ -728,17 +809,44 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       const allowed = [...new Set([...baseline.map((a) => a.nickname).filter(Boolean), '特斯拉'])];
       whereC.entOpenName = { in: allowed };
     }
+    if (brandId === 5) {
+      // Morgandada：评论按专业号账号（entOpenName ∈ MDD 账号昵称）归属过滤
+      const nicks = await this.mddNicknames();
+      whereC.entOpenName = { in: [...nicks] };
+    }
     const rows = await this.prisma.laiguComment.findMany({
       where: whereC,
       orderBy: { createdAt: 'desc' },
       take: 5000,
     });
 
-    const PRICE_WORDS = ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金', '万提', 'w提', '裸车'];
-    const PRODUCT_WORDS = ['续航', '空间', '配置', '充电', '电耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装', '智驾', '辅助驾驶'];
-    const INTENT_WORDS = ['展车', '到店', '预约', '下定', '订车', '想买', '想要', '打算', '考虑', '购买', '发我', '私我', '私信', '发一下', '求链接', '滴滴', '联系方式', '什么时候有', '哪里有', '哪里买', '多久有', '蹲一个', '怎么买', '还有货'];
-    const NEG_WORDS = ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮', '损伤'];
-    const POS_WORDS = ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞', '太帅', '封神', '胜利'];
+    // 分类词库按品牌（2026-10 客户版）：
+    //   brand6 特斯拉 = 关键词分类汇总-1014.xlsx（意向含地域词、价格含国补/置换/新购补）
+    //   brand5/默认 = Morgandada 词库
+    const WORDS = brandId === 6
+      ? {
+          PRICE_WORDS: ['价格', '多少钱', '少钱', '落地', '优惠', '便宜', '报价', '贷款', '分期', '几万', '预算', '定金', '订金', '万提', 'w提', '裸车', '国补', '置换', '新购补'],
+          PRODUCT_WORDS: ['续航', '空间', '配置', '充电', '电耗', '油耗', '对比', '性能', '马力', '尺寸', '后备箱', '内饰', '试驾', '保险', '提车', '交付', '版本', '选装', '智驾', '辅助驾驶'],
+          INTENT_WORDS: [
+            '展车', '到店', '预约', '下定', '订车', '想买', '想要', '打算', '考虑', '购买', '发我', '私我', '私信', '发一下', '求链接', '滴滴', '联系方式', '什么时候有', '哪里有', '哪里买', '多久有', '蹲一个', '怎么买', '还有货',
+            // 地域名词（34 省级行政区 + 省会/首府 + 计划单列市及主要城市）：评论出现省/市名 = 本地意向用户
+            '北京', '上海', '天津', '重庆',
+            '河北', '山西', '辽宁', '吉林', '黑龙江', '江苏', '浙江', '安徽', '福建', '江西', '山东', '河南', '湖北', '湖南', '广东', '海南', '四川', '贵州', '云南', '陕西', '甘肃', '青海', '台湾',
+            '内蒙古', '广西', '西藏', '宁夏', '新疆', '香港', '澳门',
+            '石家庄', '太原', '沈阳', '长春', '哈尔滨', '南京', '杭州', '合肥', '福州', '南昌', '济南', '郑州', '武汉', '长沙', '广州', '海口', '成都', '贵阳', '昆明', '西安', '兰州', '西宁', '银川', '乌鲁木齐', '呼和浩特', '南宁', '拉萨',
+            '深圳', '大连', '青岛', '宁波', '厦门', '苏州', '无锡', '佛山', '东莞', '昆山',
+          ],
+          NEG_WORDS: ['问题', '投诉', '差评', '失望', '故障', '异响', '维权', '吐槽', '后悔', '坑', '垃圾', '修不好', '扯皮', '损伤'],
+          POS_WORDS: ['好看', '漂亮', '喜欢', '点赞', '不错', '支持', '厉害', '羡慕', '真香', '满意', '舒服', '推荐', '称赞', '太帅', '封神', '胜利'],
+        }
+      : {
+          PRICE_WORDS: ['价格', '多少钱', '多少', '贵吗', '优惠', '便宜', '报价', '几钱', '价位', '拿货价', '批发价', '一件多少', '几个钱'],
+          PRODUCT_WORDS: ['面料', '材质', '羊绒', '羊毛', '尺码', '码数', '颜色', '款式', '成分', '起球', '缩水', '洗涤', '水洗', '版型', '厚薄', '含棉', '羊羔绒', '双面呢', '童装的厂', '厂家', '货源', '衣服', '套装', '马甲', '外套'],
+          INTENT_WORDS: ['发我', '私我', '私信', '联系方式', '微信', '加微', '拿货', '进货', '批发', '合作', '代发', '一件代发', '怎么拿', '怎么买', '哪里买', '有货', '补货', '新款', '上新', '什么时候有', '需要的话'],
+          NEG_WORDS: ['问题', '投诉', '差评', '失望', '质量差', '起球', '褪色', '掉色', '垃圾', '坑', '后悔', '扯皮', '售后'],
+          POS_WORDS: ['好看', '漂亮', '喜欢', '不错', '质量好', '支持', '厉害', '满意', '舒服', '推荐', '可爱', '质感', '上身'],
+        };
+    const { PRICE_WORDS, PRODUCT_WORDS, INTENT_WORDS, NEG_WORDS, POS_WORDS } = WORDS;
 
     const classify = (text: string): { category: string; sentiment: '正面' | '中性' | '负面' } => {
       const s = text ?? '';
@@ -798,6 +906,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         });
       }
     }
+    // 明细按时间倒序
+    detail.sort((a, b) => b.time.localeCompare(a.time));
     // 评论 → 具体笔记：按 noteId 匹配 KoxNote（noteUrl 带 xsec_token 可直接打开）
     const detailNoteIds = [
       ...new Set(
