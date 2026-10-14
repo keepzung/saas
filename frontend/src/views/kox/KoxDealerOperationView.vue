@@ -15,92 +15,61 @@
       </a-radio-group>
     </template>
 
-    <NoticeBar>该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
+    <NoticeBar v-if="!isMdd">该页面为功能示意，不代表企业真实数据，所有数据的计算逻辑均会按照项目实际需求调整</NoticeBar>
 
-    <a-card :bordered="false" class="unified-funnel-card" :body-style="{ padding: 0 }">
-      <div class="unified-funnel-steps">
-        <div class="step-item">
-          <div class="step-icon-wrap"><FileTextOutlined class="step-icon" style="color: #2563eb" /></div>
-          <div class="step-title-wrap">
-            <span class="step-title">内容发布</span>
-            <span class="step-value">{{ fmt(total.item_cnt) }} 篇</span>
+    <a-row :gutter="12" align="stretch" class="funnel-row">
+      <a-col :xs="24" :md="16">
+        <a-card :bordered="false" class="unified-funnel-card funnel-stretch" :body-style="{ padding: 0 }">
+          <div class="unified-funnel-steps">
+            <div class="step-item">
+              <div class="step-icon-wrap"><FileTextOutlined class="step-icon" style="color: #2563eb" /></div>
+              <div class="step-title-wrap">
+                <span class="step-title">内容发布</span>
+                <span class="step-value">{{ fmt(total.item_cnt) }} 篇</span>
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-icon-wrap"><SendOutlined class="step-icon" style="color: #d97706" /></div>
+              <div class="step-title-wrap">
+                <span class="step-title">留资获取</span>
+                <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="step-item">
-          <div class="step-icon-wrap"><SendOutlined class="step-icon" style="color: #d97706" /></div>
-          <div class="step-title-wrap">
-            <span class="step-title">留资获取</span>
-            <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
+          <div class="funnel-cols">
+            <div class="funnel-step-col">
+              <div class="funnel-metric">
+                <span class="fm-label">内容完成度</span>
+                <b class="fm-value">{{ total.item_pct }}%</b>
+              </div>
+              <a-progress
+                :percent="total.item_pct"
+                :show-info="false"
+                :stroke-color="{ from: '#5087ec', to: '#8cc8ff' }"
+              />
+              <div class="funnel-sub">目标 {{ fmt(total.item_target) }} 篇 / 实际 {{ fmt(total.item_cnt) }} 篇</div>
+            </div>
+            <div class="funnel-step-col">
+              <div class="funnel-metric">
+                <span class="fm-label">留资完成度</span>
+                <b class="fm-value">{{ total.leads_pct }}%</b>
+              </div>
+              <a-progress
+                :percent="total.leads_pct"
+                :show-info="false"
+                :stroke-color="{ from: '#f59e0b', to: '#fbbf24' }"
+              />
+              <div class="funnel-sub">线索率 {{ total.lead_rate }}% · 人均 {{ total.per_store_leads }} 条</div>
+            </div>
           </div>
-        </div>
-        <div class="step-item">
-          <div class="step-icon-wrap"><CarOutlined class="step-icon" style="color: #059669" /></div>
-          <div class="step-title-wrap">
-            <span class="step-title">成交转化</span>
-            <span class="step-value">{{ fmt(total.deals) }} 台</span>
-          </div>
-        </div>
-      </div>
-      <div class="funnel-cols">
-        <div class="funnel-step-col">
-          <div class="funnel-metric">
-            <span class="fm-label">内容完成度</span>
-            <b class="fm-value">{{ total.item_pct }}%</b>
-          </div>
-          <a-progress
-            :percent="total.item_pct"
-            :show-info="false"
-            :stroke-color="{ from: '#5087ec', to: '#8cc8ff' }"
-          />
-          <div class="funnel-sub">目标 {{ fmt(total.item_target) }} 篇 / 实际 {{ fmt(total.item_cnt) }} 篇</div>
-        </div>
-        <div class="funnel-step-col">
-          <div class="funnel-metric">
-            <span class="fm-label">留资完成度</span>
-            <b class="fm-value">{{ total.leads_pct }}%</b>
-          </div>
-          <a-progress
-            :percent="total.leads_pct"
-            :show-info="false"
-            :stroke-color="{ from: '#f59e0b', to: '#fbbf24' }"
-          />
-          <div class="funnel-sub">线索率 {{ total.lead_rate }}% · 人均 {{ total.per_store_leads }} 条</div>
-        </div>
-        <div class="funnel-step-col">
-          <div class="funnel-metric">
-            <span class="fm-label">成交完成度</span>
-            <b class="fm-value">{{ total.deal_pct }}%</b>
-          </div>
-          <a-progress
-            :percent="total.deal_pct"
-            :show-info="false"
-            :stroke-color="{ from: '#36b37e', to: '#73d13d' }"
-          />
-          <div class="funnel-sub">留资→成交转化率 {{ total.deal_rate }}%</div>
-        </div>
-      </div>
-    </a-card>
-
-    <div class="insight-row">
-      <a-card :bordered="false" size="small" class="insight-card">
-        <div class="insight-line">
-          <ThunderboltFilled style="color: #2563eb" />
-          <span class="insight-text">
-            头部代理商 {{ tierCount.头部 }} 家、腰部 {{ tierCount.腰部 }} 家、尾部 {{ tierCount.尾部 }} 家、
-            沉默 {{ tierCount.沉默 }} 家<template v-if="tierCount.沉默 > 0">，建议对 {{ tierCount.沉默 }} 家沉默代理商重点激活</template>。
-          </span>
-        </div>
-        <div class="insight-line">
-          <AlertOutlined style="color: #d97706" />
-          <span class="insight-text">
-            留资完成度 {{ total.leads_pct }}%<template v-if="total.leads_pct < 50">，线索获取滞后于月度节奏，建议加强私信承接话术</template>。
-          </span>
-        </div>
-      </a-card>
-      <a-card :bordered="false" size="small" title="代理商分层分布" class="tier-card">
-        <div ref="tierEl" class="tier-chart" />
-      </a-card>
-    </div>
+        </a-card>
+      </a-col>
+      <a-col :xs="24" :md="8">
+        <a-card :bordered="false" size="small" title="代理商分层分布" class="tier-card funnel-stretch">
+          <div ref="tierEl" class="tier-chart" />
+        </a-card>
+      </a-col>
+    </a-row>
 
     <a-card :bordered="false" size="small">
       <template #title>
@@ -169,9 +138,6 @@ import dayjs from 'dayjs';
 import {
   FileTextOutlined,
   SendOutlined,
-  CarOutlined,
-  ThunderboltFilled,
-  AlertOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
@@ -183,6 +149,7 @@ import { useAuthStore } from '../../stores/auth';
 const auth = useAuthStore();
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
+const isMdd = computed(() => Number(auth.currentBrandId) === 5);
 const loading = ref(false);
 const rows = ref([]);
 const days = ref(30);
@@ -465,33 +432,28 @@ onBeforeUnmount(() => {
   color: #94a3b8;
 }
 
-.insight-row {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 12px;
+/* 漏斗卡 + 分层分布同一行，等高下端平齐 */
+.funnel-row {
+  align-items: stretch;
 }
 
-.insight-card {
+.funnel-row > .ant-col {
+  display: flex;
+}
+
+.funnel-stretch {
+  flex: 1;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 10px;
 }
 
-.insight-line {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.insight-text {
-  font-size: 13px;
-  color: #475569;
-  line-height: 1.8;
+.funnel-stretch :deep(.ant-card-body) {
+  flex: 1;
 }
 
 .tier-chart {
-  height: 180px;
+  height: 200px;
 }
 
 .card-header {
@@ -585,8 +547,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1200px) {
-  .insight-row {
-    grid-template-columns: 1fr;
+  .funnel-row > .ant-col {
+    flex: 0 0 100%;
+    max-width: 100%;
   }
 }
 </style>

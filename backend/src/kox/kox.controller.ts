@@ -88,7 +88,7 @@ export class KoxController {
   }
 
   @Get('kox/mdd/overview')
-  mddOverview(@Query() query: { start?: string; end?: string }) {
+  mddOverview(@Query() query: { start?: string; end?: string; accountTag?: string }) {
     return this.koxService.mddOverview(query);
   }
 

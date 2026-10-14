@@ -67,11 +67,12 @@
 
     <a-card size="small" :bordered="false">
       <a-table
+        :class="{ 'mdd-table': isMdd }"
         :columns="columns"
         :data-source="list"
         :loading="loading"
         :pagination="pagination"
-        :scroll="{ x: 2300 }"
+        :scroll="tableScroll"
         size="small"
         row-key="account_id"
         @change="onTableChange"
@@ -86,7 +87,10 @@
             <span class="acc-cell">
               <a-avatar v-if="record.avatar" :src="record.avatar" :size="30" class="acc-avatar" />
               <a-avatar v-else :size="30" class="acc-avatar acc-avatar-ph">{{ (record.nickname || '#').slice(0, 1) }}</a-avatar>
-              <a class="acc-name" :href="record.author_url || 'javascript:;'" target="_blank" rel="noreferrer">{{ record.nickname }}</a>
+              <span :class="isMdd ? 'acc-main' : ''">
+                <a class="acc-name" :href="record.author_url || 'javascript:;'" target="_blank" rel="noreferrer">{{ record.nickname }}</a>
+                <span v-if="isMdd && record.store_name" class="acc-store">{{ record.store_name }}</span>
+              </span>
             </span>
           </template>
           <template v-else-if="column.key === 'tier'">
@@ -137,6 +141,10 @@ const data = ref({ metric_note: '', metric_source: '' });
 const isWeeklySnap = computed(() => String(data.value.metric_source || '').startsWith('weekly_snapshot'));
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'] });
 
+// 宽表（特斯拉/东风多列）启用横向滚动；Morgandada 精简列：自然表高随内容撑开（页面级滚动），
+// 表头用 CSS sticky 跟随滚动容器，修复「固定 560px 表体截断内容 + 下方大片空白」
+const tableScroll = computed(() => (isMdd.value ? undefined : { x: 2300 }));
+
 const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
 const ncol = (title, key, width = 96) => ({
   title,
@@ -149,20 +157,21 @@ const ncol = (title, key, width = 96) => ({
 
 const columns = computed(() => {
   if (isMdd.value) {
-    // Morgandada：对齐客户看板「账号表现分析」——KOS 账号综合排序（CES/新粉率/私信三件套/内容）
+    // Morgandada：对齐客户看板「账号表现分析」——KOS 账号综合排序（CES/新粉率/私信三件套/内容），一屏放下无横向滚动
+    // 弹性宽度给「账号」列（窗口拉伸时只有账号列变宽）；其余列固定宽 + 表头不换行
     return [
-      { title: '排名', key: 'rank', width: 64, fixed: 'left' },
-      { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
-      ncol('CES综合得分', 'ces', 110),
+      { title: '排名', key: 'rank', width: 60 },
+      { title: '账号', key: 'nickname' },
+      { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 84 },
+      ncol('CES综合得分', 'ces', 104),
       ncol('新粉率', 'fans_rate', 90),
       { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
-      ncol('私信连接数', 'pm_inquiries', 104),
-      ncol('私信开口数', 'pm_openings', 104),
-      ncol('私信留资数', 'pm_leads', 104),
+      ncol('私信进线数', 'pm_inquiries', 100),
+      ncol('私信开口数', 'pm_openings', 100),
+      ncol('私信留资数', 'pm_leads', 100),
       ncol('内容发布数', 'item_cnt', 104),
-      ncol('内容曝光数', 'exposure_sum', 110),
-      { title: '所属门店/团队', key: 'store', dataIndex: 'store_name', width: 200, ellipsis: true },
-      { title: '操作', key: 'action', width: 90, fixed: 'right' },
+      ncol('内容曝光数', 'exposure_sum', 120),
+      { title: '操作', key: 'action', width: 80 },
     ];
   }
   if (isDf.value) {
@@ -247,7 +256,7 @@ async function reload() {
   try {
     const res = await getKoxAccountRanking({
       ...dateParams(),
-      ...(isMdd.value ? { metric: 'ces' } : {}),
+      ...(isMdd.value ? { metric: 'pm_leads' } : {}),
       page: pagination.value.current,
       page_size: pagination.value.pageSize,
     });
@@ -338,12 +347,26 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Morgandada：表头不换行（一行展开），滚动时表头吸顶（位于分层条下方 ~42px） */
+.mdd-table :deep(.ant-table-thead > tr > th) {
+  white-space: nowrap;
+  position: sticky;
+  top: 42px;
+  z-index: 2;
+}
+
 .tier-strip {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
+  /* 客户批注「置顶?」：分层筛选条固定在可视区顶部，翻页/滚动恒可见 */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fff;
+  padding: 6px 0;
 }
 
 .tier-pill {
@@ -410,6 +433,21 @@ onMounted(() => {
 
 .acc-name:hover {
   color: #3456e6;
+}
+
+.acc-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.acc-store {
+  font-size: 12px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tier-tag {

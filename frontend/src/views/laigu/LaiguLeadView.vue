@@ -2,20 +2,48 @@
   <PageWrapper title="私信线索" subtitle="来鼓小红书私信会话线索">
     <template #filters>
       <FilterTopbar>
+        <a-segmented
+          v-model:value="viewMode"
+          :options="[
+            { label: '列表视图', value: 'list' },
+            { label: '对话视图', value: 'chat' },
+          ]"
+          @change="onViewChange"
+        />
+        <a-segmented
+          v-model:value="resMode"
+          class="res-seg"
+          :options="[
+            { label: `已留资${stats.resourced ? ` ${stats.resourced}` : ''}`, value: 'true' },
+            { label: '未留资', value: 'false' },
+            { label: '全部会话', value: 'all' },
+          ]"
+          @change="onSearch"
+        />
         <a-input-search
           v-model:value="keyword"
           placeholder="昵称 / 手机号 / 内容"
-          style="width: 220px"
+          style="width: 200px"
           allow-clear
-          @search="reload"
+          @search="onSearch"
         />
         <a-select
-          v-model:value="isResource"
-          style="width: 100px"
+          v-model:value="staffFilter"
+          style="width: 160px"
+          show-search
           allow-clear
-          placeholder="留资"
-          :options="boolOptions"
-          @change="reload"
+          placeholder="按 KOS 名称筛选"
+          :options="staffOptions"
+          @change="onSearch"
+        />
+        <a-select
+          v-model:value="kosFilter"
+          style="width: 180px"
+          show-search
+          allow-clear
+          placeholder="按 KOS 账号筛选"
+          :options="kosOptions"
+          @change="onSearch"
         />
         <a-select
           v-model:value="hasPhone"
@@ -23,13 +51,14 @@
           allow-clear
           placeholder="联系方式"
           :options="boolOptions"
-          @change="reload"
+          @change="onSearch"
         />
+        <a-checkbox v-model:checked="hideEmpty" @change="onSearch">隐藏空会话</a-checkbox>
         <a-range-picker
           v-model:value="dateRange"
           style="width: 240px"
           value-format="YYYY-MM-DD"
-          @change="reload"
+          @change="onSearch"
         />
         <template #actions>
           <a-button :loading="syncing" @click="doSync">
@@ -58,12 +87,13 @@
       </div>
     </div>
 
-    <a-card :bordered="false">
+    <a-card v-if="viewMode === 'list'" :bordered="false">
       <a-table
         :columns="columns"
         :data-source="list"
         :loading="loading"
         :pagination="pager"
+        :row-class-name="rowClassName"
         row-key="id"
         @change="onTableChange"
       >
@@ -94,6 +124,114 @@
           </template>
         </template>
       </a-table>
+    </a-card>
+
+    <a-card v-else :bordered="false" :body-style="{ padding: '0' }">
+      <div class="conv-shell">
+        <div class="conv-list" @scroll="onListScroll">
+          <div class="conv-list-head">会话列表 <span class="muted mini">共 {{ chatTotal }} 条</span></div>
+          <a-spin :spinning="chatLoading">
+            <div
+              v-for="(item, i) in chatItems"
+              :key="item.id"
+              class="conv-item"
+              :class="{ active: selected?.id === item.id }"
+              @click="selectLead(item)"
+            >
+              <span class="conv-avatar">{{ (item.client_name || '#').slice(0, 1) }}</span>
+              <div class="conv-main">
+                <div class="conv-top">
+                  <span class="conv-name">{{ item.client_name || '匿名用户' }}</span>
+                  <span class="conv-time">{{ item.last_message_at }}</span>
+                </div>
+                <div class="conv-sub">
+                  <span class="conv-preview">{{ item.last_client_content || '（无文字内容）' }}</span>
+                  <span v-if="pendingCount(item)" class="unread-badge">{{ Math.min(pendingCount(item), 99) }}</span>
+                  <a-tag v-if="item.is_resource" color="green" class="conv-tag">留资</a-tag>
+                </div>
+              </div>
+            </div>
+            <div v-if="chatItems.length < chatTotal" class="conv-more muted mini">
+              下拉加载更多（{{ chatItems.length }}/{{ chatTotal }}）
+            </div>
+            <a-empty v-if="!chatItems.length && !chatLoading" description="暂无会话" />
+          </a-spin>
+        </div>
+
+        <div class="conv-dialog">
+          <template v-if="selected">
+            <div class="conv-head">
+              <span class="conv-head-name">{{ selected.client_name || '匿名用户' }}</span>
+              <a-tag :color="selected.is_resource ? 'green' : 'default'">
+                {{ selected.is_resource ? '已留资' : '未留资' }}
+              </a-tag>
+              <span v-if="selected.phone" class="phone-text">{{ selected.phone }}</span>
+              <span class="muted mini conv-head-meta">最近活跃 {{ selected.last_message_at }} · {{ adShort(selected) }}</span>
+            </div>
+            <a-spin :spinning="detailLoading">
+              <div ref="chatFlowEl" class="chat-flow">
+                <div
+                  v-for="msg in messages"
+                  :key="msg.id"
+                  class="chat-row"
+                  :class="{ self: msg.role !== 'client' }"
+                >
+                  <div class="chat-meta">
+                    <span class="chat-name">{{ roleLabel(msg) }}</span>
+                    <span class="chat-time">{{ fmtTime(msg.created_at) }}</span>
+                  </div>
+                  <div class="chat-bubble">
+                    <template v-if="isNoteCard(msg)">
+                      <div class="note-card">
+                        <div class="note-title">{{ noteCardTitle(msg) }}</div>
+                        <a
+                          v-if="noteCardLink(msg)"
+                          :href="noteCardLink(msg)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          查看笔记
+                        </a>
+                      </div>
+                    </template>
+                    <template v-else>{{ msg.content }}</template>
+                  </div>
+                </div>
+                <a-empty v-if="!messages.length" description="暂无消息" />
+              </div>
+            </a-spin>
+            <div class="conv-readonly muted mini">只读展示 · 回复请到来鼓工作台操作</div>
+          </template>
+          <a-empty v-else description="选择左侧会话查看对话" style="margin-top: 120px" />
+        </div>
+
+        <div class="conv-profile">
+          <div class="conv-profile-head">客户资料</div>
+          <template v-if="selected">
+            <div class="profile-section">
+              <div class="profile-row"><span>昵称</span><b>{{ selected.client_name || '匿名用户' }}</b></div>
+              <div class="profile-row"><span>电话</span><b>{{ selected.phone || '-' }}</b></div>
+              <div class="profile-row"><span>微信</span><b>{{ weixinOf(selected) || '-' }}</b></div>
+              <div class="profile-row"><span>归属地</span><b>{{ selected.ip_location || '-' }}</b></div>
+              <div class="profile-row"><span>会话开始</span><b>{{ selected.session_created_at || '-' }}</b></div>
+              <div class="profile-row"><span>最近活跃</span><b>{{ selected.last_message_at }}</b></div>
+            </div>
+            <div class="profile-section" v-if="detail?.ad_info && Object.keys(detail.ad_info).length">
+              <div class="profile-sub">广告归因</div>
+              <div class="profile-row"><span>广告主</span><b>{{ detail.ad_info.advertiser_name || '-' }}</b></div>
+              <div class="profile-row"><span>广告计划</span><b>{{ detail.ad_info.campaign_name || '-' }}</b></div>
+              <div class="profile-row"><span>创意</span><b>{{ detail.ad_info.creativity_name || '-' }}</b></div>
+            </div>
+            <div class="profile-section">
+              <div class="profile-sub">会话数据</div>
+              <div class="profile-row"><span>客户消息</span><b>{{ selected.client_message_count ?? 0 }}</b></div>
+              <div class="profile-row"><span>总消息</span><b>{{ selected.message_count ?? 0 }}</b></div>
+              <div class="profile-row"><span>KOS 归属</span><b>{{ selected.staff_name || '-' }}</b></div>
+            </div>
+          </template>
+          <a-empty v-else description="未选择会话" style="margin-top: 60px" />
+        </div>
+      </div>
     </a-card>
 
     <a-drawer
@@ -204,16 +342,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { SyncOutlined } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
-import {
-  getLaiguLeadDetail,
-  getLaiguLeads,
-  getLaiguLeadStats,
-  syncLaigu,
-} from '../../api/laigu';
+import { getLaiguLeadDetail, getLaiguLeads, getLaiguLeadStats, getLaiguStaffFacets, syncLaigu } from '../../api/laigu';
+import { getKoxAccounts } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
@@ -236,6 +370,7 @@ const columns = [
   { key: 'action', title: '操作', width: 80 },
 ];
 
+const viewMode = ref('list');
 const list = ref([]);
 const stats = ref({ total: 0, today: 0, resourced: 0, with_phone: 0 });
 const loading = ref(false);
@@ -243,10 +378,21 @@ const page = ref(1);
 const pageSize = ref(10);
 const total = ref(0);
 const keyword = ref('');
-const isResource = ref(undefined);
+// 会话状态快捷切换（默认只看已留资，让操作人员一眼定位有留资的对话）
+const resMode = ref('true');
+// 默认隐藏"空白私信"（客户从未发过消息的会话）
+const hideEmpty = ref(true);
 const hasPhone = ref(undefined);
 const dateRange = ref(null);
 const syncing = ref(false);
+
+// 按 KOS 账号筛选（MDD）：会话进线账号 id / 客服昵称 双判据
+const kosFilter = ref(undefined);
+const kosOptions = ref([]);
+
+// 按 KOS 名称（客服昵称）筛选：选项来自真实会话数据
+const staffFilter = ref(undefined);
+const staffOptions = ref([]);
 
 const detailOpen = ref(false);
 const detailLoading = ref(false);
@@ -267,23 +413,63 @@ const messages = computed(() => detail.value?.raw_json?.messages ?? []);
 
 const brandParam = () => ({ brandId: auth.currentBrandId ?? undefined });
 
+function filterParams() {
+  const params = { ...brandParam() };
+  if (keyword.value) params.keyword = keyword.value;
+  if (resMode.value === 'true' || resMode.value === 'false') params.isResource = resMode.value;
+  if (hasPhone.value !== undefined && hasPhone.value !== null)
+    params.hasPhone = hasPhone.value;
+  if (hideEmpty.value) params.hasClientMessage = 'true';
+  if (dateRange.value?.length === 2) {
+    params.from = dateRange.value[0];
+    params.to = dateRange.value[1];
+  }
+  if (kosFilter.value) params.kos = kosFilter.value;
+  if (staffFilter.value) params.staff = staffFilter.value;
+  return params;
+}
+
+async function loadStaffFacets() {
+  try {
+    const res = await getLaiguStaffFacets(brandParam());
+    staffOptions.value = (res.list ?? []).map((s) => ({
+      label: `${s.name}（${s.count}）`,
+      value: s.name,
+    }));
+  } catch {
+    /* 筛选项加载失败不阻塞 */
+  }
+}
+
+// 已留资会话整行高亮，一眼识别
+function rowClassName(record) {
+  return record.is_resource ? 'row-resourced' : '';
+}
+
+async function loadKosOptions() {
+  try {
+    const res = await getKoxAccounts({ brandId: auth.currentBrandId ?? 5, status: 'enabled', page_size: 100 });
+    kosOptions.value = (res.list ?? [])
+      .filter((a) => a.nickname)
+      .map((a) => ({ label: a.nickname, value: a.nickname }));
+  } catch {
+    /* 筛选项加载失败不阻塞 */
+  }
+}
+
+function weixinOf(item) {
+  const wx = item?.client_attrs?.weixin;
+  return Array.isArray(wx) ? wx[0] : wx || null;
+}
+
 async function reload() {
   loading.value = true;
   try {
     const params = {
       page: page.value,
       page_size: pageSize.value,
-      ...brandParam(),
+      ...filterParams(),
     };
-    if (keyword.value) params.keyword = keyword.value;
-    if (isResource.value !== undefined && isResource.value !== null)
-      params.isResource = isResource.value;
-    if (hasPhone.value !== undefined && hasPhone.value !== null)
-      params.hasPhone = hasPhone.value;
-    if (dateRange.value?.length === 2) {
-      params.from = dateRange.value[0];
-      params.to = dateRange.value[1];
-    }
     const res = await getLaiguLeads(params);
     list.value = res.list.map((r) => ({
       ...r,
@@ -310,12 +496,24 @@ function onTableChange(p) {
   reload();
 }
 
+function onSearch() {
+  page.value = 1;
+  chatPage.value = 1;
+  if (viewMode.value === 'chat') loadChat(true);
+  reload();
+}
+
+function onViewChange() {
+  if (viewMode.value === 'chat' && !chatItems.value.length) loadChat(true);
+}
+
 async function doSync() {
   syncing.value = true;
   try {
     const res = await syncLaigu();
     message.success(`同步完成：拉取 ${res.fetched} 条会话`);
     await Promise.all([reload(), loadStats()]);
+    if (viewMode.value === 'chat') await loadChat(true);
   } catch (e) {
     message.error(e.message || '同步失败');
   } finally {
@@ -332,6 +530,78 @@ async function openDetail(record) {
   } catch (e) {
     message.error(e.message || '加载详情失败');
     detailOpen.value = false;
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+// ── 对话视图 ──
+const chatItems = ref([]);
+const chatPage = ref(1);
+const chatTotal = ref(0);
+const chatLoading = ref(false);
+const selected = ref(null);
+const chatFlowEl = ref(null);
+
+function isPending(item) {
+  // 客户发过消息且客服尚无后续回复 = 待回复
+  return item.client_message_count > 0 && item.message_count <= item.client_message_count;
+}
+
+/** 未读近似数 = 客户消息数 − 客服消息数（来鼓无已读状态，按未承接消息估算） */
+function pendingCount(item) {
+  const pending = (item.client_message_count ?? 0) - ((item.message_count ?? 0) - (item.client_message_count ?? 0));
+  return Math.max(0, pending);
+}
+
+async function loadChat(reset = false) {
+  if (chatLoading.value) return;
+  chatLoading.value = true;
+  try {
+    if (reset) chatPage.value = 1;
+    const res = await getLaiguLeads({
+      page: chatPage.value,
+      page_size: 50,
+      ...filterParams(),
+    });
+    const rows = res.list.map((r) => ({
+      ...r,
+      last_message_at: fmtTime(r.last_message_at),
+    }));
+    chatItems.value = reset ? rows : [...chatItems.value, ...rows];
+    chatTotal.value = res.total ?? 0;
+    if (reset && chatItems.value.length && !selected.value) {
+      // 优先选中最近有客户内容的会话，避免默认落在空会话上
+      const first = rows.find((r) => r.last_client_content || r.client_message_count > 0) ?? rows[0];
+      await selectLead(first);
+    }
+  } catch {
+    /* 静默 */
+  } finally {
+    chatLoading.value = false;
+  }
+}
+
+function onListScroll(e) {
+  const el = e.target;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+    if (chatItems.value.length < chatTotal.value) {
+      chatPage.value += 1;
+      loadChat(false);
+    }
+  }
+}
+
+async function selectLead(item) {
+  selected.value = item;
+  detailLoading.value = true;
+  detail.value = null;
+  try {
+    detail.value = await getLaiguLeadDetail(item.id);
+    await nextTick();
+    if (chatFlowEl.value) chatFlowEl.value.scrollTop = chatFlowEl.value.scrollHeight;
+  } catch (e) {
+    message.error(e.message || '加载对话失败');
   } finally {
     detailLoading.value = false;
   }
@@ -388,10 +658,26 @@ function fmtTime(value) {
 onMounted(() => {
   reload();
   loadStats();
+  loadKosOptions();
+  loadStaffFacets();
 });
 </script>
 
 <style scoped>
+/* 会话状态切换（默认已留资）：加粗强调 */
+.res-seg {
+  font-weight: 600;
+}
+
+/* 已留资会话整行浅绿高亮 + 左侧绿色描边，一眼识别 */
+:deep(.row-resourced > td) {
+  background: #f2fbf6 !important;
+}
+
+:deep(.row-resourced > td:first-child) {
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -435,10 +721,229 @@ onMounted(() => {
   color: #94a3b8;
 }
 
+.mini {
+  font-size: 12px;
+}
+
 .phone-text {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 对话视图（全屏三栏） ── */
+.conv-shell {
+  display: flex;
+  height: calc(100vh - 210px);
+  min-height: 520px;
+}
+
+.conv-list {
+  width: 340px;
+  flex-shrink: 0;
+  border-right: 1px solid #eef2f7;
+  overflow-y: auto;
+}
+
+.conv-list-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.conv-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.conv-item:hover {
+  background: #f8fafc;
+}
+
+.conv-item.active {
+  background: #eef4ff;
+}
+
+.conv-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #eef4ff;
+  color: #3456e6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.conv-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.conv-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conv-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-time {
+  font-size: 11px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.conv-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.conv-preview {
+  flex: 1;
+  font-size: 12px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread-badge {
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.conv-tag {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.conv-more {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.conv-dialog {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.conv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.conv-head-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.conv-head-meta {
+  margin-left: auto;
+}
+
+.chat-flow {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #fafbfc;
+}
+
+.conv-readonly {
+  text-align: center;
+  padding: 8px 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* 右栏客户资料 */
+.conv-profile {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid #eef2f7;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.conv-profile-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 12px;
+}
+
+.profile-section {
+  margin-bottom: 16px;
+}
+
+.profile-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.profile-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.profile-row span {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.profile-row b {
+  color: #1e293b;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-all;
+}
+
+/* ── 详情抽屉 ── */
 .detail-shell {
   height: 100%;
   overflow-y: auto;

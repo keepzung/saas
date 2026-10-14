@@ -13,6 +13,23 @@ const NOTES_WC_STOPWORDS = new Set(
   ].filter((w) => w.length >= 1),
 );
 
+// MDD(5) 内容类型自动打标（童装/服装业务；笔记 category 字段为空，按标题关键词动态归类）
+const MDD_CATEGORY_RULES: [RegExp, string][] = [
+  [/穿搭|上身|ootd|搭配|穿法|叠穿|穿衣|外套|马甲|套装|开衫|卫衣|连衣裙|羽绒服/i, '穿搭展示'],
+  [/面料|羊绒|羊毛|材质|含棉|亲肤|保暖|双面呢|羊羔绒/i, '面料材质'],
+  [/上新|新款|新品|秋冬款|春款|上架|首发/i, '上新预告'],
+  [/教程|怎么穿|技巧|指南|避坑|知识点|攻略/i, '穿搭教程'],
+  [/活动|优惠|折扣|促销|福利|直播|钜惠/i, '活动促销'],
+  [/工厂|源头|品牌|morgandada|门店|专柜|skp/i, '品牌故事'],
+  [/儿童|宝宝|亲子|男孩|女孩|baby|童/i, '亲子童装'],
+];
+const MDD_CATEGORY_LIST = ['穿搭展示', '面料材质', '上新预告', '穿搭教程', '活动促销', '品牌故事', '亲子童装', '日常分享'];
+const mddCategoryOf = (title: string | null | undefined) => {
+  const s = (title ?? '').toLowerCase();
+  for (const [re, cat] of MDD_CATEGORY_RULES) if (re.test(s)) return cat;
+  return '日常分享';
+};
+
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1085,7 +1102,7 @@ export class KoxService {
               cur.interaction_sum = v.inter;
               byDate.set(key, cur);
             }
-          } else {
+    } else {
             // 回退：窗口无 E 日档分区（回填未覆盖的历史）→ A 逐日（商业内容管理逐笔记表现）
             const aDaily = await this.prisma.koxContentNoteDaily.groupBy({
               by: ['day'],
@@ -1749,7 +1766,8 @@ export class KoxService {
     }
     const where: Prisma.KoxNoteWhereInput = { ...base };
     if (query.noteType) where.noteType = query.noteType;
-    if (query.category) where.category = query.category;
+    // Morgandada：分类为动态打标（不入库），筛选在内存进行
+    if (query.category && Number(query.brandId) !== 5) where.category = query.category;
     if (query.modelTag) where.modelTag = query.modelTag;
     if (query.isRtbAdver === 'true' || query.isRtbAdver === 'false') {
       where.isRtbAdver = query.isRtbAdver === 'true';
@@ -2016,13 +2034,12 @@ export class KoxService {
         title: n.title,
         content: n.content,
         cover_url: n.coverUrl,
-        note_url: n.noteUrl,
-        publish_time: n.publishTime,
+        note_url: n.noteUrl,        publish_time: n.publishTime,
         author_name: n.account?.nickname ?? n.authorName ?? '-',
         account_type: n.account?.accountType ?? n.accountType ?? 'KOS',
         store_name: n.account?.storeName ?? null,
         is_rtb_adver: n.isRtbAdver === true,
-        category: n.category,
+        category: brandId === 5 ? mddCategoryOf(n.title) : n.category,
         model_tag: n.modelTag,
         exposure: n.exposure,
         views: n.views,
@@ -2039,9 +2056,12 @@ export class KoxService {
       total,
       page,
       page_size: pageSize,
-      category_facets: categoryFacets
-        .map((g) => g.category)
-        .filter((c): c is string => !!c),
+      category_facets:
+        brandId === 5
+          ? MDD_CATEGORY_LIST
+          : categoryFacets
+              .map((g) => g.category)
+              .filter((c): c is string => !!c),
       model_facets: modelFacets
         .map((g) => g.modelTag)
         .filter((m): m is string => !!m),
@@ -2148,12 +2168,32 @@ export class KoxService {
       totals.pm_openings_sum = open;
       totals.pm_leads_sum = leads;
     }
+    // Morgandada(5)：私信三数 = 来鼓私信会话（账户维度真实口径，不随内容筛选联动）
+    // 时间口径：来鼓 API 不返回会话创建时间（sessionCreatedAt 入库多为 NULL），为空时回退首条消息时间
+    let pmScopeNote: string | null = null;
+    if ((query.brandId ? Number(query.brandId) : 0) === 5) {
+      const leads = await this.prisma.laiguLead.findMany({
+        where: {
+          brandId: 5,
+          isMdd: true,
+          OR: [
+            { sessionCreatedAt: { gte: start, lte: end } },
+            { sessionCreatedAt: null, firstMessageAt: { gte: start, lte: end } },
+          ],
+        },
+        select: { isResource: true, phone: true, clientMessageCount: true },
+      });
+      totals.pm_inquiries_sum = leads.length;
+      totals.pm_openings_sum = leads.filter((x) => x.clientMessageCount > 0).length;
+      totals.pm_leads_sum = leads.filter((x) => x.isResource).length;
+      pmScopeNote = '来源=来鼓私信会话（仅 Morgandada 投放账户/门店账号，账户维度），不随内容筛选联动';
+    }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
     const byModel = new Map<string, number>();
     const kwFreq = new Map<string, number>();
     for (const n of rows) {
-      const cat = n.category ?? '未分类';
+      const cat = (query.brandId ? Number(query.brandId) : 0) === 5 ? mddCategoryOf(n.title) : (n.category ?? '未分类');
       const cur = byCategory.get(cat) ?? { inter: 0, leads: 0 };
       cur.inter += n.likes + n.comments;
       cur.leads += n.formLeads;
@@ -2168,6 +2208,7 @@ export class KoxService {
 
     return {
       totals,
+      pm_scope_note: pmScopeNote,
       type_efficiency: [...byCategory.entries()].map(([category, v]) => ({
         category,
         inter: v.inter,
@@ -2205,114 +2246,117 @@ export class KoxService {
     return scope;
   }
 
-  /** ─── Morgandada(5) 运营总览：输出与特斯拉 overview 同形（global/summary/lead_funnel/trend），
-   *      大区维度替换为门店维度；数据映射集中在此方法，切换数据源只改这里 ─── */
-  async mddOverview(query: { start?: string; end?: string }) {
+  /** ─── Morgandada(5) 运营总览（客户看板版）：hero 大盘 + 三 Tab 指标（含上一等长周期 prev 环比）
+   *      + 爆文数 + 账号标签 facets；数据映射集中在此方法，切换数据源只改这里 ─── */
+  async mddOverview(query: { start?: string; end?: string; accountTag?: string }) {
     const brandId = 5;
+    /** 爆文阈值：单篇互动量（赞+藏+评+享）≥ 500 */
+    const NOTE_HIT_INTERACTION = 500;
     const asDay = (s: string | undefined, endOfDay = false) =>
       s && /^\d{4}-\d{2}-\d{2}$/.test(s)
         ? new Date(`${s}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}+08:00`)
         : undefined;
     const end = asDay(query.end, true) ?? new Date();
     const start = asDay(query.start) ?? new Date(end.getTime() - 29 * 86400000);
+    if (!query.start) start.setHours(0, 0, 0, 0);
+    if (!query.end) end.setHours(23, 59, 59, 999);
+    const windowDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
+    // 上一等长周期（环比）
+    const prevEnd = new Date(start.getTime() - 86400000);
+    prevEnd.setHours(23, 59, 59, 999);
+    const prevStart = new Date(prevEnd.getTime() - (windowDays - 1) * 86400000);
+    prevStart.setHours(0, 0, 0, 0);
 
-    const leadScope: Prisma.LaiguLeadWhereInput = {
+    // 账号（账号标签筛选联动：账号/内容类指标随标签过滤）
+    const kosAccounts = await this.prisma.kosAccount.findMany({
+      where: { brandId, status: 'enabled', ...(query.accountTag ? { accountTag: query.accountTag } : {}) },
+      select: { id: true, nickname: true, storeName: true, fans: true, accountTag: true },
+    });
+    const tagRows = await this.prisma.kosAccount.findMany({
+      where: { brandId, accountTag: { not: null } },
+      select: { accountTag: true },
+      distinct: ['accountTag'],
+    });
+    const tagFacetList = [...new Set(tagRows.map((x) => x.accountTag).filter(Boolean))] as string[];
+    const ids = kosAccounts.map((a) => a.id);
+    const nicknames = kosAccounts.map((a) => a.nickname).filter(Boolean) as string[];
+    const noteBase = (wStart: Date, wEnd: Date): Prisma.KoxNoteWhereInput => ({
+      brandId,
+      publishTime: { gte: wStart, lte: wEnd },
+      OR: [{ accountId: { in: ids } }, { authorName: { in: nicknames } }],
+    });
+    const leadWin = (wStart: Date, wEnd: Date): Prisma.LaiguLeadWhereInput => ({
       brandId,
       isMdd: true,
-      OR: [{ sessionCreatedAt: { gte: start, lte: end } }, { lastMessageAt: { gte: start, lte: end } }],
-    };
-    const authorScope = await this.mddAuthorScope();
-    const noteScope: Prisma.KoxNoteWhereInput = {
-      brandId,
-      publishTime: { gte: start, lte: end },
-      OR: [{ accountId: { in: authorScope.ids } }, { authorName: { in: authorScope.nicknames } }],
-    };
-
-    const [kosAccounts, notes, leads, campRows] = await Promise.all([
-      this.prisma.kosAccount.findMany({
-        where: { brandId, status: 'enabled' },
-        select: { id: true, nickname: true, storeName: true, fans: true },
-      }),
-      this.prisma.koxNote.findMany({
-        where: noteScope,
-        select: {
-          noteId: true, publishTime: true, authorName: true, accountId: true,
-          exposure: true, views: true, likes: true, collects: true, comments: true, shares: true,
-          followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true,
-        },
-      }),
-      this.prisma.laiguLead.findMany({
-        where: leadScope,
-        select: {
-          sessionId: true, isResource: true, phone: true, clientMessageCount: true,
-          sessionCreatedAt: true, lastMessageAt: true,
-        },
-      }),
-      this.prisma.koxCampaignDailyStat.findMany({
-        where: { brandId, statDate: { gte: start, lte: end } },
-        select: { statDate: true, fee: true, impression: true, click: true, msgLeadsNum: true },
-      }),
-    ]);
+      sessionCreatedAt: { gte: wStart, lte: wEnd },
+    });
 
     const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
     const n = (v: unknown) => Number(v ?? 0) || 0;
     const r2 = (v: number) => (Math.round(v * 100) / 100) || 0;
 
-    // 投放效率（聚光账户日报聚合；投流私信留资=日报 msgLeadsNum，留资成本按全链路留资折算）
-    const ad = {
-      cost: r2(sum(campRows.map((x) => n(x.fee)))),
-      impression: sum(campRows.map((x) => n(x.impression))),
-      click: sum(campRows.map((x) => n(x.click))),
-      msg_leads: sum(campRows.map((x) => n(x.msgLeadsNum))),
-      ctr: 0,
-      cpc: 0,
-      cpm: 0,
+    // 单窗口聚合（cur/prev 复用）
+    const aggWindow = async (wStart: Date, wEnd: Date) => {
+      const [notes, leads, camps] = await Promise.all([
+        this.prisma.koxNote.findMany({
+          where: noteBase(wStart, wEnd),
+          select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true },
+        }),
+        this.prisma.laiguLead.findMany({
+          where: leadWin(wStart, wEnd),
+          select: { isResource: true, phone: true, clientMessageCount: true },
+        }),
+        this.prisma.koxCampaignDailyStat.findMany({
+          where: { brandId, statDate: { gte: wStart, lte: wEnd } },
+          select: { fee: true, impression: true, click: true, msgLeadsNum: true },
+        }),
+      ]);
+      const itemCnt = notes.length;
+      return {
+        item_cnt: itemCnt,
+        exposure_sum: sum(notes.map((x) => x.exposure)),
+        view_sum: sum(notes.map((x) => x.views)),
+        interaction_sum: sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares)),
+        follow_sum: sum(notes.map((x) => x.followCount)),
+        hit_notes: notes.filter((x) => x.likes + x.collects + x.comments + x.shares >= NOTE_HIT_INTERACTION).length,
+        avg_publish: kosAccounts.length ? r2(itemCnt / kosAccounts.length) : 0,
+        lead: {
+          pm_inquiries: leads.length,
+          pm_openings: leads.filter((x) => x.clientMessageCount > 0).length,
+          pm_leads: leads.filter((x) => x.isResource).length,
+          total_leads: leads.filter((x) => x.isResource || x.phone).length,
+        },
+        ad: {
+          cost: r2(sum(camps.map((x) => n(x.fee)))),
+          impression: sum(camps.map((x) => n(x.impression))),
+          click: sum(camps.map((x) => n(x.click))),
+          msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
+        },
+      };
     };
-    ad.ctr = ad.impression ? r2((ad.click / ad.impression) * 100) : 0;
-    ad.cpc = ad.click ? r2(ad.cost / ad.click) : 0;
-    ad.cpm = ad.impression ? r2((ad.cost / ad.impression) * 1000) : 0;
+
+    const [cur, prev] = await Promise.all([aggWindow(start, end), aggWindow(prevStart, prevEnd)]);
 
     // 账号/门店/粉丝
     const kosNum = kosAccounts.length;
-    const storeOf = (a: { storeName: string | null }) => (a.storeName ?? '').trim();
-    const storeNames = [...new Set(kosAccounts.map(storeOf).filter(Boolean))];
+    const storeNames = [...new Set(kosAccounts.map((a) => (a.storeName ?? '').trim()).filter(Boolean))];
     const fansSum = sum(kosAccounts.map((a) => a.fans ?? 0));
-    const nickToStore = new Map(kosAccounts.map((a) => [a.nickname, storeOf(a)]));
-
-    // 内容汇总（笔记口径）
-    const itemCnt = notes.length;
-    const exposureSum = sum(notes.map((x) => x.exposure));
-    const viewSum = sum(notes.map((x) => x.views));
-    const interactionSum = sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares));
-    const followSum = sum(notes.map((x) => x.followCount));
-    const avgPublish = kosNum ? r2(itemCnt / kosNum) : 0;
-
-    // 线索漏斗（私信会话口径）
-    const openCnt = leads.filter((x) => x.clientMessageCount > 0).length;
-    const resourceCnt = leads.filter((x) => x.isResource).length;
-    const totalLeads = leads.filter((x) => x.isResource || x.phone).length;
-
-    // 门店维度（特斯拉 region_* 的 MDD 对应物）
-    const regionKos = storeNames.map((s) => ({
-      region: s,
-      kos_cnt: kosAccounts.filter((a) => storeOf(a) === s).length,
-    }));
-    const storeAgg = new Map<string, { item_cnt: number; exposure_sum: number; view_sum: number; interaction_sum: number; pm_leads: number }>();
-    for (const x of notes) {
-      const store = (x.authorName ? nickToStore.get(x.authorName) : '') || '未关联门店';
-      const cur = storeAgg.get(store) ?? { item_cnt: 0, exposure_sum: 0, view_sum: 0, interaction_sum: 0, pm_leads: 0 };
-      cur.item_cnt += 1;
-      cur.exposure_sum += x.exposure;
-      cur.view_sum += x.views;
-      cur.interaction_sum += x.likes + x.collects + x.comments + x.shares;
-      cur.pm_leads += x.pmLeads;
-      storeAgg.set(store, cur);
-    }
-    const regionContent = [...storeAgg.entries()]
-      .map(([region, v]) => ({ region, ...v }))
-      .sort((a, b) => b.item_cnt - a.item_cnt);
 
     // 趋势（东八区日键；字段名对齐特斯拉 overview）
+    const [trendNotes, trendLeads, trendCamps] = await Promise.all([
+      this.prisma.koxNote.findMany({
+        where: noteBase(start, end),
+        select: { publishTime: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true },
+      }),
+      this.prisma.laiguLead.findMany({
+        where: leadWin(start, end),
+        select: { isResource: true, phone: true, clientMessageCount: true, sessionCreatedAt: true, lastMessageAt: true },
+      }),
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: { brandId, statDate: { gte: start, lte: end } },
+        select: { statDate: true, fee: true },
+      }),
+    ]);
     const days: string[] = [];
     for (let t = new Date(`${dayKey08(start)}T00:00:00+08:00`).getTime(); t <= new Date(`${dayKey08(end)}T00:00:00+08:00`).getTime(); t += 86400000) {
       days.push(new Date(t).toISOString().slice(0, 10));
@@ -2320,7 +2364,7 @@ export class KoxService {
     const trendMap = new Map(
       days.map((d) => [d, { date: d, item_cnt: 0, view_sum: 0, exposure_sum: 0, interaction_sum: 0, ad_cost: 0, ad_msg_enter: 0, ad_msg_open: 0, ad_msg_leads: 0 }]),
     );
-    for (const x of notes) {
+    for (const x of trendNotes) {
       if (!x.publishTime) continue;
       const row = trendMap.get(dayKey08(x.publishTime));
       if (row) {
@@ -2330,11 +2374,11 @@ export class KoxService {
         row.interaction_sum += x.likes + x.collects + x.comments + x.shares;
       }
     }
-    for (const x of campRows) {
+    for (const x of trendCamps) {
       const row = trendMap.get(dayKey08(x.statDate));
       if (row) row.ad_cost += n(x.fee);
     }
-    for (const x of leads) {
+    for (const x of trendLeads) {
       const at = x.sessionCreatedAt ?? x.lastMessageAt;
       if (!at) continue;
       const row = trendMap.get(dayKey08(at));
@@ -2347,37 +2391,57 @@ export class KoxService {
     return {
       start: dayKey08(start),
       end: dayKey08(end),
-      global: {
-        kos_num: kosNum,
-        store_num: storeNames.length,
-        fans_sum: fansSum,
-        region_kos: regionKos,
-        region_content: regionContent,
-      },
+      days,
+      global: { kos_num: kosNum, store_num: storeNames.length, fans_sum: fansSum },
       summary: {
         kos_num: kosNum,
         store_num: storeNames.length,
         fans_sum: fansSum,
-        item_cnt: itemCnt,
-        exposure_sum: exposureSum,
-        view_sum: viewSum,
-        interaction_sum: interactionSum,
-        avg_publish: avgPublish,
-        ctr: exposureSum ? r2((viewSum / exposureSum) * 100) : 0,
-        interaction_rate: viewSum ? r2((interactionSum / viewSum) * 100) : 0,
+        item_cnt: cur.item_cnt,
+        exposure_sum: cur.exposure_sum,
+        view_sum: cur.view_sum,
+        interaction_sum: cur.interaction_sum,
+        follow_sum: cur.follow_sum,
+        hit_notes: cur.hit_notes,
+        avg_publish: cur.avg_publish,
+        ctr: cur.exposure_sum ? r2((cur.view_sum / cur.exposure_sum) * 100) : 0,
+        interaction_rate: cur.view_sum ? r2((cur.interaction_sum / cur.view_sum) * 100) : 0,
       },
-      publish: { follow_count_sum: followSum },
-      ad,
       lead_funnel: {
-        pm_inquiries: leads.length,
-        pm_openings: openCnt,
-        pm_leads: resourceCnt,
-        open_rate: leads.length ? r2((openCnt / leads.length) * 100) : 0,
-        lead_rate: leads.length ? r2((resourceCnt / leads.length) * 100) : 0,
-        total_leads: totalLeads,
+        pm_inquiries: cur.lead.pm_inquiries,
+        pm_openings: cur.lead.pm_openings,
+        pm_leads: cur.lead.pm_leads,
+        open_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : 0,
+        lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
+        total_leads: cur.lead.total_leads,
         scope_note: '线索=来鼓私信会话（仅 Morgandada 投放账户/门店账号），留资=留资卡∪电话',
       },
+      ad: {
+        cost: cur.ad.cost,
+        impression: cur.ad.impression,
+        click: cur.ad.click,
+        msg_leads: cur.ad.msg_leads,
+        cpc: cur.ad.click ? r2(cur.ad.cost / cur.ad.click) : 0,
+        cpm: cur.ad.impression ? r2((cur.ad.cost / cur.ad.impression) * 1000) : 0,
+        leads_cost: cur.lead.total_leads ? r2(cur.ad.cost / cur.lead.total_leads) : 0,
+      },
+      prev: {
+        summary: {
+          item_cnt: prev.item_cnt,
+          exposure_sum: prev.exposure_sum,
+          view_sum: prev.view_sum,
+          interaction_sum: prev.interaction_sum,
+          follow_sum: prev.follow_sum,
+          hit_notes: prev.hit_notes,
+          avg_publish: prev.avg_publish,
+        },
+        lead_funnel: prev.lead,
+        ad: prev.ad,
+      },
+      tag_facets: tagFacetList,
       trend: [...trendMap.values()],
+      scope_note:
+        '账号=小红书 KOS 专业号（启用）；内容/阅读/互动=笔记累计口径（发布时间在筛选区间，支持账号标签筛选）；爆文=单篇互动（赞+藏+评+享）≥500；线索=来鼓私信会话（仅 Morgandada 投放账户/门店账号），留资=留资卡∪电话；投放=聚光账户日报；环比=上一等长周期对比',
     };
   }
 
@@ -3040,6 +3104,44 @@ export class KoxService {
         });
       }
       if (cumAgg.size) metric_source += '+notes_cum_likes';
+    } else if (brandId === 5) {
+      // Morgandada(5)：乐允投放报表为品牌级（brandUserName=MorganDaDa，无法按账号拆分），
+      // 私信三数改按来鼓会话（LaiguLead）归属 KOS 账号聚合：
+      // 进线=窗口内会话数、开口=客户发过消息的会话数、留资=已留资会话数
+      // 归属：会话进线账号 id（subSource=主页 id）或客服昵称 → KosAccount
+      // 时间口径：来鼓 API 不返回会话创建时间，为空时回退首条消息时间
+      const uidToId = new Map<string, number>();
+      for (const a of accounts) {
+        const m = (a.authorUrl ?? '').match(/\/profile\/([0-9a-f]+)$/);
+        if (m) uidToId.set(m[1], a.id);
+      }
+      const nickToId = new Map(accounts.map((a) => [a.nickname, a.id]));
+      const mddLeadRows = await this.prisma.laiguLead.findMany({
+        where: {
+          brandId: 5,
+          isMdd: true,
+          OR: [
+            { sessionCreatedAt: { gte: start, lte: end } },
+            { sessionCreatedAt: null, firstMessageAt: { gte: start, lte: end } },
+          ],
+        },
+        select: { subSource: true, staffName: true, clientMessageCount: true, isResource: true },
+      });
+      let mddLeadHit = 0;
+      for (const r of mddLeadRows) {
+        const accId =
+          (r.subSource ? uidToId.get(r.subSource) : undefined) ??
+          (r.staffName ? nickToId.get(r.staffName) : undefined) ??
+          null;
+        if (accId == null || !idSet.has(accId)) continue;
+        mddLeadHit += 1;
+        bump(accId, (a) => {
+          a.pm_inquiries += 1;
+          if (r.clientMessageCount > 0) a.pm_openings += 1;
+          if (r.isResource) a.pm_leads += 1;
+        });
+      }
+      if (mddLeadRows.length) metric_source += '+mdd_laigu_sessions';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {

@@ -12,6 +12,11 @@ export class LaiguController {
     return this.laiguService.stats(brandId);
   }
 
+  @Get('laigu/leads/staff-facets')
+  staffFacets(@Query('brandId') brandId?: string) {
+    return this.laiguService.staffFacets(brandId);
+  }
+
   @Get('laigu/feedback/analysis')
   feedbackAnalysis(@Query() query: { brandId?: string; days?: string }) {
     return this.laiguService.feedbackAnalysis(query);
@@ -26,10 +31,13 @@ export class LaiguController {
       keyword?: string;
       isResource?: string;
       hasPhone?: string;
+      hasClientMessage?: string;
       source?: string;
       from?: string;
       to?: string;
       brandId?: string;
+      kos?: string;
+      staff?: string;
     },
   ) {
     return this.laiguService.leads(query);

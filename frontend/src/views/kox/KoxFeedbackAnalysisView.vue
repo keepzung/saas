@@ -1,22 +1,34 @@
 <template>
   <PageWrapper title="反馈分析" subtitle="评论互动与留资转化分析">
     <template #extra>
-      <a-segmented
-        v-if="isMdd"
-        v-model:value="feedbackScope"
-        :options="[
-          { label: '私信分析', value: 'dm' },
-          { label: '评论监控', value: 'comment' },
-          { label: '私信监控', value: 'monitor' },
-        ]"
-        @change="loadData"
-      />
       <a-radio-group v-model:value="days" size="small" @change="onDaysChange">
         <a-radio-button :value="7">近7天</a-radio-button>
         <a-radio-button :value="30">近30天</a-radio-button>
         <a-radio-button v-if="isMdd" :value="90">近90天</a-radio-button>
       </a-radio-group>
     </template>
+
+    <a-card v-if="isMdd" :bordered="false" class="scope-card" size="small">
+      <div class="scope-bar">
+        <span class="scope-bar-label">分析视角</span>
+        <div class="scope-tabs">
+          <button
+            v-for="opt in SCOPE_OPTIONS"
+            :key="opt.value"
+            type="button"
+            class="scope-tab"
+            :class="{ active: feedbackScope === opt.value }"
+            @click="onScopeChange(opt.value)"
+          >
+            <component :is="opt.icon" class="scope-icon" />
+            <span class="scope-text">
+              <span class="scope-name">{{ opt.label }}</span>
+              <span class="scope-desc">{{ opt.desc }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </a-card>
 
     <a-card :bordered="false" class="pipeline-card" size="small">
       <div class="pipeline-bar">
@@ -238,6 +250,8 @@ import dayjs from 'dayjs';
 import {
   QuestionCircleOutlined,
   MessageOutlined,
+  CommentOutlined,
+  EyeOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
   SendOutlined,
@@ -253,8 +267,18 @@ const isTesla = Number(auth.currentBrandId) === 6;
 // Morgandada(5) 同样接来鼓私信真实口径（服务端 isMdd 过滤已就绪）
 const isMdd = Number(auth.currentBrandId) === 5;
 const realChannel = isTesla || isMdd;
-// 口径切换（MDD）：私信分析 / 评论监控
+// 口径切换（MDD）：私信分析 / 评论监控 / 私信监控 —— 醒目视角切换条（客户要求显性化入口）
 const feedbackScope = ref('dm');
+const SCOPE_OPTIONS = [
+  { label: '私信分析', value: 'dm', icon: MessageOutlined, desc: '会话情感 · 分类 · 高频话题' },
+  { label: '评论监控', value: 'comment', icon: CommentOutlined, desc: '笔记评论情感与意图分类' },
+  { label: '私信监控', value: 'monitor', icon: EyeOutlined, desc: '企微引流 × 话术转化' },
+];
+function onScopeChange(v) {
+  if (feedbackScope.value === v) return;
+  feedbackScope.value = v;
+  loadData();
+}
 
 const PAGE_SIZE = 12;
 
@@ -543,6 +567,91 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ─── MDD 分析视角切换条（醒目入口） ─── */
+.scope-card :deep(.ant-card-body) {
+  padding: 10px 16px;
+}
+
+.scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.scope-bar-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  padding-right: 12px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.scope-tabs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scope-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border: 1.5px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.scope-tab:hover {
+  border-color: #3456e6;
+  background: #eef4ff;
+}
+
+.scope-tab.active {
+  background: linear-gradient(135deg, #3456e6, #4f6ef2);
+  border-color: #3456e6;
+  box-shadow: 0 3px 10px rgba(52, 86, 230, 0.35);
+}
+
+.scope-icon {
+  font-size: 18px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.scope-tab.active .scope-icon {
+  color: #fff;
+}
+
+.scope-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.scope-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.scope-desc {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.scope-tab.active .scope-name {
+  color: #fff;
+}
+
+.scope-tab.active .scope-desc {
+  color: rgba(255, 255, 255, 0.8);
+}
+
 .pipeline-card :deep(.ant-card-body) {
   padding: 12px 16px;
 }

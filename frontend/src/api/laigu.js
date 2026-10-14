@@ -6,6 +6,9 @@ export const getLaiguLeads = (params) =>
 export const getLaiguLeadStats = (params) =>
   request.get('/laigu/leads/stats', { params });
 
+export const getLaiguStaffFacets = (params) =>
+  request.get('/laigu/leads/staff-facets', { params });
+
 export const getLaiguFeedbackAnalysis = (params) =>
   request.get('/laigu/feedback/analysis', { params });
 

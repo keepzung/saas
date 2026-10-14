@@ -206,6 +206,11 @@ const routes = [
         meta: { title: '车型销量' },
       },
       {
+        path: '/kox_df/sales/board',
+        component: () => import('../views/kox/KoxMddSalesView.vue'),
+        meta: { title: '销售看板' },
+      },
+      {
         path: '/kox_df/campaign-analysis/cycle-report',
         component: () => import('../views/kox/KoxCycleReportView.vue'),
         meta: { title: '周报表' },

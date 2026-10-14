@@ -563,8 +563,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
       let upserted = 0;
       const sellerIds = new Set<string>();
+      // Morgandada(5)：仅保留指定代理商子账户（客户确认单一投放账户，env 可配）
+      const mddOnlyAdvertiser = (
+        this.configService.get<string>('SPARK_MDD_ADVERTISER_ID') ?? '10847045'
+      ).trim();
       for (const r of rows) {
         if (!r.virtualSellerId) continue;
+        if (org.brandId === 5 && String(r.advertiserId ?? '') !== mddOnlyAdvertiser) continue;
         sellerIds.add(r.virtualSellerId);
         const isSub = !!r.subAccount?.agentSubAccountId;
         await this.prisma.koxCampaignDailyStat.upsert({

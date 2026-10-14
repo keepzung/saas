@@ -205,7 +205,8 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <div class="note-title-cell">
-              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" referrerpolicy="no-referrer" @error="record.cover = `/images/kox-notes/note${(record.id % 5) + 1}.webp`" />
+              <img v-if="record.cover" class="note-cover-img" :src="record.cover" alt="" referrerpolicy="no-referrer" @error="onCoverError(record)" />
+              <span v-else-if="isMdd" class="note-cover-ph">暂无封面</span>
               <img v-else class="note-cover-img" :src="`/images/kox-notes/note${(record.id % 5) + 1}.webp`" loading="lazy" />
               <div class="note-title-text">
                 <a class="title-link" @click="showDetail(record)">{{ record.title }}</a>
@@ -446,7 +447,8 @@ const columns = computed(() => [
   { title: '收藏', dataIndex: 'collect', width: 80 },
   { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
   { title: '曝光', dataIndex: 'exposure', width: 110 },
-  ...(isTesla.value
+  // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
+  ...(isTesla.value || isMdd.value
     ? []
     : [{ title: '表单线索', dataIndex: 'formLeads', width: 90, sorter: (a, b) => a.formLeads - b.formLeads }]),
 ]);
@@ -891,6 +893,11 @@ function showDetail(row) {
   detailOpen.value = true;
 }
 
+// 封面加载失败：MDD 回退到中性占位（车图为其他品牌演示兜底，不得出现在 MDD）
+function onCoverError(record) {
+  record.cover = isMdd.value ? '' : `/images/kox-notes/note${(record.id % 5) + 1}.webp`;
+}
+
 const exporting = ref(false);
 
 async function exportCsv() {
@@ -898,7 +905,9 @@ async function exportCsv() {
   try {
     const head = isTesla.value
       ? ['标题', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
-      : ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
+      : isMdd.value
+        ? ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
+        : ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
       const raw = await fetchAllRealRows();
@@ -929,7 +938,7 @@ async function exportCsv() {
               n.collects,
               n.views,
               n.exposure,
-              n.form_leads,
+              ...(isMdd.value ? [] : [n.form_leads]),
               n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
             ],
       );
@@ -937,7 +946,7 @@ async function exportCsv() {
       rows = filtered.value.map((n) =>
         isTesla.value
           ? [n.title, n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
-          : [n.title, n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.formLeads, n.publishTime],
+          : [n.title, n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [] : [n.formLeads]), n.publishTime],
       );
     }
     const csv = [head, ...rows]
@@ -1361,10 +1370,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   color: #94a3b8;
   background: linear-gradient(160deg, #eef2ff, #f8fafc);
+  width: 45px;
+  height: 60px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  writing-mode: vertical-rl;
+  letter-spacing: 3px;
 }
 
 .note-title-text {

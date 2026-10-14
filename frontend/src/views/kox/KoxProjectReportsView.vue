@@ -4,17 +4,18 @@
       <a-button size="small" class="export-btn" :loading="exporting" @click="exportExcelData">
         <DownloadOutlined /> 数据导出
       </a-button>
-      <a-button type="primary" size="small" @click="goAdd">
+      <a-button v-if="!isMdd" type="primary" size="small" @click="goAdd">
         <PlusOutlined /> 新增项目
       </a-button>
     </template>
 
-    <NoticeBar v-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实项目数据。</NoticeBar>
+    <NoticeBar v-if="isMdd">数据来源：小红书聚光平台（Morgandada 组织投放日报），按投放账户聚合，每日 T+1 更新。</NoticeBar>
+    <NoticeBar v-else-if="mode === 'demo'">数据说明：当前为演示数据，聚光平台授权接入后将替换为真实项目数据。</NoticeBar>
     <NoticeBar v-else-if="mode === 'real'">数据来源：小红书聚光平台（聚光投放），每日 T+1 更新；项目消耗按「项目周期 × 关联账户」自动聚合。</NoticeBar>
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-label">项目数</div>
+        <div class="stat-label">{{ isMdd ? '投放账户数' : '项目数' }}</div>
         <div class="stat-value">{{ list.length }}</div>
       </div>
       <div class="stat-card">
@@ -83,7 +84,7 @@ import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
-import { getSparkProjects, deleteSparkProject } from '../../api/spark';
+import { getSparkProjects, deleteSparkProject, getSparkCampaignAccounts } from '../../api/spark';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
 
@@ -184,14 +185,16 @@ const budgetRate = computed(() =>
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
+const isMdd = computed(() => Number(auth.currentBrandId) === 5);
 
 const columns = computed(() => {
   const base = [
-    { key: 'name', title: '项目名称' },
+    { key: 'name', title: isMdd.value ? '投放账户' : '项目名称' },
   ];
   if (isDf) base.push({ title: '大区', dataIndex: 'region', width: 100 });
+  if (!isMdd.value) base.push({ title: '项目周期', dataIndex: 'period', width: 200 });
+  else base.push({ title: '有消耗天数', dataIndex: 'consume_days', width: 100 });
   base.push(
-    { title: '项目周期', dataIndex: 'period', width: 200 },
     { key: 'budget', title: '预算 / 消耗', width: 180 },
     { title: '展现量', dataIndex: 'impressions', width: 100, sorter: (a, b) => a.impressions - b.impressions },
     { title: '点击量', dataIndex: 'clicks', width: 90 },
@@ -199,14 +202,40 @@ const columns = computed(() => {
     { title: '互动量', dataIndex: 'interactions', width: 90 },
     { title: '私信留资', dataIndex: 'pm_leads', width: 95 },
     { title: '留资成本', dataIndex: 'lead_cost', width: 95 },
-    { key: 'actions', title: '操作', width: 80 },
   );
+  if (!isMdd.value) base.push({ key: 'actions', title: '操作', width: 80 });
   return base;
 });
 
 async function load() {
   loading.value = true;
   try {
+    if (isMdd.value) {
+      // Morgandada：投放账户聚合视图（聚光日报真实数据，无项目档案）
+      const res = await getSparkCampaignAccounts({
+        brandId: auth.currentBrandId ?? 5,
+        page_size: 100,
+      });
+      list.value = (res.list ?? []).map((p) => ({
+        id: p.virtual_seller_id,
+        name: p.name,
+        remark: p.agent_name ? `代理商：${p.agent_name}` : '',
+        account_num: 0,
+        consume_days: p.consume_days ?? 0,
+        period: '',
+        budget: null,
+        cost: p.fee,
+        impressions: p.impression,
+        clicks: p.click,
+        ctr: p.impression ? `${((p.click / p.impression) * 100).toFixed(2)}%` : '0',
+        interactions: p.interaction,
+        pm_leads: p.msg_leads,
+        lead_cost: p.msg_leads ? (p.fee / p.msg_leads).toFixed(1) : '-',
+      }));
+      // 真实通道空数据 = 空态，绝不回退演示（荣威假项目对客户严重误导）
+      mode.value = list.value.length ? 'real' : 'empty';
+      return;
+    }
     const res = await getSparkProjects({
       brandId: auth.currentBrandId ?? 2,
     });

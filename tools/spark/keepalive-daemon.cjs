@@ -8,6 +8,7 @@
 // 用法: pm2 start keepalive-daemon.cjs --name saas-keepalive   （env: KEEPALIVE_INTERVAL_MINUTES=10）
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { createRequire } = require('module');
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -51,6 +52,19 @@ const state = {}; // brandId -> { lastOk, lastFail, consecutiveFails, lastRelogi
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowIso = () => new Date().toISOString();
+
+let xvfbProc = null;
+/** 有头登录需要虚拟屏：系统无 DISPLAY 时自动拉起 Xvfb :99（复用，随 daemon 存活） */
+function ensureXvfb() {
+  if (process.env.DISPLAY) return process.env.DISPLAY;
+  if (!xvfbProc) {
+    try {
+      xvfbProc = spawn('Xvfb', [':99', '-screen', '0', '1440x860x24'], { stdio: 'ignore' });
+      xvfbProc.on('exit', () => { xvfbProc = null; });
+    } catch {}
+  }
+  return ':99';
+}
 
 function loadState() {
   try { Object.assign(state, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))); } catch {}
@@ -237,7 +251,13 @@ async function reloginMcc(brandId) {
   const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
   const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
   if (!ACCOUNT || !PASSWORD) return { ok: false, note: `缺 SPARK_ACCOUNT_B${brandId}/SPARK_PASSWORD_B${brandId}` };
-  const browser = await chromium.launch({ headless: true, executablePath: CHROMIUM_BIN, args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  // 有头模式（Xvfb 虚拟屏）：headless 会被小红书风控静默拦截，导致点击后无响应
+  const browser = await chromium.launch({
+    headless: false,
+    executablePath: CHROMIUM_BIN,
+    env: { ...process.env, DISPLAY: ensureXvfb() },
+    args: ['--no-proxy-server', '--no-sandbox', '--disable-blink-features=AutomationControlled', '--disable-gpu'],
+  });
   try {
     const ctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1440, height: 860 } });
     const page = await ctx.newPage();
@@ -259,7 +279,13 @@ async function reloginMcc(brandId) {
       await sleep(400);
       const cbs = page.locator('input[type="checkbox"]');
       lastDebug = `round${round + 1} 邮箱值=${(await page.locator('input[placeholder="邮箱"]').first().inputValue().catch(() => '?')).slice(0, 4)}*** 勾选=${await cbs.nth(0).isChecked().catch(() => '?')}/${await cbs.nth(1).isChecked().catch(() => '?')} dom=${await page.evaluate(() => { const cb = document.querySelector('input[type="checkbox"]'); return cb ? cb.outerHTML.slice(0, 80) : 'none'; })}`;
-      await page.locator('button:has-text("登 录"), button:has-text("登录")').first().click().catch(() => {});
+      // 客户提交按钮被遮挡时 locator.click 会永远等待 → JS 原生 click（beer-login-btn 提交钮）+ 密码框回车兜底
+      await page.evaluate(() => {
+        const el = [...document.querySelectorAll('button')].find((b) => (b.innerText || '').replace(/\s+/g, '') === '登录' && /beer-login-btn/.test(b.className));
+        if (el) el.click();
+      }).catch(() => {});
+      await sleep(1500);
+      await page.locator('input[placeholder="密码"]').first().press('Enter').catch(() => {});
       // 等最多 20s
       for (let i = 0; i < 6; i++) {
         await sleep(3000);
@@ -344,11 +370,10 @@ async function keepBrand(org) {
   if (!r.alive && !r.netError) {
     st.consecutiveFails = (st.consecutiveFails || 0) + 1;
     const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
+    // reloginMcc 已改 Xvfb 有头 + JS 原生点击（2026-10-13），成功率恢复，MCC 自动重登重新启用
     const canTry =
       st.consecutiveFails >= 2 &&
-      (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs) &&
-      // mcc 无头重登历史全部被风控拦（超时/滑块），不浪费时间与风控暴露——恢复走人工有头登录 push-cookie-prod
-      org.channel !== 'mcc';
+      (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs);
     if (canTry) {
       st.lastReloginAt = Date.now();
       console.log(`[${nowIso()}] brand${brandId} 失效，尝试自动重登 (${org.channel}) ...`);
