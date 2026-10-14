@@ -28,6 +28,8 @@ const NO_MIRROR = argv.includes('--no-mirror');
 const argOf = (k, d) => { const i = argv.indexOf(k); return i > -1 ? argv[i + 1] : d; };
 const LIMIT = Number(argOf('--limit', 0)) || Infinity;
 const BRAND_ID = Number(argOf('--brandId', 5)) || 5;
+// 排序：views=阅读量优先（第一页/热门内容优先补齐），publishTime=最新优先（默认）
+const ORDER = argOf('--order', 'publishTime') === 'views' ? { views: 'desc' } : { publishTime: 'desc' };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isRealCover = (u) => {
@@ -63,31 +65,27 @@ async function fetchOgImage(url) {
 }
 
 async function launchBrowser() {
-  let chromium;
-  try {
-    ({ chromium } = require('playwright'));
-  } catch {
-    const pc = backendRequire('playwright-core');
-    const findChromium = () => {
-      if (process.env.CHROMIUM_BIN && fs.existsSync(process.env.CHROMIUM_BIN)) return process.env.CHROMIUM_BIN;
-      const bases = [
-        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
-        '/root/.cache/ms-playwright',
-        path.join(process.env.HOME ?? '', '.cache', 'ms-playwright'),
-      ].filter(Boolean);
-      for (const base of bases) {
-        if (!fs.existsSync(base)) continue;
-        const dirs = fs.readdirSync(base).filter((d) => d.startsWith('chromium-')).sort().reverse();
-        for (const d of dirs) for (const sub of ['chrome-win64', 'chrome-win', 'chrome-linux']) {
-          const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
-          if (fs.existsSync(exe)) return exe;
-        }
+  // 与 keepalive-daemon 一致：playwright-core + 本地已装 chromium（全量 playwright 包要求的 headless_shell 版本常缺失）
+  const pc = backendRequire('playwright-core');
+  const findChromium = () => {
+    if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
+    if (process.env.CHROMIUM_BIN && fs.existsSync(process.env.CHROMIUM_BIN)) return process.env.CHROMIUM_BIN;
+    const bases = [
+      path.join(process.env.HOME || process.env.USERPROFILE || '', '.cache', 'ms-playwright'),
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'ms-playwright') : null,
+    ].filter(Boolean);
+    for (const base of bases) {
+      if (!fs.existsSync(base)) continue;
+      const dirs = fs.readdirSync(base).filter((d) => /^chromium-\d+$/.test(d)).sort().reverse();
+      for (const d of dirs) for (const sub of ['chrome-linux64/chrome', 'chrome-linux/chrome', 'chrome-win64/chrome.exe', 'chrome-win/chrome.exe']) {
+        const exe = path.join(base, d, sub);
+        if (fs.existsSync(exe)) return exe;
       }
-      return null;
-    };
-    const exe = findChromium();
-    chromium = { launch: (opts) => pc.chromium.launch({ ...opts, executablePath: exe ?? undefined }) };
-  }
+    }
+    return null;
+  };
+  const exe = findChromium();
+  const chromium = { launch: (opts) => pc.chromium.launch({ ...opts, executablePath: exe ?? undefined }) };
   if (!fs.existsSync(STATE_FILE)) {
     // 不中断整批：og:image 快路径照常跑，仅跳过浏览器兜底分支（调用方判 null）
     console.warn(`[warn] 缺少小红书登录态 ${STATE_FILE}，仅用 og:image 采集，浏览器兜底已跳过。`);
@@ -145,7 +143,7 @@ async function download(url, file) {
   const rows = await p.koxNote.findMany({
     where: { brandId: BRAND_ID, coverUrl: null, noteUrl: { not: null, notIn: [''] } },
     select: { id: true, noteId: true, noteUrl: true },
-    orderBy: { publishTime: 'desc' },
+    orderBy: ORDER,
     take: LIMIT === Infinity ? undefined : LIMIT,
   });
   console.log(`MDD(${BRAND_ID}) 待采集封面: ${rows.length} 条${DRY_RUN ? '（dry-run）' : ''}`);
@@ -160,6 +158,7 @@ async function download(url, file) {
   let mirrorOk = 0;
   let fail = 0;
   let skippedNoState = 0;
+  let consecutiveFails = 0;
   let done = 0;
   let ctx = null;
   let browser = null;
@@ -192,8 +191,22 @@ async function download(url, file) {
         }
       }
       cover = await browserCover(ctx, r.noteUrl);
-      if (cover) browserOk += 1;
-      await sleep(1500 + Math.floor(Math.random() * 1200)); // 限速
+      if (cover) {
+        browserOk += 1;
+        consecutiveFails = 0;
+      } else {
+        consecutiveFails += 1;
+        // 风控退避：连续失败 ≥3 次 → 冷却 90s 再试；连续 8 次 → 判定被限流，终止本次（稍后重跑只补缺口）
+        if (consecutiveFails >= 8) {
+          console.error(`[abort] 连续 ${consecutiveFails} 次未取到封面，疑似触发风控/安全验证。已入库 ${ogOk + browserOk} 条，请 30-60 分钟后重跑补齐。`);
+          break;
+        }
+        if (consecutiveFails >= 3) {
+          console.log(`  连续失败 ${consecutiveFails} 次，冷却 90s 后继续…`);
+          await sleep(90000);
+        }
+      }
+      await sleep(5000 + Math.floor(Math.random() * 6000)); // 限速 5-11s/条，降低风控风险
     }
     if (!cover) {
       fail += 1;
