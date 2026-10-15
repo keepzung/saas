@@ -193,3 +193,14 @@ export const downloadImagesZip = (data) =>
     responseType: 'blob',
     timeout: 120000,
   });
+
+// 任务示例文档上传（仅 PDF，≤20MB）
+export const uploadTaskDoc = (file, brandId) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return request.post('/content-pro/upload-doc', fd, {
+    params: { brandId },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};

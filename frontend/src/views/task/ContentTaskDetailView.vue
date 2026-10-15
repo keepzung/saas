@@ -37,8 +37,13 @@
           <div class="info-row" v-if="task?.instructions"><span>任务说明</span><div class="pre">{{ task.instructions }}</div></div>
           <div class="info-row" v-if="task?.reward"><span>奖励机制</span><div class="pre">{{ task.reward }}</div></div>
           <div class="info-row" v-if="task?.example_images?.length">
-            <span>示例图片</span>
-            <div class="imgs"><img v-for="u in task.example_images" :key="u" :src="u" /></div>
+            <span>示例附件</span>
+            <div class="imgs">
+              <template v-for="u in task.example_images" :key="u">
+                <img v-if="!/\.pdf($|\?)/i.test(u)" :src="u" />
+                <a v-else :href="u" target="_blank" class="doc-link"><FilePdfOutlined /> 查看 PDF 示例文档</a>
+              </template>
+            </div>
           </div>
         </div>
 
@@ -70,7 +75,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
-import { DownloadOutlined } from '@ant-design/icons-vue';
+import { DownloadOutlined, FilePdfOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
 import { getContentTaskDetail } from '../../api/contentpro';

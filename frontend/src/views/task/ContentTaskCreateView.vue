@@ -79,11 +79,26 @@
             >
               <a-button><UploadOutlined /> 上传图片</a-button>
             </a-upload>
-            <span class="form-hint" style="margin-left: 10px">图片仅支持png/jpg/jpeg/webp格式，每张图片最大不超过5Mb</span>
+            <a-upload
+              :show-upload-list="false"
+              :before-upload="uploadDoc"
+              accept=".pdf"
+              style="margin-left: 10px"
+            >
+              <a-button><FilePdfOutlined /> 上传 PDF 示例</a-button>
+            </a-upload>
+            <span class="form-hint" style="margin-left: 10px">图片支持png/jpg/jpeg/webp（≤5Mb）；PDF 单个≤20Mb</span>
             <div v-if="form.exampleImages.length" class="example-grid">
               <div v-for="(u, i) in form.exampleImages" :key="u" class="example-cell">
                 <img :src="u" />
                 <span class="ex-del" @click="form.exampleImages.splice(i, 1)"><DeleteOutlined /></span>
+              </div>
+            </div>
+            <div v-if="form.exampleDocs.length" class="doc-list">
+              <div v-for="(d, i) in form.exampleDocs" :key="d.url" class="doc-item">
+                <FilePdfOutlined class="doc-icon" />
+                <a :href="d.url" target="_blank" class="doc-name">{{ d.name }}</a>
+                <span class="ex-del" @click="form.exampleDocs.splice(i, 1)"><DeleteOutlined /></span>
               </div>
             </div>
           </div>
@@ -123,11 +138,12 @@ import {
   UploadOutlined,
   DeleteOutlined,
   BoldOutlined,
+  FilePdfOutlined,
   FontColorsOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { createContentTask, getTaskCandidates } from '../../api/contentpro';
+import { createContentTask, getTaskCandidates, uploadTaskDoc } from '../../api/contentpro';
 import { getKoxAccounts } from '../../api/kox';
 import { uploadMaterialImage } from '../../api/contentpro';
 
@@ -144,6 +160,7 @@ const form = ref({
   accountType: '',
   platforms: ['xhs'],
   exampleImages: [],
+  exampleDocs: [],
   exampleLink: '',
   instructions: '',
   reward: '',
@@ -202,6 +219,22 @@ const uploadExample = async (file) => {
   return false;
 };
 
+const uploadDoc = async (file) => {
+  if (file.size > 20 * 1024 * 1024) {
+    message.warning('PDF 超过 20MB 限制');
+    return false;
+  }
+  try {
+    const res = await uploadTaskDoc(file, brandId.value);
+    if (!res?.url) throw new Error(res?.error ?? '上传失败');
+    form.value.exampleDocs.push({ url: res.url, name: res.name || file.name });
+    message.success(`已上传 ${res.name || file.name}`);
+  } catch (e) {
+    message.error(e?.message ?? '上传失败');
+  }
+  return false;
+};
+
 const wrapBold = () => {
   form.value.instructions = `${form.value.instructions}**加粗内容**`;
 };
@@ -239,7 +272,10 @@ const submit = async () => {
         regions: form.value.scopeType === 'regions' ? form.value.regions : [],
         accountTypes: form.value.scopeType === 'users' ? [] : form.value.accountType ? [form.value.accountType] : [],
         userIds: form.value.scopeType === 'users' ? form.value.userIds : undefined,
-        exampleImages: form.value.exampleImages,
+        exampleImages: [
+          ...form.value.exampleImages,
+          ...form.value.exampleDocs.map((d) => d.url),
+        ],
         exampleLink: form.value.exampleLink || undefined,
         instructions: form.value.instructions || undefined,
         reward: form.value.reward || undefined,
@@ -334,6 +370,45 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.doc-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  width: 420px;
+}
+
+.doc-icon {
+  color: #e11d48;
+  font-size: 16px;
+}
+
+.doc-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.doc-item .ex-del {
+  cursor: pointer;
+  color: #94a3b8;
+}
+
+.doc-item .ex-del:hover {
+  color: #ef4444;
 }
 
 .example-cell {

@@ -150,6 +150,29 @@ export class ContentproController {
     return { url: `/uploads/materials/${dir}/${filename}` };
   }
 
+  /** 任务示例文档上传：仅 PDF，单文件 ≤ 20MB（魔数校验防伪造后缀） */
+  @Post('content-pro/upload-doc')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  uploadDoc(@UploadedFile() file: unknown, @Query('brandId') brandId?: string) {
+    const f = file as { originalname?: string; buffer?: Buffer; size?: number } | undefined;
+    if (!f?.buffer) return { url: null, name: null, error: '未收到文件' };
+    if ((f.size ?? 0) > 20 * 1024 * 1024) return { url: null, name: null, error: '文件超过 20MB 限制' };
+    const ext = extname(f.originalname || '').toLowerCase();
+    if (ext !== '.pdf') return { url: null, name: null, error: '仅支持 PDF 格式' };
+    if (f.buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      return { url: null, name: null, error: '文件内容不是有效的 PDF' };
+    }
+    const dir = String(brandId ?? 1);
+    const target = require('path').join(UPLOAD_ROOT, 'materials', dir);
+    mkdirSync(target, { recursive: true });
+    const filename = `${randomUUID()}${ext}`;
+    writeFileSync(require('path').join(target, filename), f.buffer);
+    return {
+      url: `/uploads/materials/${dir}/${filename}`,
+      name: (f.originalname || '示例文档.pdf').slice(0, 80),
+    };
+  }
+
   @Post('content-pro/upload-cover')
   @UseInterceptors(FileInterceptor('file'))
   uploadCover(@UploadedFile() file: unknown, @Query('brandId') brandId?: string) {

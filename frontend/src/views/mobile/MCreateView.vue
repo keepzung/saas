@@ -13,7 +13,10 @@
         示例内容：{{ task.example_link }}
       </a>
       <div v-if="task.example_images?.length" class="tcard-imgs">
-        <img v-for="u in task.example_images" :key="u" :src="u" />
+        <template v-for="u in task.example_images" :key="u">
+          <img v-if="!/\.pdf($|\?)/i.test(u)" :src="u" />
+          <a v-else :href="u" target="_blank" class="tcard-link">查看 PDF 示例文档</a>
+        </template>
       </div>
     </div>
     <div v-if="draftLoaded" class="draft-tip">已带入 PC 端生成的草稿，确认配图后即可发布</div>
