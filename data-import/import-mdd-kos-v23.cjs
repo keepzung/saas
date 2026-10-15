@@ -26,6 +26,7 @@ function canonicalStore(s) {
   if (!t) return t;
   if (/^深圳罗湖万象城$/.test(t)) return '深圳万象城';
   if (/^南京德基(店)?$/.test(t)) return '南京德基';
+  if (/^上海久光$/.test(t)) return '上海久光百货';
   if (/^成都skp$/i.test(t)) return '成都SKP';
   return t;
 }
