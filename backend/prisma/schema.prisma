@@ -1166,6 +1166,9 @@ model ContentTask {
   exampleLink   String?
   instructions  String?             @db.Text
   reward        String?             @db.Text
+  hashtags      String[]            @default([])
+  requireMinWords  Int?
+  requireMinImages Int?
   status        String              @default("active")
   createdById   Int
   createdBy     User                @relation("ContentTaskCreator", fields: [createdById], references: [id])

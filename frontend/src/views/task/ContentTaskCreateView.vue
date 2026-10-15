@@ -69,6 +69,34 @@
       <div class="sec">
         <div class="sec-title"><span class="bar" /> 添加任务详情</div>
         <div class="form-row top">
+          <span class="form-label"><i>*</i> 指定话题：</span>
+          <div>
+            <a-select
+              v-model:value="form.hashtags"
+              mode="tags"
+              style="width: 420px"
+              :max-tag-count="5"
+              placeholder="输入话题词后回车，如：奕境X9（可多个）"
+              :token-separators="[',', '，', ' ']"
+            />
+            <div class="form-hint" style="margin-top: 6px">
+              完成判定口径：员工笔记<b>标题包含任一话题词</b>才算完成任务；不设话题则发布即算
+            </div>
+          </div>
+        </div>
+        <div class="form-row top">
+          <span class="form-label">创作要求：</span>
+          <a-space>
+            <span class="form-hint">正文≥</span>
+            <a-input-number v-model:value="form.requireMinWords" :min="1" :precision="0" placeholder="字数" style="width: 100px" />
+            <span class="form-hint">字</span>
+            <span class="form-hint" style="margin-left: 12px">配图≥</span>
+            <a-input-number v-model:value="form.requireMinImages" :min="1" :precision="0" placeholder="张数" style="width: 100px" />
+            <span class="form-hint">张</span>
+            <span class="form-hint">（留空=不要求；不达标提交时仅提醒）</span>
+          </a-space>
+        </div>
+        <div class="form-row top">
           <span class="form-label">任务示例图片：</span>
           <div>
             <a-upload
@@ -159,6 +187,9 @@ const form = ref({
   userIds: [],
   accountType: '',
   platforms: ['xhs'],
+  hashtags: [],
+  requireMinWords: null,
+  requireMinImages: null,
   exampleImages: [],
   exampleDocs: [],
   exampleLink: '',
@@ -272,6 +303,9 @@ const submit = async () => {
         regions: form.value.scopeType === 'regions' ? form.value.regions : [],
         accountTypes: form.value.scopeType === 'users' ? [] : form.value.accountType ? [form.value.accountType] : [],
         userIds: form.value.scopeType === 'users' ? form.value.userIds : undefined,
+        hashtags: form.value.hashtags.map((h) => String(h).trim().replace(/^#/, '')).filter(Boolean),
+        requireMinWords: form.value.requireMinWords ?? undefined,
+        requireMinImages: form.value.requireMinImages ?? undefined,
         exampleImages: [
           ...form.value.exampleImages,
           ...form.value.exampleDocs.map((d) => d.url),

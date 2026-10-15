@@ -144,6 +144,12 @@ export class ContentTaskDto {
   @IsOptional() @IsString() exampleLink?: string;
   @IsOptional() @IsString() instructions?: string;
   @IsOptional() @IsString() reward?: string;
+  /** 指定话题：员工笔记标题需包含任一话题才算完成任务 */
+  @IsOptional() hashtags?: string[];
+  /** 创作要求：正文最少字数（空=不要求） */
+  @IsOptional() @IsInt() requireMinWords?: number | null;
+  /** 创作要求：配图最少张数（空=不要求） */
+  @IsOptional() @IsInt() requireMinImages?: number | null;
 }
 
 // ─── 配图打包下载 ────────────────────────────────────────────────────

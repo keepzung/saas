@@ -21,6 +21,11 @@
         <div class="tc-row"><span>任务平台</span>{{ platformLabel(t.platform) }}</div>
         <div class="tc-row"><span>参与团队</span>{{ t.scope_type === 'regions' ? (t.regions ?? []).join('、') : '全部大区' }}</div>
         <div class="tc-row"><span>任务时间</span>{{ fmt(t.start_time) }} 至 {{ fmt(t.end_time) }}</div>
+        <div class="tc-row" v-if="t.hashtags?.length"><span>指定话题</span>#{{ t.hashtags.join(' #') }}</div>
+        <div class="tc-row" v-if="t.require_min_words || t.require_min_images">
+          <span>创作要求</span>
+          {{ [t.require_min_words ? `正文≥${t.require_min_words}字` : '', t.require_min_images ? `配图≥${t.require_min_images}张` : ''].filter(Boolean).join(' · ') }}
+        </div>
         <div v-if="t.reward" class="tc-row reward"><span>奖励</span>{{ t.reward }}</div>
         <div v-if="t.instructions" class="tc-desc">{{ t.instructions }}</div>
         <div class="tc-progress">

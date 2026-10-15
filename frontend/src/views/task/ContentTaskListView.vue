@@ -34,6 +34,11 @@
             <div class="tcard-field"><span>参与任务的团队：</span>{{ teamLabel(t) }}</div>
             <div class="tcard-field"><span>参与账号类型：</span>{{ typeLabel(t.account_types) }}</div>
             <div class="tcard-field"><span>任务时间：</span>{{ fmtDate(t.start_time) }} 至 {{ fmtDate(t.end_time) }}</div>
+            <div class="tcard-field" v-if="t.hashtags?.length"><span>指定话题：</span><a-tag v-for="h in t.hashtags" :key="h" color="blue">#{{ h }}</a-tag></div>
+            <div class="tcard-field" v-if="t.require_min_words || t.require_min_images">
+              <span>创作要求：</span>
+              {{ [t.require_min_words ? `正文≥${t.require_min_words}字` : '', t.require_min_images ? `配图≥${t.require_min_images}张` : ''].filter(Boolean).join(' · ') }}
+            </div>
             <div class="tcard-field"><span>创建时间：</span>{{ fmtDate(t.created_at) }}</div>
             <div class="tcard-progress">
               <div class="tp-labels">

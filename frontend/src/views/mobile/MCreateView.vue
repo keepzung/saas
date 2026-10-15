@@ -8,6 +8,11 @@
         <span class="tcard-time">{{ fmt(task.start_time) }} ~ {{ fmt(task.end_time) }}</span>
       </div>
       <div v-if="task.instructions" class="tcard-line"><span>要求</span>{{ task.instructions }}</div>
+      <div v-if="task.hashtags?.length" class="tcard-line"><span>话题</span>{{ task.hashtags.map((h) => '#' + h).join('  ') }}（标题含话题才算完成）</div>
+      <div v-if="task.require_min_words || task.require_min_images" class="tcard-line req">
+        <span>创作要求</span>
+        {{ [task.require_min_words ? `正文≥${task.require_min_words}字` : '', task.require_min_images ? `配图≥${task.require_min_images}张` : ''].filter(Boolean).join(' · ') }}
+      </div>
       <div v-if="task.reward" class="tcard-line reward"><span>奖励</span>{{ task.reward }}</div>
       <a v-if="task.example_link" :href="task.example_link" target="_blank" class="tcard-link">
         示例内容：{{ task.example_link }}
@@ -226,6 +231,21 @@ const toggleImg = (i) => {
 };
 
 const publish = async () => {
+  // 创作要求提醒（B 口径：仅提醒，不阻止提交）
+  if (task.value) {
+    const warns = [];
+    const title = titles.value[selectedTitle.value] || '';
+    if (task.value.hashtags?.length && !task.value.hashtags.some((h) => title.includes(h))) {
+      warns.push(`标题未含指定话题（${task.value.hashtags.map((h) => '#' + h).join(' ')}），可能不计入任务完成`);
+    }
+    if (task.value.require_min_words && content.value.length < task.value.require_min_words) {
+      warns.push(`正文 ${content.value.length} 字未达 ${task.value.require_min_words} 字要求`);
+    }
+    if (task.value.require_min_images && selectedImages.value.length < task.value.require_min_images) {
+      warns.push(`配图 ${selectedImages.value.length} 张未达 ${task.value.require_min_images} 张要求`);
+    }
+    if (warns.length) message.warning(`创作要求提醒：${warns.join('；')}`, 5);
+  }
   publishing.value = true;
   try {
     const res = await saveXhsHistory(

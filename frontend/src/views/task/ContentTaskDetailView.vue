@@ -32,6 +32,15 @@
           <div class="info-row"><span>任务平台</span>{{ platformLabel(task?.platform) }}</div>
           <div class="info-row"><span>参与团队</span>{{ task?.scope_type === 'regions' ? (task?.regions ?? []).join('、') : '全部大区' }}</div>
           <div class="info-row"><span>账号类型</span>{{ (task?.account_types ?? []).length ? task.account_types.join(' / ') : '不限' }}</div>
+          <div class="info-row" v-if="task?.hashtags?.length"><span>指定话题</span><div><a-tag v-for="h in task.hashtags" :key="h" color="blue">#{{ h }}</a-tag></div></div>
+          <div class="info-row" v-if="task?.require_min_words || task?.require_min_images">
+            <span>创作要求</span>
+            <div>
+              <span v-if="task?.require_min_words">正文≥{{ task.require_min_words }} 字</span>
+              <span v-if="task?.require_min_words && task?.require_min_images"> · </span>
+              <span v-if="task?.require_min_images">配图≥{{ task.require_min_images }} 张</span>
+            </div>
+          </div>
           <div class="info-row"><span>任务时间</span>{{ fmt(task?.start_time) }} 至 {{ fmt(task?.end_time) }}</div>
           <div class="info-row" v-if="task?.example_link"><span>示例内容</span><a :href="task.example_link" target="_blank">{{ task.example_link }}</a></div>
           <div class="info-row" v-if="task?.instructions"><span>任务说明</span><div class="pre">{{ task.instructions }}</div></div>
