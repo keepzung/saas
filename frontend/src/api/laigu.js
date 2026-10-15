@@ -6,6 +6,12 @@ export const getLaiguLeads = (params) =>
 export const getLaiguLeadStats = (params) =>
   request.get('/laigu/leads/stats', { params });
 
+export const getLaiguKosTree = (params) =>
+  request.get('/laigu/leads/kos-tree', { params });
+
+export const updateLaiguLeadTags = (id, tags) =>
+  request.patch(`/laigu/leads/${id}/tags`, { tags });
+
 export const getLaiguFeedbackAnalysis = (params) =>
   request.get('/laigu/feedback/analysis', { params });
 

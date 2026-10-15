@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { LaiguService } from './laigu.service';
 
@@ -10,6 +10,19 @@ export class LaiguController {
   @Get('laigu/leads/stats')
   stats(@Query('brandId') brandId?: string) {
     return this.laiguService.stats(brandId);
+  }
+
+  @Get('laigu/leads/kos-tree')
+  kosTree(@Query('brandId') brandId?: string) {
+    return this.laiguService.kosTree(brandId);
+  }
+
+  @Patch('laigu/leads/:id/tags')
+  updateTags(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { tags?: string[] },
+  ) {
+    return this.laiguService.updateTags(id, dto?.tags);
   }
 
   @Get('laigu/feedback/analysis')
@@ -32,6 +45,8 @@ export class LaiguController {
       to?: string;
       brandId?: string;
       kos?: string;
+      uid?: string;
+      tag?: string;
     },
   ) {
     return this.laiguService.leads(query);

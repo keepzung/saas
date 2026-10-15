@@ -514,6 +514,10 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     /** 按 KOS 账号筛选（MDD）：传账号昵称，匹配进线账号 id（subSource=主页 id）或客服昵称 */
     kos?: string;
+    /** 按进线账号 userid 精确筛选（工作台一级树，subSource） */
+    uid?: string;
+    /** 按标签筛选（tags 数组包含） */
+    tag?: string;
   }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(100, Number(query.page_size ?? 10) || 10);
@@ -528,6 +532,10 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     // 隐藏空会话：客户从未发过消息（0 条客户消息的"空白私信"）
     if (query.hasClientMessage === 'true') where.clientMessageCount = { gt: 0 };
     if (query.source) where.source = query.source;
+    // 工作台一级树：进线账号 userid 精确
+    if (query.uid) where.subSource = query.uid;
+    // 标签筛选：tags JSON 数组包含
+    if (query.tag) where.tags = { array_contains: query.tag };
     // 按 KOS 账号筛选：账号主页 id → subSource；昵称 → 客服昵称（客服名数据不全，双判据）
     if (query.kos && brandId === 5) {
       const acc = await this.prisma.kosAccount.findFirst({
@@ -579,6 +587,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
           sessionCreatedAt: true,
           sessionEndedAt: true,
           fetchedAt: true,
+          tags: true,
         },
       }),
     ]);
@@ -602,6 +611,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         session_created_at: row.sessionCreatedAt,
         session_ended_at: row.sessionEndedAt,
         fetched_at: row.fetchedAt,
+        tags: Array.isArray(row.tags) ? row.tags : [],
       })),
       total,
       page,
@@ -624,6 +634,52 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
     return { total, resourced, with_phone: withPhone, today };
+  }
+
+  /** 私信工作台一级树（MDD）：KOS 账号 × 会话数（subSource 归属聚合，按会话数降序） */
+  async kosTree(brandIdParam?: string) {
+    const brandId = Number(brandIdParam ?? LAIGU_BRAND_ID) || LAIGU_BRAND_ID;
+    const scope: Prisma.LaiguLeadWhereInput = { brandId };
+    if (brandId === 5 && process.env.LAIGU_MDD_FILTER !== 'off') scope.isMdd = true;
+    const [grouped, accs] = await Promise.all([
+      this.prisma.laiguLead.groupBy({
+        by: ['subSource'],
+        where: { ...scope, subSource: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.kosAccount.findMany({
+        where: { brandId: 5 },
+        select: { nickname: true, authorUrl: true, status: true },
+      }),
+    ]);
+    const uidToNick = new Map<string, string>();
+    for (const a of accs) {
+      const uid = (a.authorUrl ?? '').match(/\/profile\/([0-9a-zA-Z]+)$/)?.[1];
+      if (uid) uidToNick.set(uid, a.nickname);
+    }
+    const list = grouped
+      .map((g) => ({
+        uid: g.subSource as string,
+        nickname: uidToNick.get(g.subSource as string) ?? null,
+        count: g._count._all,
+      }))
+      .filter((x) => x.nickname)
+      .sort((a, b) => b.count - a.count);
+    return { list };
+  }
+
+  /** 工作台标签：更新会话标签（≤10 个，单个 ≤20 字） */
+  async updateTags(id: number, tags?: string[]) {
+    const clean = (Array.isArray(tags) ? tags : [])
+      .map((t) => String(t).trim().slice(0, 20))
+      .filter(Boolean)
+      .slice(0, 10);
+    const row = await this.prisma.laiguLead.update({
+      where: { id },
+      data: { tags: clean },
+      select: { id: true, tags: true },
+    });
+    return row;
   }
 
   /** 用户反馈分析聚合（特斯拉面板）：会话级评论分类/情感/高频话题，规则引擎无外部依赖 */
@@ -1009,6 +1065,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       session_created_at: lead.sessionCreatedAt,
       session_ended_at: lead.sessionEndedAt,
       fetched_at: lead.fetchedAt,
+      tags: Array.isArray(lead.tags) ? lead.tags : [],
       raw_json: lead.rawJson,
     };
   }

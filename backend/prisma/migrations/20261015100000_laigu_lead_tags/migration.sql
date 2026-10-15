@@ -1,0 +1,1 @@
+ALTER TABLE "LaiguLead" ADD COLUMN "tags" JSONB;

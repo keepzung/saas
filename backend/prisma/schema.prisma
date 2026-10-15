@@ -1321,6 +1321,7 @@ model LaiguLead {
   isMdd              Boolean   @default(false)
   sessionCreatedAt   DateTime?
   sessionEndedAt     DateTime?
+  tags               Json?
   rawJson            Json
   fetchedAt          DateTime  @updatedAt
   createdAt          DateTime  @default(now())
