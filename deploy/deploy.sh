@@ -13,6 +13,15 @@
 #=============================================================================
 set -euo pipefail
 
+# ── 部署纪律（强制）────────────────────────────────────────────────
+# 只允许 root 部署。以其他用户执行会产生第二 PM2 实例互抢 3000 端口，
+# 并因属主混乱导致后续部署 EACCES（历史事故：崩溃循环数千次）。
+if [ "$(id -u)" -ne 0 ]; then
+  echo "⛔ 禁止以 $(whoami) 用户部署。请使用：" >&2
+  echo "    bash /opt/saas/deploy/deploy.sh    # 以 root 执行" >&2
+  exit 1
+fi
+
 APP_DIR="${APP_DIR:-/opt/saas}"
 BRANCH="${BRANCH:-main}"
 WEB_DIR="${WEB_DIR:-/var/www/saas-web}"

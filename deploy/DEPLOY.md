@@ -1,7 +1,21 @@
-# 部署文档（Linux + Nginx + PM2 + 自建 PostgreSQL）
+﻿# 部署文档（Linux + Nginx + PM2 + 自建 PostgreSQL）
 
 > 适用：Ubuntu 22.04 / 24.04，单机部署
 > 架构：浏览器 → Nginx(80/443) → 静态文件(frontend/dist) + 反代 API(127.0.0.1:3000, PM2) → PostgreSQL(本机)
+
+## ⛔ 部署纪律（先读）
+
+**一切部署 / 重启 / PM2 操作必须以 root 执行**（与线上一致）：
+
+```bash
+ssh root@<服务器>
+bash /opt/saas/deploy/deploy.sh
+```
+
+禁止以 `deploy` 用户或 `PM2_HOME=/home/deploy/.pm2` 部署——会产生第二个
+PM2 实例与 root 实例互抢 3000 端口（历史事故：saas-api 崩溃循环数千次、
+部署 EACCES 反复失败）。deploy.sh 已内置非 root 拒绝执行。
+如发现 deploy 侧双实例：`PM2_HOME=/home/deploy/.pm2 pm2 kill`。
 
 ## 目录
 
@@ -44,7 +58,8 @@ bash /root/setup-server.sh
 
 脚本完成后摘要会输出 `DATABASE_URL`（若自动生成密码请记录）。
 
-接着以部署用户克隆代码并创建生产 `.env`：
+接着以部署用户克隆代码并创建生产 `.env`（历史初始化流程；现约定部署统一 root，克隆后请执行
+`git config --global --add safe.directory /opt/saas`）:
 
 ```bash
 su - deploy
@@ -61,8 +76,7 @@ chmod 600 /opt/saas/backend/.env
 ## 3. 首次部署
 
 ```bash
-su - deploy
-bash /opt/saas/deploy/deploy.sh
+bash /opt/saas/deploy/deploy.sh   # root 执行（deploy.sh 已内置非 root 拒绝）
 ```
 
 脚本自动完成：拉代码 → 后端 npm ci → `prisma migrate deploy` → build → PM2 启动 → 前端 build → 发布到 `/var/www/saas-web`。
@@ -110,8 +124,7 @@ certbot --nginx -d <你的域名> --redirect
 **更新**（本地 push 后）：
 
 ```bash
-su - deploy
-bash /opt/saas/deploy/deploy.sh
+bash /opt/saas/deploy/deploy.sh   # root 执行（deploy.sh 已内置非 root 拒绝）
 ```
 
 **回滚**（回到上一次发布）：
