@@ -168,39 +168,60 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 2) 笔记：取窗口内最旧断档日跑一次（发布日期窗口 D~今日，一次覆盖其后所有断档日）
-    let notesOldest: string | null = null;
-    for (const d of dates) {
-      if (!(await this.hasSuccessLog('notes', d, ctx.brandId))) notesOldest = d;
-    }
-    if (notesOldest && !cookieBroken) {
-      try {
-        const result = await this.syncNotes(notesOldest, undefined, ctx);
-        syncedSomething = true;
-        // 一次同步覆盖 notesOldest~昨日 的发布窗口，逐日落成功日志避免逐日重爬
-        const covered = dates.slice(0, dates.indexOf(notesOldest) + 1);
-        for (const d of covered) {
-          await this.prisma.sparkSyncLog.create({
-            data: {
-              syncType: 'notes',
-              statDate: d,
-              status: 'success',
-              fetched: result.fetched,
-              upserted: result.upserted,
-              message: `covered by window sync from ${notesOldest}`,
-              brandId: ctx.brandId,
-            },
-          });
-        }
-        this.logger.log(
-          `星火notes 同步完成 brand=${ctx.brandId} 自${notesOldest}：拉取 ${result.fetched}，入库 ${result.upserted}`,
-        );
-      } catch (error) {
-        if (error instanceof SparkCookieExpiredError) cookieBroken = true;
-        else {
-          this.logger.warn(
-            `星火notes 同步失败 brand=${ctx.brandId} 自${notesOldest}: ${(error as Error).message}`,
+    // 2) 笔记：荣威(2)走每日滚动重拉（backfill 模式：重拉近35天发布笔记的最新累计指标，
+    //    并自动注册新创作者）——修复「同步成功过的天不再重查 + covered 假覆盖」导致的
+    //    近期天数长期半截数据、笔记累计指标停留在首抓快照的问题
+    if (ctx.brandId === 2) {
+      if (!cookieBroken) {
+        try {
+          const result = await this.syncNotes(this.syncDate(), { backfill: true }, ctx);
+          syncedSomething = true;
+          this.logger.log(
+            `星火notes 滚动重拉完成 brand=${ctx.brandId}：拉取 ${result.fetched}，入库 ${result.upserted}，新注册账号 ${result.accountsAdded}`,
           );
+        } catch (error) {
+          if (error instanceof SparkCookieExpiredError) cookieBroken = true;
+          else {
+            this.logger.warn(
+              `星火notes 滚动重拉失败 brand=${ctx.brandId}: ${(error as Error).message}`,
+            );
+          }
+        }
+      }
+    } else {
+      let notesOldest: string | null = null;
+      for (const d of dates) {
+        if (!(await this.hasSuccessLog('notes', d, ctx.brandId))) notesOldest = d;
+      }
+      if (notesOldest && !cookieBroken) {
+        try {
+          const result = await this.syncNotes(notesOldest, undefined, ctx);
+          syncedSomething = true;
+          // 一次同步覆盖 notesOldest~昨日 的发布窗口，逐日落成功日志避免逐日重爬
+          const covered = dates.slice(0, dates.indexOf(notesOldest) + 1);
+          for (const d of covered) {
+            await this.prisma.sparkSyncLog.create({
+              data: {
+                syncType: 'notes',
+                statDate: d,
+                status: 'success',
+                fetched: result.fetched,
+                upserted: result.upserted,
+                message: `covered by window sync from ${notesOldest}`,
+                brandId: ctx.brandId,
+              },
+            });
+          }
+          this.logger.log(
+            `星火notes 同步完成 brand=${ctx.brandId} 自${notesOldest}：拉取 ${result.fetched}，入库 ${result.upserted}`,
+          );
+        } catch (error) {
+          if (error instanceof SparkCookieExpiredError) cookieBroken = true;
+          else {
+            this.logger.warn(
+              `星火notes 同步失败 brand=${ctx.brandId} 自${notesOldest}: ${(error as Error).message}`,
+            );
+          }
         }
       }
     }
@@ -721,6 +742,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const day = new Date(`${statDate}T00:00:00.000Z`);
     let upserted = 0;
+    let accountsAdded = 0;
     for (const r of rows) {
       const pick = (code: string): unknown => {
         if (r[code] !== undefined && r[code] !== null && r[code] !== '') return r[code];
@@ -779,8 +801,36 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           .slice(0, 24)}`;
 
       const brandUserName = String(pick('brand_user_name') ?? '').trim() || null;
-      const accountId =
+      let accountId =
         byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
+      // 荣威(2)：未匹配创作者自动注册为账号（账号底表每天自动长全，
+      // 新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
+      if (accountId == null && org.brandId === 2 && authorName) {
+        const authorIdRaw = String(pick('author_id') ?? pickLink('author_id') ?? '').trim();
+        const regAuthorId =
+          authorIdRaw ||
+          `auto_b2_${createHash('md5').update(authorName).digest('hex').slice(0, 20)}`;
+        const existing = await this.prisma.kosAccount.findUnique({
+          where: { authorId: regAuthorId },
+        });
+        if (existing) {
+          accountId = existing.id;
+        } else {
+          const created = await this.prisma.kosAccount.create({
+            data: {
+              authorId: regAuthorId,
+              nickname: authorName,
+              platform: 'xhs',
+              accountType: 'KOS',
+              brandId: org.brandId,
+              status: 'enabled',
+            },
+          });
+          accountId = created.id;
+          accountsAdded += 1;
+        }
+        byNickname.set(authorName, accountId);
+      }
 
       // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）
       if (org.brandId === 5 && !accountId) continue;
@@ -832,9 +882,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       status: 'success',
       fetched: rows.length,
       upserted,
-      accountsAdded: 0,
+      accountsAdded,
       accountsRemoved: 0,
-      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}`,
+      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
