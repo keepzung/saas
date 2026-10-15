@@ -504,26 +504,31 @@ function beforeUpload(file) {
   return false;
 }
 
-/** 订单明细解析：同订单多行时表头字段（日期/客户/手机号/收款合计/顾问）向下透传 */
+/** 订单明细解析：同订单多行时表头字段（日期/客户/手机号/收款合计/顾问）向下透传；人工杂格式日期容错 */
 function parseOrderRows(raw) {
   const rows = [];
   let head = null;
+  let lastGood = null;
   for (const r of raw) {
     if (r['日期'] != null && r['日期'] !== '') {
-      head = {
-        date: normalizeDay(r['日期']),
-        orderSeq: r['订单序号'] != null ? String(r['订单序号']) : null,
-        internalNo: r['内部单号'] != null && r['内部单号'] !== '' ? String(r['内部单号']) : null,
-        customerName: r['客户姓名'] ? String(r['客户姓名']).trim() : null,
-        phone: r['手机号码'] != null && r['手机号码'] !== '' ? String(r['手机号码']).trim() : null,
-        repurchase: r['是否回购'] ? String(r['是否回购']).trim() : null,
-        channel: r['渠道'] ? String(r['渠道']).trim() : null,
-        amount: r['收款合计'] ?? null,
-        staff: r['销售顾问'] ? String(r['销售顾问']).trim() : null,
-        remark: r['备注'] ? String(r['备注']).trim() : null,
-      };
+      const d = normalizeDay(r['日期'], lastGood);
+      if (d) {
+        lastGood = d;
+        head = {
+          date: d,
+          orderSeq: r['订单序号'] != null ? String(r['订单序号']) : null,
+          internalNo: r['内部单号'] != null && r['内部单号'] !== '' ? String(r['内部单号']) : null,
+          customerName: r['客户姓名'] ? String(r['客户姓名']).trim() : null,
+          phone: r['手机号码'] != null && r['手机号码'] !== '' ? String(r['手机号码']).trim() : null,
+          repurchase: r['是否回购'] ? String(r['是否回购']).trim() : null,
+          channel: r['渠道'] ? String(r['渠道']).trim() : null,
+          amount: r['收款合计'] ?? null,
+          staff: r['销售顾问'] ? String(r['销售顾问']).trim() : null,
+          remark: r['备注'] ? String(r['备注']).trim() : null,
+        };
+      }
     }
-    if (!head) continue;
+    if (!head || !head.date) continue;
     const hasProduct = (r['产品型号'] ?? '') !== '' || (r['品名'] ?? '') !== '';
     if (!hasProduct) continue;
     rows.push({
@@ -540,15 +545,36 @@ function parseOrderRows(raw) {
   return rows;
 }
 
-function normalizeDay(v) {
-  if (!v) return '';
-  if (v instanceof Date) return dayjs(v).format('YYYY-MM-DD');
+function normalizeDay(v, lastGood) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return dayjs(v).format('YYYY-MM-DD');
   const num = Number(v);
-  if (Number.isFinite(num) && num > 200000 && num < 500000) {
+  if (Number.isFinite(num) && String(v).trim() !== '' && num > 20000 && num < 80000) {
     return dayjs('1899-12-30').add(num, 'day').format('YYYY-MM-DD');
   }
-  const d = dayjs(String(v));
-  return d.isValid() ? d.format('YYYY-MM-DD') : '';
+  if (Number.isFinite(num) && num >= 1 && num <= 32 && lastGood) {
+    // 纯数字：整数=日号；小数=月.日 写法（9.6 = 9月6日）
+    if (!Number.isInteger(num)) {
+      const parts = String(v).trim().split('.');
+      const mm = Number(parts[0]);
+      const dd = Number(parts[1] || '0');
+      if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+        return `${lastGood.slice(0, 4)}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      }
+    }
+    return `${lastGood.slice(0, 7)}-${String(num).padStart(2, '0')}`;
+  }
+  let s = String(v).trim().replace(/\s+/g, '');
+  if (/^\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}$/.test(s)) {
+    const [y, m, d] = s.split(/[.\-/]/);
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const md = s.replace(/[年月]/g, '-').replace(/日/, '').replace(/\./g, '-').match(/^(\d{1,2})-(\d{1,2})$/);
+  if (md && lastGood) {
+    return `${lastGood.slice(0, 7)}-${md[1].padStart(2, '0')}-${md[2].padStart(2, '0')}`;
+  }
+  const d2 = dayjs(s);
+  return d2.isValid() ? d2.format('YYYY-MM-DD') : '';
 }
 
 function normalizeMonth(v) {
