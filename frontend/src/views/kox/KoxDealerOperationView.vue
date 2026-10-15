@@ -33,6 +33,13 @@
             <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
           </div>
         </div>
+        <div class="step-item" v-if="isMdd">
+          <div class="step-icon-wrap"><ShoppingOutlined class="step-icon" style="color: #16a34a" /></div>
+          <div class="step-title-wrap">
+            <span class="step-title">成交转化</span>
+            <span class="step-value">{{ fmt(salesSummary.qty) }} 台</span>
+          </div>
+        </div>
       </div>
       <div class="funnel-cols">
         <div class="funnel-step-col">
@@ -58,6 +65,18 @@
             :stroke-color="{ from: '#f59e0b', to: '#fbbf24' }"
           />
           <div class="funnel-sub">线索率 {{ total.lead_rate }}% · 人均 {{ total.per_store_leads }} 条</div>
+        </div>
+        <div class="funnel-step-col" v-if="isMdd">
+          <div class="funnel-metric">
+            <span class="fm-label">留资→成交转化率</span>
+            <b class="fm-value">{{ dealRate }}%</b>
+          </div>
+          <a-progress
+            :percent="Math.min(100, dealRate)"
+            :show-info="false"
+            :stroke-color="{ from: '#16a34a', to: '#4ade80' }"
+          />
+          <div class="funnel-sub">留资 {{ fmt(total.pm_leads) }} 条 → 成交 {{ fmt(salesSummary.qty) }} 台 · ¥{{ fmt(salesSummary.amount) }}</div>
         </div>
       </div>
     </a-card>
@@ -150,6 +169,7 @@ import dayjs from 'dayjs';
 import {
   FileTextOutlined,
   SendOutlined,
+  ShoppingOutlined,
   ThunderboltFilled,
   AlertOutlined,
 } from '@ant-design/icons-vue';
@@ -157,14 +177,17 @@ import PageWrapper from '../../components/PageWrapper.vue';
 import NoticeBar from '../../components/NoticeBar.vue';
 import KoxKosTierView from './KoxKosTierView.vue';
 import KoxDfDealerView from './KoxDfDealerView.vue';
-import { getKoxRanking } from '../../api/kox';
+import { getKoxRanking, getKoxAccountRanking } from '../../api/kox';
+import request from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const isTesla = computed(() => Number(auth.currentBrandId) === 6);
 const isDf = computed(() => [7, 8].includes(Number(auth.currentBrandId)));
 // 仅纯演示品牌显示"功能示意"提示；荣威(2)已接真实数据，特斯拉/东风格力为真实口径
-const isDemo = computed(() => [1, 4, 5].includes(Number(auth.currentBrandId)));
+// Morgandada(5)：代理商总览按 23 个认证账号维度展示真实数据，不再演示态
+const isDemo = computed(() => [1, 4].includes(Number(auth.currentBrandId)));
+const isMdd = computed(() => Number(auth.currentBrandId) === 5);
 const isRoewe = computed(() => Number(auth.currentBrandId) === 2);
 // 荣威(2)对客口径为「经销商」，其余共用该页的工作区保持「代理商」
 const dealerLabel = computed(() => (isRoewe.value ? '经销商' : '代理商'));
@@ -200,14 +223,23 @@ const columns = computed(() => {
     { key: 'rank', title: '排名', width: 70 },
     { key: 'dealer_name', title: dealerLabel.value, width: 180, ellipsis: true },
     { key: 'tier', title: '分层', width: 80 },
-    { title: '账号数', dataIndex: 'account_num', width: 80 },
+  ];
+  // Morgandada 按认证账号维度（23 个），每行即一个账号，无账号数列
+  if (!isMdd.value) cols.push({ title: '账号数', dataIndex: 'account_num', width: 80 });
+  cols.push(
     { key: 'item_cnt', title: '发布数 / 完成度', width: 200 },
     { title: '曝光量', dataIndex: 'exposure_sum', width: 110, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
-  ];
+  );
   // 荣威真实留资通道未接入（MCC 侧无留资数据，恒为 0），留资列隐藏；接入专业号获客工具后恢复
   if (!isRoewe.value) cols.push({ key: 'pm_leads', title: '留资数 / 完成度', width: 180 });
   cols.push({ key: 'score', title: '综合得分', width: 90, sorter: (a, b) => a.score - b.score });
   return cols;
+});
+
+const salesSummary = ref({ orders: 0, qty: 0, amount: 0 });
+const dealRate = computed(() => {
+  const leads = Number(total.value.pm_leads ?? 0);
+  return leads ? Math.round((Number(salesSummary.value.qty ?? 0) / leads) * 1000) / 10 : 0;
 });
 
 const tierCount = computed(() => {
@@ -280,14 +312,33 @@ function renderTierChart() {
 async function reload() {
   loading.value = true;
   try {
-    const res = await getKoxRanking({
-      dimension: 'store',
-      brandId: auth.currentBrandId ?? undefined,
-      metric: 'view_sum',
-      ...rangeParams(),
-      page_size: 100,
-    });
-    const list = res.list ?? [];
+    let list = [];
+    if (isMdd.value) {
+      // Morgandada：代理商 = 认证账号（23 个），复用账号表现接口（发布/曝光/留资真实口径）
+      const res = await getKoxAccountRanking({
+        brandId: auth.currentBrandId ?? undefined,
+        metric: 'pm_leads',
+        ...rangeParams(),
+        page_size: 100,
+      });
+      list = (res.list ?? []).map((r) => ({
+        ...r,
+        dealer_name: r.nickname,
+        account_num: 1,
+        item_cnt: Number(r.item_cnt ?? 0),
+        exposure_sum: Number(r.exposure_sum ?? 0),
+        pm_leads: Number(r.pm_leads ?? 0),
+      }));
+    } else {
+      const res = await getKoxRanking({
+        dimension: 'store',
+        brandId: auth.currentBrandId ?? undefined,
+        metric: 'view_sum',
+        ...rangeParams(),
+        page_size: 100,
+      });
+      list = res.list ?? [];
+    }
     const maxItems = Math.max(1, ...list.map((r) => Number(r.item_cnt ?? 0)));
     const maxLeads = Math.max(1, ...list.map((r) => Number(r.pm_leads ?? 0)));
     const tierOf = classifyTier(list);
@@ -322,6 +373,14 @@ async function reload() {
       };
     });
     nextTick(renderTierChart);
+    // Morgandada：成交转化卡接真实销售订单（与销售看板同源）
+    if (isMdd.value) {
+      try {
+        salesSummary.value = await request.get('/mdd/sales/summary', { params: rangeParams() });
+      } catch {
+        salesSummary.value = { orders: 0, qty: 0, amount: 0 };
+      }
+    }
   } catch (e) {
     message.error(e.message || '加载失败');
   } finally {

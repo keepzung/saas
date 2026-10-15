@@ -6,91 +6,206 @@
       </a-button>
     </template>
 
-    <a-card size="small" class="filter-card">
-      <div class="filter-row">
-        <span class="f-label">月份：</span>
-        <a-range-picker
-          v-model:value="monthRange"
-          picker="month"
+    <a-segmented
+      v-model:value="tab"
+      :options="[
+        { label: '汇总看板', value: 'summary' },
+        { label: '订单明细', value: 'orders' },
+      ]"
+      class="tab-seg"
+      @change="onTabChange"
+    />
+
+    <!-- ─── 汇总看板 ─── -->
+    <template v-if="tab === 'summary'">
+      <a-card size="small" class="filter-card">
+        <div class="filter-row">
+          <span class="f-label">月份：</span>
+          <a-range-picker
+            v-model:value="monthRange"
+            picker="month"
+            size="small"
+            format="YYYY-MM"
+            :allow-clear="false"
+            @change="reload"
+          />
+          <span class="f-label">省份：</span>
+          <a-select
+            v-model:value="province"
+            size="small"
+            style="width: 130px"
+            allow-clear
+            placeholder="全部省份"
+            :options="(facets.provinces ?? []).map((p) => ({ label: p, value: p }))"
+            @change="reload"
+          />
+          <span class="f-label">品系：</span>
+          <a-select
+            v-model:value="productLine"
+            size="small"
+            style="width: 150px"
+            allow-clear
+            placeholder="全部品系"
+            :options="(facets.product_lines ?? []).map((p) => ({ label: p, value: p }))"
+            @change="reload"
+          />
+        </div>
+      </a-card>
+
+      <a-alert v-if="emptyHint" type="info" show-icon :message="emptyHint" class="hint-bar" />
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">总线索数</div>
+          <div class="stat-value hl-blue">{{ fmt(cards.total_leads) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总销量（台）</div>
+          <div class="stat-value">{{ fmt(cards.total_sales) }}</div>
+          <div v-if="orderSummary.orders" class="stat-sub muted mini">销售额 ¥{{ fmt(orderSummary.amount) }} · {{ orderSummary.orders }} 单</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总转化率</div>
+          <div class="stat-value hl-green">{{ cards.conversion_rate }}%</div>
+        </div>
+        <div v-if="orderSummary.orders" class="stat-card">
+          <div class="stat-label">成交客户 / 复购率</div>
+          <div class="stat-value hl-purple">{{ orderSummary.customers }}</div>
+          <div class="stat-sub muted mini">复购率 {{ orderSummary.repurchase_rate }}%</div>
+        </div>
+      </div>
+
+      <a-row :gutter="12">
+        <a-col :span="15">
+          <a-card size="small" :bordered="false" title="月度销量趋势">
+            <div ref="trendEl" style="height: 320px" />
+          </a-card>
+        </a-col>
+        <a-col :span="9">
+          <a-card size="small" :bordered="false" title="销量排行（按订单品名）">
+            <div ref="rankEl" style="height: 320px" />
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <a-row :gutter="12" v-if="(staffRanking || []).length">
+        <a-col :span="24">
+          <a-card size="small" :bordered="false" class="detail-card">
+            <template #title>
+              <div class="sec-head"><span class="bar"></span>销售顾问排行（销量 / 金额）</div>
+            </template>
+            <a-table
+              :columns="staffColumns"
+              :data-source="staffRanking"
+              :pagination="false"
+              row-key="staff"
+              size="small"
+            />
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <a-card size="small" :bordered="false" class="detail-card">
+        <template #title>
+          <div class="sec-head"><span class="bar"></span>门店品系销量明细</div>
+        </template>
+        <a-table
+          :columns="detailColumns"
+          :data-source="detail"
+          :loading="loading"
+          :pagination="{ pageSize: 15, showSizeChanger: false, size: 'small' }"
+          row-key="store"
           size="small"
-          format="YYYY-MM"
-          :allow-clear="false"
-          @change="reload"
+          :scroll="{ x: detailColumns.length > 8 ? 1200 : undefined }"
         />
-        <span class="f-label">省份：</span>
-        <a-select
-          v-model:value="province"
+      </a-card>
+    </template>
+
+    <!-- ─── 订单明细 ─── -->
+    <template v-else>
+      <a-card size="small" class="filter-card">
+        <div class="filter-row">
+          <span class="f-label">月份：</span>
+          <a-range-picker
+            v-model:value="orderMonthRange"
+            picker="month"
+            size="small"
+            format="YYYY-MM"
+            :allow-clear="false"
+            @change="loadOrders"
+          />
+          <span class="f-label">门店：</span>
+          <a-select
+            v-model:value="orderStore"
+            size="small"
+            style="width: 150px"
+            show-search
+            allow-clear
+            placeholder="全部门店"
+            :options="(orderFacets.stores ?? []).map((s) => ({ label: s, value: s }))"
+            @change="loadOrders"
+          />
+          <span class="f-label">顾问：</span>
+          <a-select
+            v-model:value="orderStaff"
+            size="small"
+            style="width: 130px"
+            show-search
+            allow-clear
+            placeholder="全部顾问"
+            :options="(orderFacets.staff ?? []).map((s) => ({ label: s, value: s }))"
+            @change="loadOrders"
+          />
+          <a-input-search
+            v-model:value="orderKeyword"
+            size="small"
+            style="width: 220px"
+            placeholder="客户 / 手机号 / 品名 / 顾问"
+            allow-clear
+            @search="loadOrders"
+            @change="(e) => { if (!e.target.value) loadOrders(); }"
+          />
+        </div>
+        <div class="order-summary-row muted mini" v-if="orderSummary.orders">
+          共 {{ orderSummary.orders }} 单 · {{ orderSummary.qty }} 台 · ¥{{ fmt(orderSummary.amount) }} ·
+          客户 {{ orderSummary.customers }} 人 · 复购率 {{ orderSummary.repurchase_rate }}%
+        </div>
+      </a-card>
+
+      <a-card size="small" :bordered="false">
+        <a-table
+          :columns="orderColumns"
+          :data-source="orderList"
+          :loading="orderLoading"
+          :pagination="orderPager"
+          row-key="id"
           size="small"
-          style="width: 130px"
-          allow-clear
-          placeholder="全部省份"
-          :options="(facets.provinces ?? []).map((p) => ({ label: p, value: p }))"
-          @change="reload"
-        />
-        <span class="f-label">品系：</span>
-        <a-select
-          v-model:value="productLine"
-          size="small"
-          style="width: 150px"
-          allow-clear
-          placeholder="全部品系"
-          :options="(facets.product_lines ?? []).map((p) => ({ label: p, value: p }))"
-          @change="reload"
-        />
-      </div>
-    </a-card>
+          :scroll="{ x: 1500 }"
+          @change="onOrderTableChange"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'date'">{{ fmtDay(record.date) }}</template>
+            <template v-else-if="column.key === 'phone'">
+              <span class="phone-text">{{ record.phone || '-' }}</span>
+            </template>
+            <template v-else-if="column.key === 'store'">
+              <a-tag :color="record.storeName === '未分配' ? 'default' : 'blue'">{{ record.storeName || '-' }}</a-tag>
+            </template>
+            <template v-else-if="column.key === 'repurchase'">
+              <a-tag v-if="record.repurchase === '是'" color="green">回购</a-tag>
+              <span v-else class="muted mini">-</span>
+            </template>
+          </template>
+        </a-table>
+      </a-card>
+    </template>
 
-    <a-alert v-if="emptyHint" type="info" show-icon :message="emptyHint" class="hint-bar" />
-
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">总线索数</div>
-        <div class="stat-value hl-blue">{{ fmt(cards.total_leads) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">总销量</div>
-        <div class="stat-value">{{ fmt(cards.total_sales) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">总转化率</div>
-        <div class="stat-value hl-green">{{ cards.conversion_rate }}%</div>
-      </div>
-    </div>
-
-    <a-row :gutter="12">
-      <a-col :span="15">
-        <a-card size="small" :bordered="false" title="月度销量趋势">
-          <div ref="trendEl" style="height: 320px" />
-        </a-card>
-      </a-col>
-      <a-col :span="9">
-        <a-card size="small" :bordered="false" title="品系销量排行">
-          <div ref="rankEl" style="height: 320px" />
-        </a-card>
-      </a-col>
-    </a-row>
-
-    <a-card size="small" :bordered="false" class="detail-card">
-      <template #title>
-        <div class="sec-head"><span class="bar"></span>门店品系销量明细</div>
-      </template>
-      <a-table
-        :columns="detailColumns"
-        :data-source="detail"
-        :loading="loading"
-        :pagination="{ pageSize: 15, showSizeChanger: false, size: 'small' }"
-        row-key="store"
-        size="small"
-        :scroll="{ x: detailColumns.length > 8 ? 1200 : undefined }"
-      />
-    </a-card>
-
-    <a-modal v-model:open="showImport" title="导入小红书渠道销售清单" :footer="null" width="560px">
+    <a-modal v-model:open="showImport" title="导入小红书渠道销售数据" :footer="null" width="560px">
       <a-alert
         type="info"
         show-icon
         class="import-tip"
-        message="Excel 列头要求：月份(YYYY-MM)、门店、省份、品系、销量、销售额(可选)。同月+同门店+同品系重复导入将覆盖更新。"
+        message="自动识别两种格式：① 订单明细（列头含：日期/客户姓名/手机号码/产品型号/品名/数量…，支持同订单多行，客户手机号一并入库）；② 月度汇总（月份/门店/省份/品系/销量）。重复导入按唯一键覆盖更新。"
       />
       <a-upload
         :before-upload="beforeUpload"
@@ -106,6 +221,9 @@
         <div>新增 {{ importResult.created }} 条 · 更新 {{ importResult.updated }} 条</div>
         <div v-if="importResult.skipped" class="muted mini">
           跳过 {{ importResult.skipped }} 行：{{ (importResult.errors || []).join('；') }}
+        </div>
+        <div v-if="importResult.unmatched_staff?.length" class="muted mini">
+          未匹配门店的顾问：{{ importResult.unmatched_staff.join('、') }}（已归「未分配」，补齐基线归属人后可重导）
         </div>
       </div>
     </a-modal>
@@ -123,6 +241,7 @@ import PageWrapper from '../../components/PageWrapper.vue';
 import request from '../../api/request';
 
 const loading = ref(false);
+const tab = ref('summary');
 const monthRange = ref([dayjs().startOf('year'), dayjs()]);
 const province = ref(undefined);
 const productLine = ref(undefined);
@@ -133,6 +252,8 @@ const importResult = ref(null);
 
 const facets = ref({ provinces: [], product_lines: [], months: [] });
 const cards = ref({ total_leads: 0, total_sales: 0, conversion_rate: 0 });
+const orderSummary = ref({ orders: 0, qty: 0, amount: 0, customers: 0, repurchase_rate: 0 });
+const staffRanking = ref([]);
 const emptyHint = ref(null);
 const detail = ref([]);
 const trend = ref([]);
@@ -143,7 +264,20 @@ let rankChart = null;
 const trendEl = ref(null);
 const rankEl = ref(null);
 
+// 订单明细状态
+const orderList = ref([]);
+const orderLoading = ref(false);
+const orderPage = ref(1);
+const orderPageSize = 20;
+const orderTotal = ref(0);
+const orderMonthRange = ref([dayjs().startOf('year'), dayjs()]);
+const orderStore = ref(undefined);
+const orderStaff = ref(undefined);
+const orderKeyword = ref('');
+const orderFacets = ref({ stores: [], staff: [] });
+
 const fmt = (v) => Number(v ?? 0).toLocaleString();
+const fmtDay = (v) => (v ? dayjs(v).format('MM-DD') : '-');
 
 const detailColumns = computed(() => {
   const products = [...new Set(detail.value.flatMap((d) => Object.keys(d).filter((k) => !['store', 'province', 'total'].includes(k))))];
@@ -156,6 +290,41 @@ const detailColumns = computed(() => {
   ];
 });
 
+const staffColumns = [
+  { title: '排名', key: 'rank', width: 60, customRender: ({ index }) => index + 1 },
+  { title: '销售顾问', dataIndex: 'staff', width: 140 },
+  { title: '销量（台）', dataIndex: 'qty', width: 100, align: 'right', sorter: (a, b) => a.qty - b.qty },
+  { title: '销售额（元）', dataIndex: 'amount', width: 120, align: 'right', sorter: (a, b) => a.amount - b.amount, customRender: ({ text }) => fmt(text) },
+];
+
+const orderColumns = [
+  { key: 'date', title: '日期', width: 80 },
+  { title: '序号', dataIndex: 'orderSeq', width: 60 },
+  { title: '内部单号', dataIndex: 'internalNo', width: 90 },
+  { title: '客户姓名', dataIndex: 'customerName', width: 100 },
+  { key: 'phone', title: '手机号码', dataIndex: 'phone', width: 120 },
+  { key: 'repurchase', title: '回购', width: 70 },
+  { title: '渠道', dataIndex: 'channel', width: 100 },
+  { title: '产品型号', dataIndex: 'productModel', width: 150 },
+  { title: '品名', dataIndex: 'productName', width: 120 },
+  { title: '颜色', dataIndex: 'color', width: 80 },
+  { title: '尺码', dataIndex: 'size', width: 60 },
+  { title: '数量', dataIndex: 'quantity', width: 60, align: 'right' },
+  { title: '单价', dataIndex: 'unitPrice', width: 80, align: 'right' },
+  { title: '折后小计', dataIndex: 'discountSub', width: 90, align: 'right' },
+  { title: '收款合计', dataIndex: 'amount', width: 90, align: 'right' },
+  { title: '销售顾问', dataIndex: 'staff', width: 90 },
+  { key: 'store', title: '门店', dataIndex: 'storeName', width: 110 },
+];
+
+const orderPager = computed(() => ({
+  current: orderPage.value,
+  pageSize: orderPageSize,
+  total: orderTotal.value,
+  showSizeChanger: false,
+  size: 'small',
+}));
+
 const monthParams = () => ({
   startMonth: monthRange.value?.[0]?.format('YYYY-MM'),
   endMonth: monthRange.value?.[1]?.format('YYYY-MM'),
@@ -163,11 +332,21 @@ const monthParams = () => ({
   ...(productLine.value ? { productLine: productLine.value } : {}),
 });
 
+const orderParams = () => ({
+  startMonth: orderMonthRange.value?.[0]?.format('YYYY-MM'),
+  endMonth: orderMonthRange.value?.[1]?.format('YYYY-MM'),
+  ...(orderStore.value ? { storeName: orderStore.value } : {}),
+  ...(orderStaff.value ? { staff: orderStaff.value } : {}),
+  ...(orderKeyword.value?.trim() ? { keyword: orderKeyword.value.trim() } : {}),
+});
+
 async function reload() {
   loading.value = true;
   try {
     const res = await request.get('/mdd/sales/dashboard', { params: monthParams() });
     cards.value = res.cards ?? { total_leads: 0, total_sales: 0, conversion_rate: 0 };
+    orderSummary.value = res.order_summary ?? { orders: 0, qty: 0, amount: 0, customers: 0, repurchase_rate: 0 };
+    staffRanking.value = res.staff_ranking ?? [];
     emptyHint.value = res.empty_hint ?? null;
     detail.value = res.detail ?? [];
     trend.value = res.trend ?? [];
@@ -180,6 +359,32 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadOrders() {
+  orderLoading.value = true;
+  try {
+    const res = await request.get('/mdd/sales/orders', {
+      params: { page: orderPage.value, page_size: orderPageSize, ...orderParams() },
+    });
+    orderList.value = res.list ?? [];
+    orderTotal.value = res.total ?? 0;
+    orderSummary.value = res.summary ?? orderSummary.value;
+    orderFacets.value = res.facets ?? { stores: [], staff: [] };
+  } catch (e) {
+    message.error(e.message || '加载订单失败');
+  } finally {
+    orderLoading.value = false;
+  }
+}
+
+function onTabChange(v) {
+  if (v === 'orders' && !orderList.value.length) loadOrders();
+}
+
+function onOrderTableChange(p) {
+  orderPage.value = p.current;
+  loadOrders();
 }
 
 function renderTrend() {
@@ -209,14 +414,11 @@ function renderTrend() {
 function renderRank() {
   if (!rankEl.value) return;
   if (!rankChart) rankChart = echarts.init(rankEl.value);
-  const rows = (detail.value.length
-    ? rankFromDetail()
-    : []
-  ).slice(0, 12);
+  const rows = rankFromDetail().slice(0, 12);
   rankChart.setOption(
     {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { left: 110, right: 40, top: 10, bottom: 20 },
+      grid: { left: 130, right: 40, top: 10, bottom: 20 },
       xAxis: { type: 'value' },
       yAxis: { type: 'category', data: rows.map((r) => r.name).reverse() },
       series: [
@@ -234,7 +436,7 @@ function renderRank() {
 }
 
 function rankFromDetail() {
-  // 从明细行的品系列汇总出排行
+  // 从明细行的品系/品名列汇总出排行
   const agg = new Map();
   for (const row of detail.value) {
     for (const [k, v] of Object.entries(row)) {
@@ -255,28 +457,43 @@ function beforeUpload(file) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-      const rows = raw
-        .map((r) => ({
-          month: normalizeMonth(r['月份'] ?? r.month),
-          storeName: String(r['门店'] ?? r.storeName ?? '').trim(),
-          province: String(r['省份'] ?? r.province ?? '').trim(),
-          productLine: String(r['品系'] ?? r['车型'] ?? r.productLine ?? '').trim(),
-          quantity: Number(r['销量'] ?? r.quantity ?? 0) || 0,
-          amount: r['销售额'] ?? r.amount ?? null,
-        }))
-        .filter((r) => r.month && r.storeName && r.productLine);
-      if (!rows.length) {
-        message.error('未解析到有效行（列头需含：月份/门店/品系/销量）');
-        importing.value = false;
-        fileList.value = [];
-        return;
+      const raw = XLSX.utils.sheet_to_json(sheet, { defval: null });
+      const isOrderFormat = raw.some((r) => r['手机号码'] != null);
+      let res;
+      if (isOrderFormat) {
+        const rows = parseOrderRows(raw);
+        if (!rows.length) {
+          message.error('未解析到有效订单行（列头需含：日期/产品型号/品名/数量）');
+          importing.value = false;
+          fileList.value = [];
+          return;
+        }
+        res = await request.post('/mdd/sales/import-orders', { rows });
+      } else {
+        const rows = raw
+          .map((r) => ({
+            month: normalizeMonth(r['月份'] ?? r.month),
+            storeName: String(r['门店'] ?? r.storeName ?? '').trim(),
+            province: String(r['省份'] ?? r.province ?? '').trim(),
+            productLine: String(r['品系'] ?? r['车型'] ?? r.productLine ?? '').trim(),
+            quantity: Number(r['销量'] ?? r.quantity ?? 0) || 0,
+            amount: r['销售额'] ?? r.amount ?? null,
+          }))
+          .filter((r) => r.month && r.storeName && r.productLine);
+        if (!rows.length) {
+          message.error('未解析到有效行（列头需含：月份/门店/品系/销量 或 订单明细格式）');
+          importing.value = false;
+          fileList.value = [];
+          return;
+        }
+        res = await request.post('/mdd/sales/import', { rows });
       }
-      const res = await request.post('/mdd/sales/import', { rows });
       importResult.value = res;
       message.success(`导入完成：新增 ${res.created} · 更新 ${res.updated}`);
       fileList.value = [];
       await reload();
+      orderPage.value = 1;
+      await loadOrders();
     } catch (err) {
       message.error(err.message || '解析失败');
     } finally {
@@ -285,6 +502,53 @@ function beforeUpload(file) {
   };
   reader.readAsArrayBuffer(file);
   return false;
+}
+
+/** 订单明细解析：同订单多行时表头字段（日期/客户/手机号/收款合计/顾问）向下透传 */
+function parseOrderRows(raw) {
+  const rows = [];
+  let head = null;
+  for (const r of raw) {
+    if (r['日期'] != null && r['日期'] !== '') {
+      head = {
+        date: normalizeDay(r['日期']),
+        orderSeq: r['订单序号'] != null ? String(r['订单序号']) : null,
+        internalNo: r['内部单号'] != null && r['内部单号'] !== '' ? String(r['内部单号']) : null,
+        customerName: r['客户姓名'] ? String(r['客户姓名']).trim() : null,
+        phone: r['手机号码'] != null && r['手机号码'] !== '' ? String(r['手机号码']).trim() : null,
+        repurchase: r['是否回购'] ? String(r['是否回购']).trim() : null,
+        channel: r['渠道'] ? String(r['渠道']).trim() : null,
+        amount: r['收款合计'] ?? null,
+        staff: r['销售顾问'] ? String(r['销售顾问']).trim() : null,
+        remark: r['备注'] ? String(r['备注']).trim() : null,
+      };
+    }
+    if (!head) continue;
+    const hasProduct = (r['产品型号'] ?? '') !== '' || (r['品名'] ?? '') !== '';
+    if (!hasProduct) continue;
+    rows.push({
+      ...head,
+      productModel: r['产品型号'] ? String(r['产品型号']).trim() : null,
+      productName: r['品名'] ? String(r['品名']).trim() : null,
+      color: r['颜色'] ? String(r['颜色']).trim() : null,
+      size: r['尺码'] != null && r['尺码'] !== '' ? String(r['尺码']).trim() : null,
+      quantity: Number(r['数量'] ?? 0) || 0,
+      unitPrice: r['单价'] ?? null,
+      discountSub: r['折后小计'] ?? null,
+    });
+  }
+  return rows;
+}
+
+function normalizeDay(v) {
+  if (!v) return '';
+  if (v instanceof Date) return dayjs(v).format('YYYY-MM-DD');
+  const num = Number(v);
+  if (Number.isFinite(num) && num > 200000 && num < 500000) {
+    return dayjs('1899-12-30').add(num, 'day').format('YYYY-MM-DD');
+  }
+  const d = dayjs(String(v));
+  return d.isValid() ? d.format('YYYY-MM-DD') : '';
 }
 
 function normalizeMonth(v) {
@@ -318,6 +582,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.tab-seg {
+  margin-bottom: 12px;
+}
+
 .filter-card {
   margin-bottom: 12px;
 }
@@ -334,13 +602,17 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.order-summary-row {
+  margin-top: 8px;
+}
+
 .hint-bar {
   margin-bottom: 12px;
 }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-bottom: 12px;
 }
@@ -367,12 +639,24 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
+.stat-sub {
+  margin-top: 2px;
+}
+
 .hl-blue {
   color: #2563eb;
 }
 
 .hl-green {
   color: #16a34a;
+}
+
+.hl-purple {
+  color: #7c3aed;
+}
+
+.phone-text {
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-card {

@@ -1351,6 +1351,39 @@ model MddChannelSale {
   @@index([brandId, productLine])
 }
 
+// MDD(5) 小红书渠道销售订单明细（客户底表 Excel 订单级导入，含客户手机号/销售顾问）
+model MddSalesOrder {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(5)
+  month        String // YYYY-MM（date 派生，聚合查询用）
+  date         DateTime?
+  orderSeq     String? // 订单序号（同日序号）
+  internalNo   String? // 内部单号
+  customerName String?
+  phone        String?
+  repurchase   String? // 是否回购
+  channel      String? // 渠道
+  productModel String?
+  productName  String?
+  color        String?
+  size         String?
+  quantity     Int      @default(0)
+  unitPrice    Decimal? @db.Decimal(12, 2)
+  discountSub  Decimal? @db.Decimal(12, 2) // 折后小计（行级）
+  amount       Decimal? @db.Decimal(12, 2) // 收款合计（订单级，行间透传）
+  staff        String? // 销售顾问
+  storeName    String? // 门店归属（顾问→KOS 自动映射，未匹配=未分配）
+  remark       String?
+  dedupKey     String   @unique // 防重复导入：月份|订单序号|内部单号|产品型号|行序
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([brandId, month])
+  @@index([brandId, storeName])
+  @@index([brandId, staff])
+  @@index([phone])
+}
+
 model KoxRanfDaily {
   id           Int      @id @default(autoincrement())
   brandId      Int      @default(6)
