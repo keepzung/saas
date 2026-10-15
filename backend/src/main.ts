@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
+import { json } from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -9,6 +10,8 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Excel 明细批量导入（销售订单等）请求体可达数 MB，默认 100kb 不够
+  app.use(json({ limit: '8mb' }));
   app.setGlobalPrefix('api/agency-api');
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true }),

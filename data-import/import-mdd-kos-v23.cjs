@@ -9,7 +9,8 @@ const path = require('path');
 const { createRequire } = require('module');
 
 const ROOT = path.resolve(__dirname, '..');
-const XLSX_FILE = process.argv[2] || path.join(ROOT, 'morgandada', 'DaDa kos 23个认证账号归属人.xlsx');
+const XLSX_FILE = process.argv.slice(2).find((a) => a.endsWith('.xlsx'))
+  || path.join(ROOT, 'morgandada', 'DaDa kos 23个认证账号归属人.xlsx');
 const DRY_RUN = process.argv.includes('--dry-run');
 const KEEP_ALL = process.argv.includes('--keep-all');
 
@@ -66,22 +67,37 @@ function storeFromNickname(nick) {
   console.log(`基线解析：${baseline.length} 个账号（问题行 ${problems.length}）`);
   for (const pr of problems) console.log('  [warn]', pr);
 
-  // 现状
+  // 现状（匹配键 = authorUrl 提取的小红书 userid；authorId 是 mdd_ 占位不作匹配键）
   const current = await p.kosAccount.findMany({
     where: { brandId: 5 },
-    select: { id: true, authorId: true, nickname: true, storeName: true, status: true, operatorName: true },
+    select: { id: true, authorId: true, nickname: true, storeName: true, status: true, operatorName: true, authorUrl: true },
   });
-  const curByUid = new Map(current.map((a) => [a.authorId, a]));
-  const toCreate = baseline.filter((b) => !curByUid.has(b.uid));
-  const toUpdate = baseline.filter((b) => curByUid.has(b.uid));
-  const toDisable = KEEP_ALL ? [] : current.filter((a) => a.status === 'enabled' && !uids.has(a.authorId));
+  const uidOf = (a) => (a.authorUrl || '').match(/\/profile\/([0-9a-zA-Z]+)/)?.[1] || null;
+  const curByUid = new Map();
+  const curByNick = new Map();
+  for (const a of current) {
+    const uid = uidOf(a);
+    if (uid) curByUid.set(uid, a);
+    if (a.nickname) curByNick.set(a.nickname, a);
+  }
+  // 基线 → 现有账号匹配（uid 优先，昵称兜底）
+  const matchBase = (b) => curByUid.get(b.uid) ?? curByNick.get(b.nickname) ?? null;
+  const toCreate = baseline.filter((b) => !matchBase(b));
+  const toUpdate = baseline.map((b) => ({ base: b, cur: matchBase(b) })).filter((x) => x.cur);
+  const baselineUids = new Set(baseline.map((b) => b.uid));
+  const baselineNicks = new Set(baseline.map((b) => b.nickname));
+  const toDisable = KEEP_ALL
+    ? []
+    : current.filter((a) => a.status === 'enabled' && !(baselineUids.has(uidOf(a)) || baselineNicks.has(a.nickname)));
 
   console.log('--- diff ---');
   console.log(`新增 ${toCreate.length}: ${toCreate.map((b) => b.nickname).join('、') || '-'}`);
-  const renamed = toUpdate.filter((b) => curByUid.get(b.uid).nickname !== b.nickname);
-  console.log(`更新 ${toUpdate.length}（其中改名 ${renamed.length}: ${renamed.map((b) => `${curByUid.get(b.uid).nickname}→${b.nickname}`).join('、') || '-'}）`);
-  const storeChanged = toUpdate.filter((b) => curByUid.get(b.uid).storeName !== b.storeName);
-  console.log(`门店规范化 ${storeChanged.length}: ${storeChanged.map((b) => `${b.nickname}:${curByUid.get(b.uid).storeName}→${b.storeName}`).join('、') || '-'}`);
+  const renamed = toUpdate.filter((x) => x.cur.nickname !== x.base.nickname);
+  console.log(`更新 ${toUpdate.length}（其中改名 ${renamed.length}: ${renamed.map((x) => `${x.cur.nickname}→${x.base.nickname}`).join('、') || '-'}）`);
+  const storeChanged = toUpdate.filter((x) => x.cur.storeName !== x.base.storeName);
+  console.log(`门店规范化 ${storeChanged.length}: ${storeChanged.map((x) => `${x.base.nickname}:${x.cur.storeName}→${x.base.storeName}`).join('、') || '-'}`);
+  const opFilled = toUpdate.filter((x) => !x.cur.operatorName && x.base.operatorName);
+  console.log(`补归属人 ${opFilled.length}: ${opFilled.map((x) => `${x.base.nickname}(${x.base.operatorName})`).join('、') || '-'}`);
   console.log(`禁用（基线外） ${toDisable.length}: ${toDisable.map((a) => a.nickname).join('、') || '-'}`);
 
   if (DRY_RUN) {
@@ -92,9 +108,8 @@ function storeFromNickname(nick) {
 
   let upserted = 0;
   for (const b of baseline) {
+    const cur = matchBase(b);
     const data = {
-      brandId: 5,
-      authorId: b.uid,
       nickname: b.nickname,
       authorUrl: b.authorUrl,
       operatorName: b.operatorName,
@@ -104,7 +119,12 @@ function storeFromNickname(nick) {
       platform: 'xhs',
       status: 'enabled',
     };
-    await p.kosAccount.upsert({ where: { authorId: b.uid }, create: data, update: data });
+    if (cur) {
+      // 保留原 authorId（笔记/归属引用一致），仅更新资料
+      await p.kosAccount.update({ where: { id: cur.id }, data });
+    } else {
+      await p.kosAccount.create({ data: { ...data, brandId: 5, authorId: `mdd_${b.uid}` } });
+    }
     upserted += 1;
   }
   let disabled = 0;
