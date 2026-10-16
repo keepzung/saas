@@ -40,7 +40,7 @@ const normType = (v) => {
   return 'KOS';
 };
 
-async function upsertAccount(prisma, slot, row, stat) {
+async function upsertAccount(prisma, slot, row, stat, slotType) {
   const authorId = String(slot.id || '').trim();
   const nickname = String(slot.name || '').trim();
   if (!authorId || !nickname) {
@@ -50,8 +50,10 @@ async function upsertAccount(prisma, slot, row, stat) {
   const regionName = String(row['区域'] || '').trim() || null;
   const areaName = [row['省'], row['市']].filter(Boolean).join('·') || null;
   const storeName = String(row['F经销商简称'] || '').trim() || null;
-  const accountType = normType(row['账号类型']);
-  const data = { nickname, accountType, regionName, areaName, storeName, status: 'enabled' };
+  // 主账户槽位=门店 KOB 主账户；第二槽位（主账户ID_1）=该店绑定的员工号，类型取行「账号类型」(KOS)
+  const accountType = slotType || normType(row['账号类型']);
+  // source='roster'：客户权威清单账号，运营总览 KOS/KOB/KOC 计数只统计该来源
+  const data = { nickname, accountType, regionName, areaName, storeName, status: 'enabled', source: 'roster' };
 
   const byId = await prisma.kosAccount.findUnique({ where: { authorId } });
   if (byId) {
@@ -88,11 +90,43 @@ async function main() {
     for (const row of rows) {
       const main = { id: row['主账户ID'], name: row['主账户名称'] };
       const second = { id: row['主账户ID_1'], name: row['主账户名称_1'] };
-      await upsertAccount(prisma, main, row, stat);
-      // 第二账号列存在且与主账号不同 → 作为独立账号导入
+      // 主账户槽位固定为门店 KOB 主账户（KOC 行除外）
+      const rowType = normType(row['账号类型']);
+      const mainType = rowType === 'KOC' ? 'KOC' : 'KOB';
+      await upsertAccount(prisma, main, row, stat, mainType);
+      // 第二账号列 = 该店绑定员工号（类型取行「账号类型」，通常 KOS）；与主账号不同才导入
       if (second.id && second.name && String(second.id) !== String(main.id)) {
-        await upsertAccount(prisma, second, row, stat);
+        await upsertAccount(prisma, second, row, stat, rowType);
       }
+    }
+
+    // 清单行快照（替换式）：运营总览 KOS/KOB 计数按行口径（KOS 行=员工号绑定，KOB 行=主账户），与客户报表一致
+    if (!DRY_RUN) {
+      await prisma.kosRosterEntry.deleteMany({ where: { brandId: BRAND_ID } });
+      const entries = rows.map((r) => {
+        const rawType = String(r['账号类型'] || '').trim();
+        return {
+          brandId: BRAND_ID,
+          // 行类型：仅明确的 KOS 行算 KOS（员工号绑定），KOB蓝V/空类型均归 KOB（门店主账户）
+          rowType: rawType === 'KOS' ? 'KOS' : 'KOB',
+        sqCode: String(r['SQ代码'] || '').trim() || null,
+        region: String(r['区域'] || '').trim() || null,
+        province: String(r['省'] || '').trim() || null,
+        city: String(r['市'] || '').trim() || null,
+        district: String(r['区县'] || '').trim() || null,
+        storeName: String(r['F经销商简称'] || '').trim() || null,
+        mainUid: String(r['主账户ID'] || '').trim() || null,
+        mainName: String(r['主账户名称'] || '').trim() || null,
+        staffUid: String(r['主账户ID_1'] || '').trim() || null,
+        staffName: String(r['主账户名称_1'] || '').trim() || null,
+        };
+      });
+      for (let i = 0; i < entries.length; i += 200) {
+        await prisma.kosRosterEntry.createMany({ data: entries.slice(i, i + 200) });
+      }
+      const byType = {};
+      for (const e of entries) byType[e.rowType] = (byType[e.rowType] || 0) + 1;
+      console.log(`清单行快照: ${entries.length} 行`, JSON.stringify(byType));
     }
     console.log(
       `=== 完成 === 新建 ${stat.created} / 更新 ${stat.updated} / 自动账号升级 ${stat.upgraded} / 跳过 ${stat.skipped}`,

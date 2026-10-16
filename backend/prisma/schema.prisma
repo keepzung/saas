@@ -489,6 +489,7 @@ model KosAccount {
   status         String   @default("enabled")
   brandId        Int      @default(1)
   userId         Int?
+  source         String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -505,6 +506,27 @@ model KosAccount {
   @@index([regionName])
   @@index([saleArea])
   @@index([storeName])
+}
+
+// 客户「账号清单」行快照（每行一条，替换式导入）：运营总览 KOS/KOB 计数按行口径与客户报表一致
+model KosRosterEntry {
+  id          Int      @id @default(autoincrement())
+  brandId     Int
+  rowType     String
+  sqCode      String?
+  region      String?
+  province    String?
+  city        String?
+  district    String?
+  storeName   String?
+  mainUid     String?
+  mainName    String?
+  staffUid    String?
+  staffName   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([brandId, rowType])
 }
 
 model KoxNote {

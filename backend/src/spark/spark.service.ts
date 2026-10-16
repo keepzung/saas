@@ -824,6 +824,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
               accountType: 'KOS',
               brandId: org.brandId,
               status: 'enabled',
+              source: 'auto',
             },
           });
           accountId = created.id;
