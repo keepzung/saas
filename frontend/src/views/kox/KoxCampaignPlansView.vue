@@ -754,9 +754,9 @@ const noteColumns = computed(() => {
       { title: '曝光', dataIndex: 'exposure', width: 100, sorter: (a, b) => a.exposure - b.exposure },
       { title: '点击', dataIndex: 'click', width: 90, sorter: (a, b) => a.click - b.click },
       { key: 'ctr', title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
-      { title: '互动', dataIndex: 'interaction', width: 80 },
+      { title: '互动', dataIndex: 'interaction', width: 80, sorter: (a, b) => a.interaction - b.interaction },
       { title: '私信进线', dataIndex: 'msg_inquiries', width: 95, sorter: (a, b) => a.msg_inquiries - b.msg_inquiries },
-      { title: '私信开口', dataIndex: 'msg_openings', width: 95 },
+      { title: '私信开口', dataIndex: 'msg_openings', width: 95, sorter: (a, b) => a.msg_openings - b.msg_openings },
       { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
       { key: 'msg_lead_cost', title: '留资成本', dataIndex: 'msg_lead_cost', width: 95, sorter: (a, b) => a.msg_lead_cost - b.msg_lead_cost },
     ];
@@ -766,11 +766,11 @@ const noteColumns = computed(() => {
     { key: 'rtb', title: '推广状态', width: 90 },
     { title: '曝光', dataIndex: 'exposure', width: 100, sorter: (a, b) => a.exposure - b.exposure },
     { title: '阅读', dataIndex: 'views', width: 100, sorter: (a, b) => a.views - b.views },
-    { title: '点赞', dataIndex: 'likes', width: 80 },
-    { title: '评论', dataIndex: 'comments', width: 80 },
-    { title: '收藏', dataIndex: 'collects', width: 80 },
-    { title: '分享', dataIndex: 'shares', width: 80 },
-    { title: '涨粉', dataIndex: 'follow', width: 80 },
+    { title: '点赞', dataIndex: 'likes', width: 80, sorter: (a, b) => a.likes - b.likes },
+    { title: '评论', dataIndex: 'comments', width: 80, sorter: (a, b) => a.comments - b.comments },
+    { title: '收藏', dataIndex: 'collects', width: 80, sorter: (a, b) => a.collects - b.collects },
+    { title: '分享', dataIndex: 'shares', width: 80, sorter: (a, b) => a.shares - b.shares },
+    { title: '涨粉', dataIndex: 'follow', width: 80, sorter: (a, b) => a.follow - b.follow },
     { title: '发布时间', dataIndex: 'publish_time', width: 150 },
   ];
 });
@@ -907,16 +907,16 @@ const regionColumns = computed(() => {
     cols.push({ title: '大区', dataIndex: 'name', width: 160 });
   }
   cols.push(
-    { title: '账户数', dataIndex: 'account_num', width: 80 },
-    { key: 'fee', title: '消耗', width: 160 },
+    { title: '账户数', dataIndex: 'account_num', width: 80, sorter: (a, b) => a.account_num - b.account_num },
+    { key: 'fee', title: '消耗', width: 160, sorter: (a, b) => a.fee - b.fee },
     { title: '曝光量', dataIndex: 'impression', width: 100, sorter: (a, b) => a.impression - b.impression },
-    { title: '点击量', dataIndex: 'click', width: 90 },
+    { title: '点击量', dataIndex: 'click', width: 90, sorter: (a, b) => a.click - b.click },
     { title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
-    { title: '互动量', dataIndex: 'interaction', width: 90 },
-    { title: '私信进线', dataIndex: 'msg_inquiries', width: 95 },
-    { title: '私信开口', dataIndex: 'msg_openings', width: 95 },
+    { title: '互动量', dataIndex: 'interaction', width: 90, sorter: (a, b) => a.interaction - b.interaction },
+    { title: '私信进线', dataIndex: 'msg_inquiries', width: 95, sorter: (a, b) => a.msg_inquiries - b.msg_inquiries },
+    { title: '私信开口', dataIndex: 'msg_openings', width: 95, sorter: (a, b) => a.msg_openings - b.msg_openings },
     { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
-    { title: '留资成本', dataIndex: 'msg_lead_cost', width: 95 },
+    { title: '留资成本', dataIndex: 'msg_lead_cost', width: 95, sorter: (a, b) => a.msg_lead_cost - b.msg_lead_cost },
   );
   return cols;
 });
@@ -946,16 +946,16 @@ function onDetailTabChange() {
 
 const accountColumns = [
   { key: 'name', title: '账户名称 / 类型' },
-  { title: '消耗天数', dataIndex: 'consume_days', width: 90 },
-  { key: 'fee', title: '消耗', width: 170 },
+  { title: '消耗天数', dataIndex: 'consume_days', width: 90, sorter: (a, b) => a.consume_days - b.consume_days },
+  { key: 'fee', title: '消耗', width: 170, sorter: (a, b) => a.fee - b.fee },
   { title: '曝光量', dataIndex: 'impression', width: 100, sorter: (a, b) => a.impression - b.impression },
-  { title: '点击量', dataIndex: 'click', width: 90 },
+  { title: '点击量', dataIndex: 'click', width: 90, sorter: (a, b) => a.click - b.click },
   { title: '点击率', dataIndex: 'ctr', width: 90, sorter: (a, b) => a.ctr - b.ctr },
-  { title: '互动量', dataIndex: 'interaction', width: 95 },
-  { title: '私信进线', dataIndex: 'msg_inquiries', width: 95 },
-  { title: '私信开口', dataIndex: 'msg_openings', width: 95 },
+  { title: '互动量', dataIndex: 'interaction', width: 95, sorter: (a, b) => a.interaction - b.interaction },
+  { title: '私信进线', dataIndex: 'msg_inquiries', width: 95, sorter: (a, b) => a.msg_inquiries - b.msg_inquiries },
+  { title: '私信开口', dataIndex: 'msg_openings', width: 95, sorter: (a, b) => a.msg_openings - b.msg_openings },
   { title: '私信留资', dataIndex: 'msg_leads', width: 95, sorter: (a, b) => a.msg_leads - b.msg_leads },
-  { title: '留资成本', dataIndex: 'msg_lead_cost', width: 95 },
+  { title: '留资成本', dataIndex: 'msg_lead_cost', width: 95, sorter: (a, b) => a.msg_lead_cost - b.msg_lead_cost },
 ];
 
 onMounted(() => {
