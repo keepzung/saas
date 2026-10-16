@@ -49,6 +49,7 @@
         @search="onFilterChange"
         @change="(e) => { if (!e.target.value) onFilterChange(); }"
       />
+      <a-button size="small" @click="exportUnlinked">导出未关联门店账号</a-button>
       <a-button size="small" type="primary" @click="exportDetail">导出数据明细</a-button>
     </template>
 
@@ -311,6 +312,44 @@ function viewContent(record) {
     path: '/kox_df/operation-analysis/note-ranking',
     query: { author: record.nickname },
   });
+}
+
+async function exportUnlinked() {
+  // 导出未关联门店的账号（storeName 为空），供客户比对补全归属
+  const all = [];
+  let page = 1;
+  for (;;) {
+    const res = await getKoxAccounts({
+      brandId: auth.currentBrandId ?? 2,
+      unlinked: 1,
+      status: 'enabled',
+      page,
+      page_size: 100,
+    });
+    const l = res.list ?? [];
+    all.push(...l);
+    if (!l.length || all.length >= (res.total ?? 0)) break;
+    page += 1;
+  }
+  if (!all.length) {
+    message.info('当前没有未关联门店的账号');
+    return;
+  }
+  exportExcel(
+    all.map((a, i) => ({
+      序号: i + 1,
+      账号昵称: a.nickname,
+      UID: a.authorId,
+      账号类型: a.accountType,
+      大区: a.regionName ?? '',
+      销售区域: a.saleArea ?? '',
+      粉丝数: a.fans ?? 0,
+      状态: a.status,
+      当前门店: a.storeName ?? '',
+    })),
+    '未关联门店账号',
+  );
+  message.success(`已导出 ${all.length} 个未关联门店账号`);
 }
 
 async function exportDetail() {

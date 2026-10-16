@@ -31,6 +31,7 @@ export class KoxController {
       regionName?: string;
       saleArea?: string;
       accountTag?: string;
+      unlinked?: string;
       createdAtStart?: string;
       createdAtEnd?: string;
       keyword?: string;

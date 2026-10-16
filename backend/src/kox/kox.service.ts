@@ -108,6 +108,7 @@ export class KoxService {
     regionName?: string;
     saleArea?: string;
     accountTag?: string;
+    unlinked?: string;
     createdAtStart?: string;
     createdAtEnd?: string;
     keyword?: string;
@@ -127,6 +128,10 @@ export class KoxService {
     if (query.saleArea) where.saleArea = query.saleArea;
     if (query.accountTag) where.accountTag = query.accountTag;
     if (query.brandId) where.brandId = Number(query.brandId);
+    // 未关联门店：storeName 为空（供客户导出比对、补全归属）
+    if (query.unlinked === '1' || query.unlinked === 'true') {
+      where.OR = [{ storeName: null }, { storeName: '' }];
+    }
     if (query.createdAtStart || query.createdAtEnd) {
       where.createdAt = {
         ...(query.createdAtStart ? { gte: new Date(query.createdAtStart) } : {}),
@@ -1524,7 +1529,10 @@ export class KoxService {
         g.follow_sum += n.followCount;
         g.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
       });
-      // 门店账号明细（前端展开行）：账号 → 发布数/曝光
+      // 门店账号明细（前端展开行）：账号 → 发布数/曝光；无 authorUrl 时用创作者 UID 拼小红书主页链接
+      const profileUrl = /^[\da-f]{16,}$/i.test(acct.authorId)
+        ? `https://www.xiaohongshu.com/user/profile/${acct.authorId}`
+        : null;
       const storeKey = storeOf(acct);
       const perAcc =
         storeAccounts.get(storeKey) ??
@@ -1532,7 +1540,7 @@ export class KoxService {
       const cur = perAcc.get(acct.id) ?? {
         nickname: acct.nickname,
         account_type: acct.accountType,
-        author_url: acct.authorUrl,
+        author_url: acct.authorUrl || profileUrl,
         item_cnt: 0,
         exposure: 0,
       };
@@ -1594,6 +1602,24 @@ export class KoxService {
         g.pm_openings += v.open;
         g.pm_leads += v.leads;
       });
+      // 归属账号同样进展开明细（保证 账号数=展开数）
+      const profileUrl = /^[\da-f]{16,}$/i.test(acct.authorId)
+        ? `https://www.xiaohongshu.com/user/profile/${acct.authorId}`
+        : null;
+      const storeKey = storeOf(acct);
+      const perAcc =
+        storeAccounts.get(storeKey) ??
+        new Map<number, { nickname: string; account_type: string; author_url: string | null; item_cnt: number; exposure: number }>();
+      const cur =
+        perAcc.get(acct.id) ?? {
+          nickname: acct.nickname,
+          account_type: acct.accountType,
+          author_url: acct.authorUrl || profileUrl,
+          item_cnt: 0,
+          exposure: 0,
+        };
+      perAcc.set(acct.id, cur);
+      storeAccounts.set(storeKey, perAcc);
     }
 
     // 2b) 获客工具统计无数据时（未接专业号），回退 MCC「员工矩阵」口径：
@@ -1618,6 +1644,24 @@ export class KoxService {
           g.pm_openings += s.messageOpenCnt;
           g.pm_inquiries += s.messageDrivingOpenCnt;
         });
+        // 留资/开口归属的账号同样进展开明细（笔记数可为 0，保证 账号数=展开数）
+        const profileUrl = /^[\da-f]{16,}$/i.test(acct.authorId)
+          ? `https://www.xiaohongshu.com/user/profile/${acct.authorId}`
+          : null;
+        const storeKey = storeOf(acct);
+        const perAcc =
+          storeAccounts.get(storeKey) ??
+          new Map<number, { nickname: string; account_type: string; author_url: string | null; item_cnt: number; exposure: number }>();
+        const cur =
+          perAcc.get(acct.id) ?? {
+            nickname: acct.nickname,
+            account_type: acct.accountType,
+            author_url: acct.authorUrl || profileUrl,
+            item_cnt: 0,
+            exposure: 0,
+          };
+        perAcc.set(acct.id, cur);
+        storeAccounts.set(storeKey, perAcc);
       }
       if (staffRows.length > 0) leadsSource = 'mcc_staff_matrix';
     }
