@@ -539,6 +539,12 @@ export class KoxService {
     }
     const gAccById = new Map(gAccs.map((a) => [a.id, a]));
     const gAccByNick = new Map(gAccs.map((a) => [a.nickname, a]));
+    // 员工行关联：userId↔authorId 精确匹配优先（平台端昵称会变更，昵称匹配会丢数据），昵称兜底
+    const gAccByUid = new Map(gAccs.filter((a) => a.authorId).map((a) => [a.authorId as string, a]));
+    const gAccOfStaff = (s: { userId: string; nickName: string }) => {
+      const byId = s.userId ? gAccByUid.get(s.userId) : undefined;
+      return byId ?? gAccByNick.get(s.nickName);
+    };
     // 内容发布数统一口径（2026-10 客户确认）：仅统计匹配 210 基线账号的笔记——
     // 与 KOS数据进度/账号表现分析/区域数据完全一致（未匹配作者名/官号不入统计）
     const pubCntByAcc = new Map<number, number>();
@@ -566,7 +572,7 @@ export class KoxService {
         matrixMeta = { source: proMatrix.source, dateType: proMatrix.dateType, statDate: proMatrix.statDate };
         if (accountTag || regionName) {
           staffUse = proMatrix.rows.filter((s) => {
-            const a = gAccByNick.get(s.nickName);
+            const a = gAccOfStaff(s);
             return (
               !!a &&
               (!accountTag || a.accountTag === accountTag) &&
@@ -639,7 +645,7 @@ export class KoxService {
         if (cur) cur.item_cnt += cnt;
       }
       for (const s of staffUse) {
-        const cur = bumpRegion(gAccByNick.get(s.nickName)?.regionName);
+        const cur = bumpRegion(gAccOfStaff(s)?.regionName);
         if (!cur) continue;
         cur.exposure_sum += s.socImpCnt;
         cur.view_sum += s.socClickCnt;
@@ -2903,6 +2909,7 @@ export class KoxService {
     // 笔记 → 账号键（accountId 优先，authorName 兜底）
     const idToAcc = new Map(accounts.map((a) => [a.id, a]));
     const nameToAcc = new Map(accounts.map((a) => [a.nickname, a]));
+    const authorIdToAcc = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a]));
     interface Agg {
       kos: Set<number>;
       published: Set<number>;
@@ -2994,11 +3001,13 @@ export class KoxService {
           bucket.note_cnt += 1;
         }
       }
-      // 曝光/阅读/互动：员工数据窗口（E）按账号→大区/标签分桶
+      // 曝光/阅读/互动：员工数据窗口（E）按账号→大区/标签分桶（userId↔authorId 精确匹配优先，昵称兜底）
       const proMatrix = await this.proMatrixSvc.proMatrix(6, start, end);
       if (proMatrix) {
         for (const s of proMatrix.rows) {
-          const acc = s.nickName ? nameToAcc.get(s.nickName) : undefined;
+          const acc =
+            (s.userId ? authorIdToAcc.get(s.userId) : undefined) ??
+            (s.nickName ? nameToAcc.get(s.nickName) : undefined);
           if (!acc) continue;
           const g = bucketOf(groups, regionOf(acc));
           const tg = bucketOf(tagGroups, tagOf(acc));
@@ -3292,11 +3301,15 @@ export class KoxService {
           a.item_cnt += 1;
         });
       }
-      // 曝光/阅读（点击）/互动：专业号员工数据窗口（dateType=4 逐日求和优先、三档快照回退）
+      // 曝光/阅读（点击）/互动：专业号员工数据窗口（dateType=4 逐日求和优先、三档快照回退）；
+      // 员工行关联 = userId↔authorId 精确匹配优先（平台端昵称会变更），昵称兜底
+      const authorToIdE = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a.id]));
       const proMatrix = await this.proMatrixSvc.proMatrix(6, start, end);
       if (proMatrix) {
         for (const s of proMatrix.rows) {
-          const accId = s.nickName ? nameToId.get(s.nickName) : null;
+          const accId =
+            (s.userId ? authorToIdE.get(s.userId) : undefined) ??
+            (s.nickName ? nameToId.get(s.nickName) : null);
           if (accId == null) continue;
           bump(accId, (a) => {
             a.exposure += s.socImpCnt;
@@ -4053,11 +4066,16 @@ export class KoxService {
         a.item_cnt += 1;
       });
     }
-    // 曝光/阅读/互动：员工数据窗口（E）按账号聚合
+    // 曝光/阅读/互动：员工数据窗口（E）按账号聚合（userId↔authorId 精确匹配优先，昵称兜底）
+    const authorToIdPro = new Map(
+      accounts.filter((a) => a.authorId).map((a) => [a.authorId, a]),
+    );
     const proMatrixP = await this.proMatrixSvc.proMatrix(brandId, start, end);
     if (proMatrixP) {
       for (const s of proMatrixP.rows) {
-        const acc = s.nickName ? nameToAcc.get(s.nickName) : null;
+        const acc =
+          (s.userId ? authorToIdPro.get(s.userId) : undefined) ??
+          (s.nickName ? nameToAcc.get(s.nickName) : null);
         if (!acc) continue;
         bump(acc.id, (a) => {
           a.exposure_sum += s.socImpCnt;
@@ -4076,9 +4094,6 @@ export class KoxService {
         otherLeadsUserCnt: true,
       },
     });
-    const authorToIdPro = new Map(
-      accounts.filter((a) => a.authorId).map((a) => [a.authorId, a.id]),
-    );
     const toolAggP = new Map<string, { enter: number; open: number; leads: number }>();
     for (const r of toolRowsP) {
       const cur = toolAggP.get(r.belongUserId) ?? { enter: 0, open: 0, leads: 0 };
@@ -4091,9 +4106,9 @@ export class KoxService {
       toolAggP.set(r.belongUserId, cur);
     }
     for (const [belong, v] of toolAggP) {
-      const accId = authorToIdPro.get(belong);
-      if (accId == null) continue;
-      bump(accId, (a) => {
+      const acc = authorToIdPro.get(belong);
+      if (!acc) continue;
+      bump(acc.id, (a) => {
         a.pm_inquiries = v.enter;
         a.pm_openings = v.open;
         a.pm_leads = v.leads;
