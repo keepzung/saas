@@ -775,11 +775,15 @@ export class KoxService {
     // 特斯拉线索口径（proClueFunnel）已在上方 G 块计算：专业号「客户管理（旧版）获客工具统计」
     // 严格单源——窗口内无数据如实显示 0，不再回退 ProKosOverview 快照/周度表（客户确认，2026-10）
 
-    // KOS/KOB/KOC 计数：荣威(2)=客户「账号清单」行口径（KOS 行=员工号绑定 / KOB 行=主账户，
-    // 与客户报表数字一致，2026-10 客户确认）；其他品牌=账号表按类型计数
+    // KOS/KOB/KOC/覆盖门店数 计数：荣威(2)=客户「账号清单」行口径（KOS 行=员工号绑定 / KOB 行=主账户 /
+    // 门店=清单去重 F经销商简称），与客户报表数字一致，2026-10 客户确认；其他品牌=账号表按类型计数
     let kosNum = typeCount('KOS');
     let kobNum = typeCount('KOB');
     let kocNum = typeCount('KOC');
+    let storeNum = await this.prisma.kosAccount.groupBy({
+      by: ['storeName'],
+      where: { storeName: { not: null }, ...accountWhere },
+    }).then((g) => g.length);
     if (brandId === 2) {
       const rosterGroups = await this.prisma.kosRosterEntry.groupBy({
         by: ['rowType'],
@@ -789,14 +793,15 @@ export class KoxService {
       kosNum = rosterGroups.find((g) => g.rowType === 'KOS')?._count._all ?? 0;
       kobNum = rosterGroups.find((g) => g.rowType === 'KOB')?._count._all ?? 0;
       kocNum = 0;
+      storeNum = await this.prisma.kosRosterEntry.groupBy({
+        by: ['storeName'],
+        where: { brandId: 2, storeName: { not: null } },
+      }).then((g) => g.length);
     }
 
     return {
       global: globalBlock,
-      store_num: await this.prisma.kosAccount.groupBy({
-        by: ['storeName'],
-        where: { storeName: { not: null }, ...accountWhere },
-      }).then((g) => g.length),
+      store_num: storeNum,
       kos_num: kosNum,
       kob_num: kobNum,
       koc_num: kocNum,
