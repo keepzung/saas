@@ -285,21 +285,46 @@
                       <span class="chat-name">{{ roleLabel(block.msg) }}</span>
                     </div>
                     <div class="chat-bubble">
-                      <template v-if="isNoteCard(block.msg)">
-                        <div class="note-card">
-                          <div class="note-note muted mini">分享了笔记</div>
-                          <div class="note-title">{{ noteCardTitle(block.msg) }}</div>
-                          <a
-                            v-if="noteCardLink(block.msg)"
-                            :href="noteCardLink(block.msg)"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            查看笔记
-                          </a>
+                      <template v-if="msgCard(block.msg).kind === 'photo'">
+                        <img
+                          class="msg-photo"
+                          :src="msgCard(block.msg).url"
+                          referrerpolicy="no-referrer"
+                          loading="lazy"
+                          @error="onCardImgError"
+                        />
+                      </template>
+                      <template v-else-if="msgCard(block.msg).kind === 'voice'">
+                        <span class="msg-voice">🎤 语音消息</span>
+                      </template>
+                      <template v-else-if="msgCard(block.msg).kind === 'json' && isCardData(msgCard(block.msg).data)">
+                        <div class="msg-card">
+                          <img
+                            v-if="cardImg(msgCard(block.msg).data)"
+                            class="msg-card-img"
+                            :src="cardImg(msgCard(block.msg).data)"
+                            referrerpolicy="no-referrer"
+                            loading="lazy"
+                            @error="onCardImgError"
+                          />
+                          <div class="msg-card-body">
+                            <div v-if="noteAuthor(msgCard(block.msg).data)" class="msg-card-sub">
+                              分享了笔记 · @{{ noteAuthor(msgCard(block.msg).data) }}
+                            </div>
+                            <div class="msg-card-title">{{ cardTitle(msgCard(block.msg).data) }}</div>
+                            <a
+                              v-if="cardLink(msgCard(block.msg).data)"
+                              :href="cardLink(msgCard(block.msg).data)"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >查看笔记</a>
+                          </div>
                         </div>
                       </template>
-                      <template v-else>{{ block.msg.content }}</template>
+                      <template v-else-if="msgCard(block.msg).kind === 'json'">
+                        <pre class="msg-json">{{ JSON.stringify(msgCard(block.msg).data, null, 2) }}</pre>
+                      </template>
+                      <template v-else>{{ msgCard(block.msg).text }}</template>
                     </div>
                   </div>
                 </template>
@@ -475,20 +500,46 @@
                   <span class="chat-time">{{ fmtTime(msg.created_at) }}</span>
                 </div>
                 <div class="chat-bubble">
-                  <template v-if="isNoteCard(msg)">
-                    <div class="note-card">
-                      <div class="note-title">{{ noteCardTitle(msg) }}</div>
-                      <a
-                        v-if="noteCardLink(msg)"
-                        :href="noteCardLink(msg)"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        查看笔记
-                      </a>
+                  <template v-if="msgCard(msg).kind === 'photo'">
+                    <img
+                      class="msg-photo"
+                      :src="msgCard(msg).url"
+                      referrerpolicy="no-referrer"
+                      loading="lazy"
+                      @error="onCardImgError"
+                    />
+                  </template>
+                  <template v-else-if="msgCard(msg).kind === 'voice'">
+                    <span class="msg-voice">🎤 语音消息</span>
+                  </template>
+                  <template v-else-if="msgCard(msg).kind === 'json' && isCardData(msgCard(msg).data)">
+                    <div class="msg-card">
+                      <img
+                        v-if="cardImg(msgCard(msg).data)"
+                        class="msg-card-img"
+                        :src="cardImg(msgCard(msg).data)"
+                        referrerpolicy="no-referrer"
+                        loading="lazy"
+                        @error="onCardImgError"
+                      />
+                      <div class="msg-card-body">
+                        <div v-if="noteAuthor(msgCard(msg).data)" class="msg-card-sub">
+                          分享了笔记 · @{{ noteAuthor(msgCard(msg).data) }}
+                        </div>
+                        <div class="msg-card-title">{{ cardTitle(msgCard(msg).data) }}</div>
+                        <a
+                          v-if="cardLink(msgCard(msg).data)"
+                          :href="cardLink(msgCard(msg).data)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >查看笔记</a>
+                      </div>
                     </div>
                   </template>
-                  <template v-else>{{ msg.content }}</template>
+                  <template v-else-if="msgCard(msg).kind === 'json'">
+                    <pre class="msg-json">{{ JSON.stringify(msgCard(msg).data, null, 2) }}</pre>
+                  </template>
+                  <template v-else>{{ msgCard(msg).text }}</template>
                 </div>
               </div>
               <a-empty v-if="!messages.length" description="暂无消息" />
@@ -954,24 +1005,54 @@ function roleLabel(msg) {
   return msg.name || '客服';
 }
 
-function isNoteCard(msg) {
-  return msg.type === 'redbook_note_card';
-}
-
-function parseCardContent(msg) {
-  try {
-    return JSON.parse(msg.content);
-  } catch {
-    return null;
+/** 消息渲染分类：text / photo / voice / json（json = 各类小红书卡片：笔记/名片/分享评论/通用） */
+function msgCard(msg) {
+  const t = String(msg.type ?? '');
+  const raw = String(msg.content ?? '');
+  if (t === 'photo') return { kind: 'photo', url: raw };
+  if (t === 'voice') return { kind: 'voice' };
+  let data = null;
+  if (raw.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') data = parsed;
+    } catch {
+      data = null;
+    }
   }
+  if (data) return { kind: 'json', data };
+  return { kind: 'text', text: raw };
 }
 
-function noteCardTitle(msg) {
-  return parseCardContent(msg)?.title || '笔记卡片';
+/** 可渲染为卡片的 JSON（含标题/图片/链接特征） */
+function isCardData(data) {
+  return !!(data && (data.title || data.image || data.cover || data.name || data.note_link));
 }
 
-function noteCardLink(msg) {
-  return parseCardContent(msg)?.link || '';
+function cardImg(data) {
+  return data?.cover || data?.image || '';
+}
+
+function cardTitle(data) {
+  return data?.title || data?.name || '卡片消息';
+}
+
+function noteAuthor(data) {
+  return data?.user_info?.nickname || '';
+}
+
+function cardLink(data) {
+  const link = data?.note_link || data?.link || '';
+  // xhsdiscover:// 等 app 私有协议浏览器无法打开，不渲染链接
+  return link.startsWith('http') ? link : '';
+}
+
+function onCardImgError(e) {
+  const el = e.target;
+  const span = document.createElement('span');
+  span.className = 'img-expired';
+  span.textContent = '图片已过期';
+  el.replaceWith(span);
 }
 
 function fmtTime(value) {
@@ -1526,6 +1607,79 @@ onMounted(() => {
 
 .note-title {
   font-weight: 600;
+}
+
+/* ── 消息卡片（名片/分享评论/通用卡/图片/语音/JSON） ── */
+.msg-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.msg-card-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #f1f5f9;
+}
+
+.msg-card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.msg-card-sub {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.msg-card-body .msg-card-sub + .msg-card-title {
+  margin-top: 0;
+}
+
+.msg-photo {
+  max-width: 220px;
+  max-height: 280px;
+  border-radius: 8px;
+  display: block;
+  cursor: zoom-in;
+}
+
+.msg-voice {
+  font-size: 13px;
+  color: #475569;
+}
+
+.msg-json {
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.img-expired {
+  font-size: 11px;
+  color: #94a3b8;
 }
 
 .raw-json {
