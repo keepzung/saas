@@ -7,6 +7,27 @@
           <a-radio-button :value="30">近30天</a-radio-button>
         </a-radio-group>
         <a-range-picker v-model:value="range" size="small" @change="onRangeChange" />
+        <a-select
+          v-if="!isTesla"
+          v-model:value="accountKind"
+          size="small"
+          style="width: 150px"
+          placeholder="账号属性"
+          allow-clear
+          :options="[
+            { value: 'brand', label: '品牌主账户（代理商）' },
+            { value: 'agent_sub', label: '代理商子账户（门店）' },
+          ]"
+          @change="onFilterChange"
+        />
+        <a-input-search
+          v-model:value="storeKeyword"
+          size="small"
+          style="width: 170px"
+          placeholder="门店名筛选"
+          allow-clear
+          @search="onFilterChange"
+        />
         <a-button size="small" @click="reload">
           <ReloadOutlined />
         </a-button>
@@ -351,6 +372,9 @@ const coverage = ref(null);
 const accountRows = ref([]);
 const accountTotal = ref(0);
 const exporting = ref(false);
+// 账号属性（品牌主账户/代理商子账户）与门店名筛选
+const accountKind = ref();
+const storeKeyword = ref('');
 
 // 客户 2026-10 确认：以聚光「标准投笔记报表」为唯一消耗口径，不再使用平台盯盘月快照
 const heroFee = computed(() => summary.value.fee ?? 0);
@@ -379,8 +403,15 @@ function realParams(extra = {}) {
     brandId: auth.currentBrandId ?? 2,
     start: hasRange ? range.value[0].format('YYYY-MM-DD') : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
     end: hasRange ? range.value[1].format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+    ...(accountKind.value ? { accountKind: accountKind.value } : {}),
+    ...(storeKeyword.value.trim() ? { keyword: storeKeyword.value.trim() } : {}),
     ...extra,
   };
+}
+
+function onFilterChange() {
+  page.value = 1;
+  reload();
 }
 
 function onDaysChange() {

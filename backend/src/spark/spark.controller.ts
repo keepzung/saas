@@ -130,7 +130,7 @@ export class SparkController {
   @Get('spark/campaign/summary')
   campaignSummary(
     @Query()
-    query: { start?: string; end?: string; brandId?: string; scope?: string; accountType?: string },
+    query: { start?: string; end?: string; brandId?: string; scope?: string; accountType?: string; accountKind?: string; keyword?: string },
   ) {
     return this.sparkService.campaignSummary(query);
   }
@@ -225,6 +225,8 @@ export class SparkController {
       brandId?: string;
       scope?: string;
       groupby?: string;
+      accountKind?: string;
+      keyword?: string;
     },
   ) {
     return this.sparkService.campaignRegion(query);

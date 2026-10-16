@@ -1581,6 +1581,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     scope?: string;
     accountType?: string;
+    accountKind?: string;
+    keyword?: string;
   }) {
     // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
     const end = query.end
@@ -1611,6 +1613,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       where: {
         statDate: { gte: start, lte: end },
         brandId,
+        // 账号属性（品牌主账户/代理商子账户）与门店名（账号名包含）筛选
+        ...(query.accountKind ? { accountKind: query.accountKind } : {}),
+        ...(query.keyword ? { brandUserName: { contains: query.keyword.trim() } } : {}),
         ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
       },
       orderBy: { statDate: 'asc' },
@@ -2529,6 +2534,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     brandId?: string;
     scope?: string;
     groupby?: string;
+    accountKind?: string;
+    keyword?: string;
   }) {
     const groupby = ['region', 'store'].includes(query.groupby ?? '')
       ? (query.groupby as string)
@@ -2662,6 +2669,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         where: {
           statDate: { gte: start, lte: end },
           brandId,
+          ...(query.accountKind ? { accountKind: query.accountKind } : {}),
+          ...(query.keyword ? { brandUserName: { contains: query.keyword.trim() } } : {}),
           ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
         },
       }),
