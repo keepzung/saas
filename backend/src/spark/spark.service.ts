@@ -866,6 +866,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         formLeads: num(pick('leads_success')),
         authorName: authorName || null,
         accountType: 'KOS',
+        topics: String(pick('huati_tag_list') ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
         statDate: day,
         rawJson: r as Prisma.InputJsonValue,
       };

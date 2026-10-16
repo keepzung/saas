@@ -1302,16 +1302,18 @@ export class ContentproService {
         const kosNoteRows = kos
           ? await this.prisma.koxNote.findMany({
               where: { accountId: kos.id, publishTime: { gte: t.startTime, lte: t.endTime } },
-              select: { title: true },
+              select: { title: true, topics: true },
             })
           : [];
         const mySubRows = kos
           ? []
           : await this.prisma.xhsHistory.findMany({
               where: { contentTaskId: t.id, createdById: userId, uploadTime: { gte: t.startTime, lte: t.endTime } },
-              select: { title: true },
+              select: { title: true, tags: true },
             });
-        const myNotes = [...kosNoteRows, ...mySubRows].filter((n) => this.titleMatchesHashtags(n.title, hashtags)).length;
+        const myNotes = [...kosNoteRows, ...mySubRows]
+          .filter((n) => this.noteMatchesHashtags({ title: n.title, topics: (n as { topics?: string[] }).topics ?? (n as { tags?: string[] }).tags }, hashtags))
+          .length;
         return {
           id: t.id,
           name: t.name,
@@ -1340,7 +1342,14 @@ export class ContentproService {
     };
   }
 
-  /** 话题完成口径：笔记标题包含任一指定话题（大小写不敏感）；任务未设置话题 = 发布即算 */
+  /** 话题完成口径：笔记话题标签或标题包含任一指定话题（大小写不敏感）；任务未设置话题 = 发布即算 */
+  private noteMatchesHashtags(note: { topics?: string[] | null; title?: string | null }, hashtags: string[] | null | undefined): boolean {
+    if (!hashtags?.length) return true;
+    const t = String(note.title ?? '');
+    const topics = note.topics ?? [];
+    return hashtags.some((h) => topics.includes(h) || t.toLowerCase().includes(h.toLowerCase()));
+  }
+
   private titleMatchesHashtags(title: string | null | undefined, hashtags: string[] | null | undefined): boolean {
     if (!hashtags?.length) return true;
     const t = String(title ?? '');
@@ -1358,12 +1367,12 @@ export class ContentproService {
     if (hashtags.length) {
       const notes = await this.prisma.koxNote.findMany({
         where: { accountId: { in: accountIds }, publishTime: { gte: start, lte: end } },
-        select: { accountId: true, title: true },
+        select: { accountId: true, title: true, topics: true },
       });
       const doneAccounts = new Set<number>();
       let total = 0;
       for (const n of notes) {
-        if (!this.titleMatchesHashtags(n.title, hashtags)) continue;
+        if (!this.noteMatchesHashtags(n, hashtags)) continue;
         total += 1;
         doneAccounts.add(n.accountId!);
       }
@@ -1420,10 +1429,10 @@ export class ContentproService {
           createdById: { in: unboundUserIds },
           uploadTime: { gte: startTime, lte: endTime },
         },
-        select: { createdById: true, title: true },
+        select: { createdById: true, title: true, tags: true },
       });
       for (const s of subs) {
-        if (!this.titleMatchesHashtags(s.title, hashtags)) continue;
+        if (!this.noteMatchesHashtags({ title: s.title, topics: s.tags }, hashtags)) continue;
         userSubTotal += 1;
         userDoneSet.add(s.createdById!);
       }
@@ -1556,12 +1565,12 @@ export class ContentproService {
     const accNotes = ids.length
       ? await this.prisma.koxNote.findMany({
           where: { accountId: { in: ids }, publishTime: { gte: t.startTime, lte: t.endTime } },
-          select: { accountId: true, title: true },
+          select: { accountId: true, title: true, topics: true },
         })
       : [];
     const noteMap = new Map<number, number>();
     for (const n of accNotes) {
-      if (!this.titleMatchesHashtags(n.title, hashtags)) continue;
+      if (!this.noteMatchesHashtags(n, hashtags)) continue;
       noteMap.set(n.accountId!, (noteMap.get(n.accountId!) ?? 0) + 1);
     }
     // 员工维度：完成口径= 其绑定矩阵号的发布笔记数（未绑定回退系统内提交草稿数）
@@ -1578,24 +1587,24 @@ export class ContentproService {
     const boundNotes = boundKosIds.length
       ? await this.prisma.koxNote.findMany({
           where: { accountId: { in: boundKosIds }, publishTime: { gte: t.startTime, lte: t.endTime } },
-          select: { accountId: true, title: true },
+          select: { accountId: true, title: true, topics: true },
         })
       : [];
     const boundNoteMap = new Map<number, number>();
     for (const n of boundNotes) {
-      if (!this.titleMatchesHashtags(n.title, hashtags)) continue;
+      if (!this.noteMatchesHashtags(n, hashtags)) continue;
       boundNoteMap.set(n.accountId!, (boundNoteMap.get(n.accountId!) ?? 0) + 1);
     }
     const unboundUserIds = userIds.filter((id) => !boundMap.has(id));
     const userSubRows = unboundUserIds.length
       ? await this.prisma.xhsHistory.findMany({
           where: { contentTaskId: t.id, createdById: { in: unboundUserIds }, uploadTime: { gte: t.startTime, lte: t.endTime } },
-          select: { createdById: true, title: true },
+          select: { createdById: true, title: true, tags: true },
         })
       : [];
     const userSubMap = new Map<number, number>();
     for (const s of userSubRows) {
-      if (!this.titleMatchesHashtags(s.title, hashtags)) continue;
+      if (!this.noteMatchesHashtags({ title: s.title, topics: s.tags }, hashtags)) continue;
       userSubMap.set(s.createdById!, (userSubMap.get(s.createdById!) ?? 0) + 1);
     }
     // H5 扫码接力的产出笔记（挂任务的生成历史）

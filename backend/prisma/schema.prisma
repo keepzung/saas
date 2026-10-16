@@ -554,6 +554,7 @@ model KoxNote {
   formLeads     Int         @default(0)
   authorName    String?
   accountType   String?
+  topics        String[]  @default([])
   isRtbAdver    Boolean?
   brandUserName String?
   category      String?

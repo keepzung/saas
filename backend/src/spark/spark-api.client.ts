@@ -209,6 +209,7 @@ export class SparkApiClient {
         'is_rtb_adver',
         'staff_city',
         'staff_label',
+        'huati_tag_list',
         'imp_num',
         'read_feed_num',
         'like_num',
