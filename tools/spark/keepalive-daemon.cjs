@@ -27,6 +27,7 @@ if (fs.existsSync(envPath)) {
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const INTERVAL_MIN = Number(process.env.KEEPALIVE_INTERVAL_MINUTES || 10);
 const RELOGIN_COOLDOWN_MIN = 30;
+const KEEP_BRAND_TIMEOUT_MIN = Number(process.env.KEEP_BRAND_TIMEOUT_MINUTES || 5);
 const LOG_DIR = process.env.KEEPALIVE_LOG_DIR || path.join(ROOT, 'tools/spark/state');
 const STATE_FILE = path.join(LOG_DIR, 'keepalive-state.json');
 
@@ -422,7 +423,14 @@ async function round() {
   const orgs = await prisma.sparkOrgConfig.findMany({ where: { active: true } });
   if (!orgs.length) { console.log(`[${nowIso()}] 无 active 组织可探活`); return; }
   for (const org of orgs) {
-    try { await keepBrand(org); } catch (e) { console.error(`[${nowIso()}] brand${org.brandId} keep error: ${String(e).slice(0, 120)}`); }
+    // 单轮全局超时（默认5分钟）：重登浏览器偶发卡死会无限阻塞，守护必须能自恢复
+    // （超时后底层 promise 可能仍在后台，卡死的 chromium 由后续 pm2 重启/系统 OOM 兜底）
+    try {
+      await Promise.race([
+        keepBrand(org),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`keepBrand 超时 ${KEEP_BRAND_TIMEOUT_MIN}min（疑似浏览器卡死，跳过该品牌本轮）`)), KEEP_BRAND_TIMEOUT_MIN * 60000).unref()),
+      ]);
+    } catch (e) { console.error(`[${nowIso()}] brand${org.brandId} keep error: ${String((e && e.message) || e).slice(0, 160)}`); }
     await sleep(3000);
   }
 }
