@@ -67,12 +67,13 @@
 
     <a-card size="small" :bordered="false">
       <a-table
-        :class="{ 'mdd-table': isMdd }"
+        :class="{ 'mdd-table': isMdd, 'acc-table-tight': isTesla }"
         :columns="columns"
         :data-source="list"
         :loading="loading"
         :pagination="pagination"
         :scroll="tableScroll"
+        :sticky="tableSticky"
         size="small"
         row-key="account_id"
         @change="onTableChange"
@@ -143,7 +144,13 @@ const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: tr
 
 // 宽表（特斯拉/东风多列）启用横向滚动；Morgandada 精简列：自然表高随内容撑开（页面级滚动），
 // 表头用 CSS sticky 跟随滚动容器，修复「固定 560px 表体截断内容 + 下方大片空白」
-const tableScroll = computed(() => (isMdd.value ? undefined : { x: 2300 }));
+// 特斯拉：列距收紧后横向滚动收窄 + 表头吸顶（客户 2026-10）
+const tableScroll = computed(() => {
+  if (isMdd.value) return undefined;
+  if (isTesla.value) return { x: 1500 };
+  return { x: 2300 };
+});
+const tableSticky = computed(() => (isTesla.value ? { offsetHeader: 56 } : undefined));
 
 const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
 const ncol = (title, key, width = 96) => ({
@@ -306,9 +313,24 @@ function viewContent(record) {
   });
 }
 
-function exportDetail() {
-  const rows = list.value.map((r, i) => ({
-    排名: (pagination.value.current - 1) * pagination.value.pageSize + i + 1,
+async function exportDetail() {
+  // 客户 2026-10：导出全量账号（循环拉取所有分页），不再只导当前页 20 条
+  const all = [];
+  let page = 1;
+  for (;;) {
+    const res = await getKoxAccountRanking({
+      ...dateParams(),
+      ...(isMdd.value ? { metric: 'pm_leads' } : {}),
+      page,
+      page_size: 100,
+    });
+    const l = res.list ?? [];
+    all.push(...l);
+    if (!l.length || all.length >= (res.total ?? 0)) break;
+    page += 1;
+  }
+  const rows = all.map((r, i) => ({
+    排名: i + 1,
     账号: r.nickname,
     ...(isMdd.value ? { CES综合得分: r.ces, 新粉率: r.fans_rate } : { 分层: r.tier_label }),
     ...(isTesla.value
@@ -353,6 +375,19 @@ onMounted(() => {
   position: sticky;
   top: 42px;
   z-index: 2;
+}
+
+/* 特斯拉：表头吸顶（sticky 表头）+ 列距收紧（客户 2026-10） */
+.acc-table-tight :deep(.ant-table-thead > tr > th) {
+  white-space: nowrap;
+}
+.acc-table-tight :deep(.ant-table-tbody > tr > td),
+.acc-table-tight :deep(.ant-table-thead > tr > th) {
+  padding: 5px 8px;
+}
+/* antd sticky 表头吸顶时避开顶部导航 */
+.acc-table-tight :deep(.ant-table-sticky-holder) {
+  top: 56px;
 }
 
 .tier-strip {
