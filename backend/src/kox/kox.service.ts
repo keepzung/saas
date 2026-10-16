@@ -1439,6 +1439,8 @@ export class KoxService {
         nickname: true,
         regionName: true,
         storeName: true,
+        accountType: true,
+        authorUrl: true,
       },
     });
     const storeOf = (a: { storeName: string | null }) =>
@@ -1453,6 +1455,7 @@ export class KoxService {
       interaction_sum: number;
       digg_sum: number;
       follow_sum: number;
+      ces: number;
       pm_leads: number;
       pm_inquiries: number;
       pm_openings: number;
@@ -1466,11 +1469,17 @@ export class KoxService {
       interaction_sum: 0,
       digg_sum: 0,
       follow_sum: 0,
+      ces: 0,
       pm_leads: 0,
       pm_inquiries: 0,
       pm_openings: 0,
     });
     const curMap = new Map<string, RealAgg>();
+    // 门店 → 账号明细（前端展开行：该店有哪些账号及其发布/曝光）
+    const storeAccounts = new Map<
+      string,
+      Map<number, { nickname: string; account_type: string; author_url: string | null; item_cnt: number; exposure: number }>
+    >();
     const bump = (
       store: string,
       regionName: string | null,
@@ -1513,7 +1522,24 @@ export class KoxService {
         g.interaction_sum += n.likes + n.collects + n.comments + n.shares;
         g.digg_sum += n.likes;
         g.follow_sum += n.followCount;
+        g.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
       });
+      // 门店账号明细（前端展开行）：账号 → 发布数/曝光
+      const storeKey = storeOf(acct);
+      const perAcc =
+        storeAccounts.get(storeKey) ??
+        new Map<number, { nickname: string; account_type: string; author_url: string | null; item_cnt: number; exposure: number }>();
+      const cur = perAcc.get(acct.id) ?? {
+        nickname: acct.nickname,
+        account_type: acct.accountType,
+        author_url: acct.authorUrl,
+        item_cnt: 0,
+        exposure: 0,
+      };
+      cur.item_cnt += 1;
+      cur.exposure += n.exposure;
+      perAcc.set(acct.id, cur);
+      storeAccounts.set(storeKey, perAcc);
     }
 
     // 2) 留资/进线/开口：获客工具统计按日×归属账号求和
@@ -1616,6 +1642,9 @@ export class KoxService {
           100,
           Math.round((g.pm_leads / leads_target) * 100),
         );
+        const accounts = [...(storeAccounts.get(store)?.values() ?? [])]
+          .sort((a, b) => b.item_cnt - a.item_cnt)
+          .map((a) => ({ ...a }));
         return {
           name: store,
           region_name: g.regionName,
@@ -1627,6 +1656,7 @@ export class KoxService {
           interaction_sum: g.interaction_sum,
           digg_sum: g.digg_sum,
           follow_sum: g.follow_sum,
+          ces: g.ces,
           pm_leads: g.pm_leads,
           pm_inquiries: g.pm_inquiries,
           pm_openings: g.pm_openings,
@@ -1634,7 +1664,7 @@ export class KoxService {
           leads_target,
           item_pct,
           leads_pct,
-          score: Math.round(item_pct * 0.4 + leads_pct * 0.6),
+          accounts,
           growth: null as number | null,
         };
       })

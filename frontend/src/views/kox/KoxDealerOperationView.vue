@@ -116,7 +116,25 @@
         :loading="loading"
         :pagination="{ total: rows.length, pageSize: 15, size: 'small', showSizeChanger: false }"
         row-key="rank"
+        :expand-column-width="40"
       >
+        <template #expandedRowRender="{ record }">
+          <div v-if="record.accounts?.length" class="store-accounts">
+            <div v-for="acc in record.accounts" :key="acc.nickname" class="store-account-row">
+              <component
+                :is="acc.author_url ? 'a' : 'span'"
+                :href="acc.author_url"
+                target="_blank"
+                rel="noopener"
+                class="store-account-link"
+              >{{ acc.nickname }}</component>
+              <a-tag class="store-account-type">{{ acc.account_type }}</a-tag>
+              <span class="store-account-metric">笔记 {{ acc.item_cnt }}</span>
+              <span class="store-account-metric">曝光 {{ fmt(acc.exposure) }}</span>
+            </div>
+          </div>
+          <span v-else class="muted mini">该门店暂无账号明细</span>
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'rank'">
             <span :class="['rank-badge', `rank-${record.rank}`]">{{ record.rank }}</span>
@@ -152,8 +170,8 @@
               />
             </div>
           </template>
-          <template v-else-if="column.key === 'score'">
-            <b class="score-num">{{ record.score }}</b>
+          <template v-else-if="column.key === 'ces'">
+            <b class="score-num">{{ record.ces ?? record.score ?? 0 }}</b>
           </template>
         </template>
       </a-table>
@@ -232,7 +250,7 @@ const columns = computed(() => {
   );
   // 荣威真实留资通道未接入（MCC 侧无留资数据，恒为 0），留资列隐藏；接入专业号获客工具后恢复
   if (!isRoewe.value) cols.push({ key: 'pm_leads', title: '留资数 / 完成度', width: 180 });
-  cols.push({ key: 'score', title: '综合得分', width: 90, sorter: (a, b) => a.score - b.score });
+  cols.push({ key: 'ces', title: 'CES', width: 90, sorter: (a, b) => (a.ces ?? a.score ?? 0) - (b.ces ?? b.score ?? 0) });
   return cols;
 });
 
@@ -623,6 +641,41 @@ onBeforeUnmount(() => {
 .score-num {
   color: #1e293b;
   font-variant-numeric: tabular-nums;
+}
+
+.store-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.store-account-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.store-account-link {
+  color: #2563eb;
+  font-weight: 600;
+  min-width: 180px;
+}
+
+.store-account-link:hover {
+  text-decoration: underline;
+}
+
+.store-account-type {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  margin: 0;
+}
+
+.store-account-metric {
+  color: #64748b;
 }
 
 .muted {
