@@ -9,14 +9,15 @@
         <a-range-picker v-model:value="range" size="small" @change="onRangeChange" />
         <a-select
           v-if="!isTesla"
-          v-model:value="accountKind"
+          v-model:value="accountType"
           size="small"
-          style="width: 150px"
-          placeholder="账号属性"
+          style="width: 120px"
+          placeholder="账号类型"
           allow-clear
           :options="[
-            { value: 'brand', label: '品牌主账户（代理商）' },
-            { value: 'agent_sub', label: '代理商子账户（门店）' },
+            { value: 'KOS', label: 'KOS 账号' },
+            { value: 'KOB', label: 'KOB 账号' },
+            { value: 'KOC', label: 'KOC 账号' },
           ]"
           @change="onFilterChange"
         />
@@ -372,8 +373,8 @@ const coverage = ref(null);
 const accountRows = ref([]);
 const accountTotal = ref(0);
 const exporting = ref(false);
-// 账号属性（品牌主账户/代理商子账户）与门店名筛选
-const accountKind = ref();
+// 账号类型（KOS/KOB/KOC）与门店名筛选
+const accountType = ref();
 const storeKeyword = ref('');
 
 // 客户 2026-10 确认：以聚光「标准投笔记报表」为唯一消耗口径，不再使用平台盯盘月快照
@@ -403,7 +404,7 @@ function realParams(extra = {}) {
     brandId: auth.currentBrandId ?? 2,
     start: hasRange ? range.value[0].format('YYYY-MM-DD') : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
     end: hasRange ? range.value[1].format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
-    ...(accountKind.value ? { accountKind: accountKind.value } : {}),
+    ...(accountType.value ? { accountType: accountType.value } : {}),
     ...(storeKeyword.value.trim() ? { keyword: storeKeyword.value.trim() } : {}),
     ...extra,
   };

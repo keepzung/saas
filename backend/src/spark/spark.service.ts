@@ -1583,8 +1583,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     accountType?: string;
     accountKind?: string;
     keyword?: string;
-  }) {
-    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
+  }) {    // 日期字符串按东八区解析，避免服务器时区差异导致统计窗口漂移
     const end = query.end
       ? /^\d{4}-\d{2}-\d{2}$/.test(query.end)
         ? new Date(`${query.end}T23:59:59.999+08:00`)
@@ -1608,6 +1607,17 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     if (brandId === 6) {
       return this.campaignSummaryJuguangBase(start, end);
     }
+    // 账号类型（KOS/KOB）筛选：经 聚光账户名 ↔ 基线账号昵称/门店 映射取该类型账户名集合
+    let typeNames: string[] | null = null;
+    if (accountType) {
+      const accs = await this.prisma.kosAccount.findMany({
+        where: { brandId, accountType },
+        select: { nickname: true, storeName: true },
+      });
+      typeNames = [
+        ...new Set(accs.flatMap((a) => [a.nickname, a.storeName].filter(Boolean) as string[])),
+      ];
+    }
 
     const rows = await this.prisma.koxCampaignDailyStat.findMany({
       where: {
@@ -1616,6 +1626,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         // 账号属性（品牌主账户/代理商子账户）与门店名（账号名包含）筛选
         ...(query.accountKind ? { accountKind: query.accountKind } : {}),
         ...(query.keyword ? { brandUserName: { contains: query.keyword.trim() } } : {}),
+        ...(typeNames ? { brandUserName: { in: typeNames } } : {}),
         ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
       },
       orderBy: { statDate: 'asc' },
@@ -2257,6 +2268,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     end?: string;
     keyword?: string;
     accountKind?: string;
+    accountType?: string;
     metric?: string;
     page?: string;
     page_size?: string;
@@ -2287,6 +2299,17 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
       },
     });
+    // 账号类型（KOS/KOB）筛选：基线账号昵称/门店名集合
+    let typeNames: string[] | null = null;
+    if (query.accountType) {
+      const accs = await this.prisma.kosAccount.findMany({
+        where: { brandId, accountType: query.accountType },
+        select: { nickname: true, storeName: true },
+      });
+      typeNames = [
+        ...new Set(accs.flatMap((a) => [a.nickname, a.storeName].filter(Boolean) as string[])),
+      ];
+    }
 
     const agg = new Map<
       string,
@@ -2377,6 +2400,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       list = list.filter(
         (a) => a.name.includes(kw) || (a.agent_name ?? '').includes(kw) || (a.advertiser_id ?? '').includes(kw),
       );
+    }
+    if (typeNames) {
+      const tn = new Set(typeNames);
+      list = list.filter((a) => tn.has(a.name));
     }
     list.sort((a, b) => (b[metric] as number) - (a[metric] as number));
 
@@ -2535,6 +2562,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     scope?: string;
     groupby?: string;
     accountKind?: string;
+    accountType?: string;
     keyword?: string;
   }) {
     const groupby = ['region', 'store'].includes(query.groupby ?? '')
@@ -2664,6 +2692,18 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    // 账号类型（KOS/KOB）筛选：基线账号昵称/门店名集合
+    let typeNames: string[] | null = null;
+    if (brandId !== 6 && query.accountType) {
+      const accs = await this.prisma.kosAccount.findMany({
+        where: { brandId, accountType: query.accountType },
+        select: { nickname: true, storeName: true },
+      });
+      typeNames = [
+        ...new Set(accs.flatMap((a) => [a.nickname, a.storeName].filter(Boolean) as string[])),
+      ];
+    }
+
     const [rows, kos, sparks] = await Promise.all([
       this.prisma.koxCampaignDailyStat.findMany({
         where: {
@@ -2671,10 +2711,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           brandId,
           ...(query.accountKind ? { accountKind: query.accountKind } : {}),
           ...(query.keyword ? { brandUserName: { contains: query.keyword.trim() } } : {}),
+          ...(typeNames ? { brandUserName: { in: typeNames } } : {}),
           ...(sellerIds ? { virtualSellerId: { in: sellerIds } } : {}),
         },
-      }),
-      this.prisma.kosAccount.findMany({
+      }),      this.prisma.kosAccount.findMany({
         where: { brandId },
         select: { nickname: true, storeName: true, regionName: true },
       }),

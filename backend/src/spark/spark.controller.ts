@@ -158,6 +158,7 @@ export class SparkController {
       end?: string;
       keyword?: string;
       accountKind?: string;
+      accountType?: string;
       metric?: string;
       page?: string;
       page_size?: string;
@@ -226,6 +227,7 @@ export class SparkController {
       scope?: string;
       groupby?: string;
       accountKind?: string;
+      accountType?: string;
       keyword?: string;
     },
   ) {
