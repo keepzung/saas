@@ -701,6 +701,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           publishStart,
           publishEnd: today,
           promotedOnly: !!opts?.promoted,
+          // 荣威(2)：底表只收录「专业号笔记 + 员工笔记」，达人笔记暂不收录（客户确认 2026-10）
+          noteSources:
+            org.brandId === 2 ? ['专业号笔记', '员工笔记'] : undefined,
           pageNo,
           pageSize: NOTE_PAGE_SIZE,
         },

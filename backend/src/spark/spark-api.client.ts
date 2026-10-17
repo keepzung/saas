@@ -192,6 +192,7 @@ export class SparkApiClient {
     publishStart?: string;
     publishEnd?: string;
     promotedOnly?: boolean;
+    noteSources?: string[];
     pageNo: number;
     pageSize?: number;
   }, ctx?: SparkOrgCtx): Promise<{ total: number; rows: Record<string, unknown>[] }> {
@@ -288,7 +289,10 @@ export class SparkApiClient {
             selectType: 20,
             selectShowType: 0,
             valueSource: 1,
-            selectLabels: [{ selected: 1, labelValue: '全部', labelName: '全部' }],
+            // 指定来源（如 专业号笔记/员工笔记）时按显示文本过滤；未指定=全部
+            selectLabels: params.noteSources?.length
+              ? params.noteSources.map((s) => ({ selected: 1, labelValue: s, labelName: s }))
+              : [{ selected: 1, labelValue: '全部', labelName: '全部' }],
           },
         },
         {

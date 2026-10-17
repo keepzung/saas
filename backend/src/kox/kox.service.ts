@@ -1975,8 +1975,9 @@ export class KoxService {
       if (noteCount > 0) {
         usedNotes = true;
         metricSource = 'notes_cumulative';
+        // 账号基线带 accountWhere（accountType/platform 筛选在此路径同样生效，2026-10-16 修复）
         const accounts = await this.prisma.kosAccount.findMany({
-          where: { brandId: brandIdNum },
+          where: { brandId: brandIdNum, ...accountWhere },
           select: {
             id: true,
             nickname: true,
