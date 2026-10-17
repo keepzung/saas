@@ -616,9 +616,8 @@ export class KoxService {
           cur.enter += r.consultUserCnt;
           cur.open += r.msgChatUserCnt;
           cur.leads +=
-            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-            r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-            r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt +
+            r.bookCompLeadsUserCnt + r.wechatLeadsUserCnt;
           clueByUid.set(r.belongUserId, cur);
         }
         const totals = { enter: 0, open: 0, leads: 0 };
@@ -1586,12 +1585,8 @@ export class KoxService {
       cur.leads +=
         r.msgLeadsUserCnt +
         r.serviceCardLeadsUserCnt +
-        r.qwAddLeadsUserCnt +
         r.bookCompLeadsUserCnt +
-        r.landingPageLeadsUserCnt +
-        r.wechatLeadsUserCnt +
-        r.appCardLeadsUserCnt +
-        r.otherLeadsUserCnt;
+        r.wechatLeadsUserCnt;
       toolAgg.set(r.belongUserId, cur);
     }
     for (const [belong, v] of toolAgg) {
@@ -2401,9 +2396,8 @@ export class KoxService {
       cur.enter += r.consultUserCnt;
       cur.open += r.msgChatUserCnt;
       cur.leads +=
-        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt +
+        r.bookCompLeadsUserCnt + r.wechatLeadsUserCnt;
       byAcc.set(acc.id, cur);
     }
     for (const k of kos) {
@@ -3198,9 +3192,8 @@ export class KoxService {
         cur.enter += r.consultUserCnt;
         cur.open += r.msgChatUserCnt;
         cur.leads +=
-          r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-          r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-          r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+          r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt +
+          r.bookCompLeadsUserCnt + r.wechatLeadsUserCnt;
         toolAgg.set(r.belongUserId, cur);
       }
       for (const [belong, v] of toolAgg) {
@@ -3574,9 +3567,8 @@ export class KoxService {
           cur.enter += r.consultUserCnt;
           cur.open += r.msgChatUserCnt;
           cur.leads +=
-            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-            r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-            r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+            r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt +
+            r.bookCompLeadsUserCnt + r.wechatLeadsUserCnt;
           toolAgg.set(r.belongUserId, cur);
         }
         let clueHit = 0;
@@ -4305,9 +4297,8 @@ export class KoxService {
       cur.enter += r.consultUserCnt;
       cur.open += r.msgChatUserCnt;
       cur.leads +=
-        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt + r.qwAddLeadsUserCnt +
-        r.bookCompLeadsUserCnt + r.landingPageLeadsUserCnt + r.wechatLeadsUserCnt +
-        r.appCardLeadsUserCnt + r.otherLeadsUserCnt;
+        r.msgLeadsUserCnt + r.serviceCardLeadsUserCnt +
+        r.bookCompLeadsUserCnt + r.wechatLeadsUserCnt;
       toolAggP.set(r.belongUserId, cur);
     }
     for (const [belong, v] of toolAggP) {
