@@ -65,15 +65,35 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('[2] 已提交登录。若出现滑块/验证码，请在浏览器窗口中手动完成（最多等待 3 分钟）…');
 
   let cookieStr = '';
-  for (let i = 0; i < 60; i++) {
+  let loggedInAt = 0;
+  let navigated = false;
+  for (let i = 0; i < 110; i++) {
     await sleep(3000);
     if (!/login|passport/i.test(page.url())) {
-      const stateJson = await ctx.storageState();
-      cookieStr = (stateJson.cookies ?? [])
-        .filter((c) => /xiaohongshu\.com$/.test(c.domain))
-        .map((c) => `${c.name}=${c.value}`)
-        .join('; ');
-      break;
+      // 登录成功后：留时间切换业务主体 → 自动跳星火数据页补齐数据上下文 cookie → 抓取
+      if (!loggedInAt) {
+        loggedInAt = Date.now();
+        console.log('[3] 登录成功。若出现主体/业务选择，请切换到 MorganDaDa（45 秒后自动跳转数据页抓取）…');
+      }
+      const waited = Date.now() - loggedInAt;
+      if (waited >= 45000 && !navigated) {
+        navigated = true;
+        console.log('[4] 跳转星火数据报表页（补齐数据上下文 cookie）…');
+        await page
+          .goto('https://ad.xiaohongshu.com/micro/aurora-data', { waitUntil: 'domcontentloaded', timeout: 45000 })
+          .catch(() => {});
+        await sleep(15000);
+        const stateJson = await ctx.storageState();
+        cookieStr = (stateJson.cookies ?? [])
+          .filter((c) => /xiaohongshu\.com$/.test(c.domain))
+          .map((c) => `${c.name}=${c.value}`)
+          .join('; ');
+        break;
+      }
+      if (i % 5 === 0) {
+        console.log(`  …登录后稳定等待中 (${Math.round(waited / 1000)}/45 秒) url=${page.url().slice(0, 60)}`);
+      }
+      continue;
     }
     const bodyText = await page.locator('body').innerText().catch(() => '');
     const errHit = bodyText.match(/密码错误|账号或密码|账号不存在|已被冻结|没有权限|权限不足/);

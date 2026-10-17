@@ -1876,6 +1876,9 @@ export class KoxService {
       digg_sum: number;
       follow_sum: number;
       pm_leads: number;
+      pm_inquiries: number;
+      pm_openings: number;
+      fee_alloc: number;
     };
     const newAgg = (name: string): Agg => ({
       name,
@@ -1888,6 +1891,9 @@ export class KoxService {
       digg_sum: 0,
       follow_sum: 0,
       pm_leads: 0,
+      pm_inquiries: 0,
+      pm_openings: 0,
+      fee_alloc: 0,
     });
     const addRow = (
       map: Map<string, Agg>,
@@ -2032,6 +2038,69 @@ export class KoxService {
       for (const r of prevRows) addRow(prevMap, r.account, r);
     }
 
+    // Morgandada(5)：私信三数叠加（星火员工矩阵按账号 → 维度聚合）+ 投流花费按曝光占比分摊
+    if (Number(query.brandId) === 5) {
+      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: {
+          staffName: true,
+          nickname: true,
+          messageOpenCnt: true,
+          messageDrivingOpenCnt: true,
+          msgLeadsNum: true,
+        },
+      });
+      const mddAccounts = await this.prisma.kosAccount.findMany({
+        where: { brandId: 5 },
+        select: {
+          id: true,
+          nickname: true,
+          operatorName: true,
+          storeName: true,
+          regionName: true,
+          saleArea: true,
+          areaName: true,
+          accountTag: true,
+        },
+      });
+      const mddNickToAcc = new Map(mddAccounts.map((a) => [a.nickname, a]));
+      const mddOpToAcc = new Map(
+        mddAccounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a]),
+      );
+      for (const r of staffRows) {
+        const acct =
+          (r.nickname ? mddNickToAcc.get(r.nickname) : undefined) ??
+          (r.staffName ? mddNickToAcc.get(r.staffName) : undefined) ??
+          (r.staffName ? mddOpToAcc.get(r.staffName) : undefined);
+        if (!acct) continue;
+        const key = dimOf(acct);
+        const g = curMap.get(key) ?? newAgg(key);
+        g.accountIds.add(acct.id);
+        if (acct.storeName) g.storeNames.add(acct.storeName);
+        g.pm_inquiries += r.messageOpenCnt;
+        g.pm_openings += r.messageDrivingOpenCnt;
+        g.pm_leads += r.msgLeadsNum;
+        curMap.set(key, g);
+      }
+      // 投流花费（星火种草账户，品牌级）按各维度曝光占比分摊
+      const feeRows = await this.prisma.koxCampaignDailyStat.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: { fee: true },
+      });
+      const totalFee = Math.round(
+        feeRows.reduce((a, r) => a + Number(r.fee ?? 0), 0),
+      );
+      const totalExposure = [...curMap.values()].reduce(
+        (a, g) => a + g.exposure_sum,
+        0,
+      );
+      if (totalFee > 0 && totalExposure > 0) {
+        for (const g of curMap.values()) {
+          g.fee_alloc = Math.round((totalFee * g.exposure_sum) / totalExposure);
+        }
+      }
+    }
+
     const accountInfo = new Map<
       string,
       {
@@ -2084,6 +2153,9 @@ export class KoxService {
           digg_sum: g.digg_sum,
           follow_sum: g.follow_sum,
           pm_leads: g.pm_leads,
+          pm_inquiries: g.pm_inquiries,
+          pm_openings: g.pm_openings,
+          fee_alloc: g.fee_alloc,
           growth: growth(g[metric], prev ? prev[metric] : 0),
           ...(dimension === 'account' ? accountInfo.get(g.name) ?? {} : {}),
         };
@@ -2580,25 +2652,18 @@ export class KoxService {
       totals.pm_openings_sum = open;
       totals.pm_leads_sum = leads;
     }
-    // Morgandada(5)：私信三数 = 来鼓私信会话（账户维度真实口径，不随内容筛选联动）
-    // 时间口径：来鼓 API 不返回会话创建时间（sessionCreatedAt 入库多为 NULL），为空时回退首条消息时间
+    // Morgandada(5)：私信三数口径 = MCC 星火投放报表（种草账户 messageConsult 进线 / msgChatUserCnt 开口 / msgLeadsNum 留资），
+    // 品牌维度，不随内容筛选联动（2026-10 客户确认切换星火口径）
     let pmScopeNote: string | null = null;
     if ((query.brandId ? Number(query.brandId) : 0) === 5) {
-      const leads = await this.prisma.laiguLead.findMany({
-        where: {
-          brandId: 5,
-          isMdd: true,
-          OR: [
-            { sessionCreatedAt: { gte: start, lte: end } },
-            { sessionCreatedAt: null, firstMessageAt: { gte: start, lte: end } },
-          ],
-        },
-        select: { isResource: true, phone: true, clientMessageCount: true },
+      const campRows = await this.prisma.koxCampaignDailyStat.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: { messageConsult: true, msgChatUserCnt: true, msgLeadsNum: true },
       });
-      totals.pm_inquiries_sum = leads.length;
-      totals.pm_openings_sum = leads.filter((x) => x.clientMessageCount > 0).length;
-      totals.pm_leads_sum = leads.filter((x) => x.isResource).length;
-      pmScopeNote = '来源=来鼓私信会话（仅 Morgandada 投放账户/门店账号，账户维度），不随内容筛选联动';
+      totals.pm_inquiries_sum = campRows.reduce((a, r) => a + r.messageConsult, 0);
+      totals.pm_openings_sum = campRows.reduce((a, r) => a + r.msgChatUserCnt, 0);
+      totals.pm_leads_sum = campRows.reduce((a, r) => a + r.msgLeadsNum, 0);
+      pmScopeNote = '来源=MCC 星火投放报表（种草账户，品牌维度，T+1），不随内容筛选联动';
     }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
@@ -2969,6 +3034,7 @@ export class KoxService {
         accountTag: true,
         regionName: true,
         storeName: true,
+        operatorName: true,
         authorId: true,
       },
     });
@@ -3017,6 +3083,7 @@ export class KoxService {
       pm_openings: number;
       pm_leads: number;
       organic_leads: number;
+      fee_alloc: number;
     }
     const newAgg = (): Agg => ({
       kos: new Set(),
@@ -3030,6 +3097,7 @@ export class KoxService {
       pm_openings: 0,
       pm_leads: 0,
       organic_leads: 0,
+      fee_alloc: 0,
     });
     const groups = new Map<string, Agg>();
     const tagGroups = new Map<string, Agg>();
@@ -3175,6 +3243,50 @@ export class KoxService {
       }
     }
 
+    // Morgandada(5)：私信三数叠加（星火员工矩阵按账号→门店/标签分桶）+ 投流花费按曝光占比分摊
+    if (brandId === 5) {
+      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: {
+          staffName: true,
+          nickname: true,
+          messageOpenCnt: true,
+          messageDrivingOpenCnt: true,
+          msgLeadsNum: true,
+        },
+      });
+      const nickToAcc = new Map(accounts.map((a) => [a.nickname, a]));
+      const opToAcc = new Map(
+        accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a]),
+      );
+      for (const r of staffRows) {
+        const acc =
+          (r.nickname ? nickToAcc.get(r.nickname) : undefined) ??
+          (r.staffName ? nickToAcc.get(r.staffName) : undefined) ??
+          (r.staffName ? opToAcc.get(r.staffName) : undefined);
+        if (!acc) continue;
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        for (const b of [g, tg]) {
+          b.pm_inquiries += r.messageOpenCnt;
+          b.pm_openings += r.messageDrivingOpenCnt;
+          b.pm_leads += r.msgLeadsNum;
+        }
+      }
+      // 投流花费（星火种草账户，品牌级）按各门店曝光占比分摊
+      const feeRows = await this.prisma.koxCampaignDailyStat.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: { fee: true },
+      });
+      const totalFee = Math.round(feeRows.reduce((a, r) => a + Number(r.fee ?? 0), 0));
+      const totalExposure = [...groups.values()].reduce((a, g) => a + g.exposure, 0);
+      if (totalFee > 0 && totalExposure > 0) {
+        for (const g of groups.values()) {
+          g.fee_alloc = Math.round((totalFee * g.exposure) / totalExposure);
+        }
+      }
+    }
+
     const mapRow = ([name, g]: [string, Agg]) => {
       const kosCnt = g.kos.size;
       return {
@@ -3194,6 +3306,7 @@ export class KoxService {
         pm_openings: g.pm_openings,
         organic_leads: g.organic_leads,
         pm_leads: g.pm_leads,
+        fee_alloc: g.fee_alloc,
       };
     };
     type RegionRow = ReturnType<typeof mapRow>;
@@ -3279,6 +3392,7 @@ export class KoxService {
         noteQuality: true,
         fans: true,
         authorUrl: true,
+        operatorName: true,
       },
     });
 
@@ -3524,43 +3638,39 @@ export class KoxService {
       }
       if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else if (brandId === 5) {
-      // Morgandada(5)：乐允投放报表为品牌级（brandUserName=MorganDaDa，无法按账号拆分），
-      // 私信三数改按来鼓会话（LaiguLead）归属 KOS 账号聚合：
-      // 进线=窗口内会话数、开口=客户发过消息的会话数、留资=已留资会话数
-      // 归属：会话进线账号 id（subSource=主页 id）或客服昵称 → KosAccount
-      // 时间口径：来鼓 API 不返回会话创建时间，为空时回退首条消息时间
-      const uidToId = new Map<string, number>();
-      for (const a of accounts) {
-        const m = (a.authorUrl ?? '').match(/\/profile\/([0-9a-f]+)$/);
-        if (m) uidToId.set(m[1], a.id);
-      }
-      const nickToId = new Map(accounts.map((a) => [a.nickname, a.id]));
-      const mddLeadRows = await this.prisma.laiguLead.findMany({
-        where: {
-          brandId: 5,
-          isMdd: true,
-          OR: [
-            { sessionCreatedAt: { gte: start, lte: end } },
-            { sessionCreatedAt: null, firstMessageAt: { gte: start, lte: end } },
-          ],
+      // Morgandada(5)：私信三数口径 = MCC 星火员工矩阵（SparkStaffUserDaily 按员工/账号出三数，2026-10 客户确认切换）
+      // 进线=messageOpenCnt、开口=messageDrivingOpenCnt、留资=msgLeadsNum
+      // 匹配：员工矩阵 nickname/staffName → KosAccount 昵称 / 使用人（operatorName）
+      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: {
+          staffName: true,
+          nickname: true,
+          messageOpenCnt: true,
+          messageDrivingOpenCnt: true,
+          msgLeadsNum: true,
         },
-        select: { subSource: true, staffName: true, clientMessageCount: true, isResource: true },
       });
-      let mddLeadHit = 0;
-      for (const r of mddLeadRows) {
+      const nickToId = new Map(accounts.map((a) => [a.nickname, a.id]));
+      const opToId = new Map(
+        accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a.id]),
+      );
+      let staffHit = 0;
+      for (const r of staffRows) {
         const accId =
-          (r.subSource ? uidToId.get(r.subSource) : undefined) ??
+          (r.nickname ? nickToId.get(r.nickname) : undefined) ??
           (r.staffName ? nickToId.get(r.staffName) : undefined) ??
+          (r.staffName ? opToId.get(r.staffName) : undefined) ??
           null;
         if (accId == null || !idSet.has(accId)) continue;
-        mddLeadHit += 1;
+        staffHit += 1;
         bump(accId, (a) => {
-          a.pm_inquiries += 1;
-          if (r.clientMessageCount > 0) a.pm_openings += 1;
-          if (r.isResource) a.pm_leads += 1;
+          a.pm_inquiries += r.messageOpenCnt;
+          a.pm_openings += r.messageDrivingOpenCnt;
+          a.pm_leads += r.msgLeadsNum;
         });
       }
-      if (mddLeadRows.length) metric_source += '+mdd_laigu_sessions';
+      if (staffRows.length) metric_source += '+spark_staff_matrix';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {

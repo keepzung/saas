@@ -45,6 +45,9 @@
           <template v-else-if="isDf && column.key === 'ad_fee'">
             {{ record.ad_fee == null ? '—' : '¥' + Number(record.ad_fee).toLocaleString() }}
           </template>
+          <template v-else-if="isMdd && column.key === 'fee_alloc'">
+            ¥{{ Number(record.fee_alloc || 0).toLocaleString() }}
+          </template>
         </template>
       </a-table>
     </a-card>
@@ -118,6 +121,7 @@ const props = defineProps({
 const auth = useAuthStore();
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const isTesla = Number(auth.currentBrandId) === 6;
+const isMdd = Number(auth.currentBrandId) === 5;
 const CROWNS = ['👑', '🥈', '🥉'];
 const pageTitle = computed(() => props.embeddedTitle || '区域数据分析');
 
@@ -246,6 +250,8 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
   col('私信留资', 'pm_leads', 96),
+  // Morgandada：投流花费（星火品牌级消耗按门店曝光占比分摊）
+  ...(isMdd ? [col('投流花费', 'fee_alloc', 110)] : []),
 ]));
 
 const tagColumns = computed(() => [
@@ -324,6 +330,7 @@ const toRows = (list, nameKey) =>
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
     私信留资: r.pm_leads,
+    ...(isMdd ? { 投流花费: r.fee_alloc } : {}),
   }));
 
 function exportAll() {

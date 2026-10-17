@@ -1704,6 +1704,75 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           }
         : null;
 
+    // Morgandada(5)：自然流口径（笔记报表 is_rtb_adver=false，发布窗口内按发布日归组），供三口径切换
+    let organic: {
+      note_cnt: number;
+      exposure: number;
+      views: number;
+      interaction: number;
+      follow: number;
+      trend: { date: string; note_cnt: number; exposure: number; views: number; interaction: number }[];
+    } | null = null;
+    if (brandId === 5) {
+      const organicRows = await this.prisma.koxNote.findMany({
+        where: {
+          brandId: 5,
+          isRtbAdver: false,
+          publishTime: { gte: start, lte: end },
+        },
+        select: {
+          publishTime: true,
+          exposure: true,
+          views: true,
+          likes: true,
+          comments: true,
+          shares: true,
+          collects: true,
+          followCount: true,
+        },
+      });
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      const dayMapO = new Map<string, { note_cnt: number; exposure: number; views: number; interaction: number }>();
+      let oExposure = 0;
+      let oViews = 0;
+      let oInteraction = 0;
+      for (const n of organicRows) {
+        const key = n.publishTime ? dayKey08(n.publishTime) : '未知';
+        const cur = dayMapO.get(key) ?? { note_cnt: 0, exposure: 0, views: 0, interaction: 0 };
+        cur.note_cnt += 1;
+        cur.exposure += n.exposure;
+        cur.views += n.views;
+        cur.interaction += n.likes + n.comments + n.shares + n.collects;
+        dayMapO.set(key, cur);
+        oExposure += n.exposure;
+        oViews += n.views;
+        oInteraction += n.likes + n.comments + n.shares + n.collects;
+      }
+      const trendO: { date: string; note_cnt: number; exposure: number; views: number; interaction: number }[] = [];
+      const startDayO = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      for (let guard = 0; guard < 366; guard++) {
+        const key = `${startDayO.getFullYear()}-${pad2(startDayO.getMonth() + 1)}-${pad2(startDayO.getDate())}`;
+        const v = dayMapO.get(key);
+        trendO.push({
+          date: key,
+          note_cnt: v?.note_cnt ?? 0,
+          exposure: v?.exposure ?? 0,
+          views: v?.views ?? 0,
+          interaction: v?.interaction ?? 0,
+        });
+        if (key >= dayKey08(end)) break;
+        startDayO.setDate(startDayO.getDate() + 1);
+      }
+      organic = {
+        note_cnt: organicRows.length,
+        exposure: oExposure,
+        views: oViews,
+        interaction: oInteraction,
+        follow: organicRows.reduce((a, r) => a + r.followCount, 0),
+        trend: trendO,
+      };
+    }
+
     return {
       start: dayKey08(start),
       end: dayKey08(end),
@@ -1711,6 +1780,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       promo_note_cnt,
       platform,
       coverage,
+      // Morgandada(5)：自然流口径块（笔记 is_rtb_adver=false，按发布窗口），供三口径切换
+      organic,
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,

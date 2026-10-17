@@ -45,9 +45,23 @@
     />
 
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
-      <div class="section-title"><span class="bar"></span>投流情况总览</div>
+      <div class="section-title">
+        <span class="bar"></span>投流情况总览
+        <a-segmented
+          v-if="isMdd"
+          v-model:value="caliber"
+          size="small"
+          style="margin-left: 14px"
+          :options="[
+            { label: '自然流', value: 'organic' },
+            { label: '聚光投放', value: 'juguang' },
+            { label: '汇总', value: 'total' },
+          ]"
+          @change="renderCharts"
+        />
+      </div>
 
-      <div class="hero-row">
+      <div class="hero-row" v-if="caliber !== 'organic'">
         <div class="hero-item">
           <div class="hero-label">
             总消耗（元）
@@ -68,8 +82,25 @@
           <div class="hero-value hl-violet">{{ heroLeadCost }}</div>
         </div>
       </div>
+      <div class="hero-row" v-else>
+        <div class="hero-item">
+          <div class="hero-label">自然笔记数</div>
+          <div class="hero-value hl-blue">{{ fmtNum(organicSummary?.note_cnt ?? 0) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">自然曝光</div>
+          <div class="hero-value hl-green">{{ fmtNum(organicSummary?.exposure ?? 0) }}</div>
+        </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">自然阅读</div>
+          <div class="hero-value hl-violet">{{ fmtNum(organicSummary?.views ?? 0) }}</div>
+        </div>
+      </div>
 
-      <div class="metric-grid">
+      <!-- 聚光口径 / 汇总：聚光投放指标卡 -->
+      <div class="metric-grid" v-if="caliber !== 'organic'">
         <div class="metric-card">
           <div class="metric-label">
             投流内容数
@@ -89,16 +120,16 @@
           <div class="metric-value">{{ fmtNum(summary.account_num) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">总曝光</div>
-          <div class="metric-value">{{ fmtWan(summary.impression) }}</div>
+          <div class="metric-label">{{ caliber === 'total' ? '总曝光（投+自）' : '总曝光' }}</div>
+          <div class="metric-value">{{ fmtWan(displayMetrics.impression) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">总点击</div>
-          <div class="metric-value">{{ fmtWan(summary.click) }}</div>
+          <div class="metric-label">{{ caliber === 'total' ? '自然阅读' : '总点击' }}</div>
+          <div class="metric-value">{{ fmtWan(displayMetrics.views) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">总点击率</div>
-          <div class="metric-value">{{ summary.ctr }}%</div>
+          <div class="metric-label">{{ caliber === 'total' ? '总互动（投+自）' : '总点击率' }}</div>
+          <div class="metric-value">{{ caliber === 'total' ? fmtWan(displayMetrics.interaction) : summary.ctr + '%' }}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">私信进线数</div>
@@ -113,8 +144,31 @@
           <div class="metric-value">{{ fmtNum(summary.msg_leads) }}</div>
         </div>
       </div>
+      <!-- 自然流口径：自然内容指标卡 -->
+      <div class="metric-grid" v-else>
+        <div class="metric-card">
+          <div class="metric-label">自然笔记数</div>
+          <div class="metric-value">{{ fmtNum(organicSummary?.note_cnt ?? 0) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">自然曝光</div>
+          <div class="metric-value">{{ fmtWan(organicSummary?.exposure ?? 0) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">自然阅读</div>
+          <div class="metric-value">{{ fmtWan(organicSummary?.views ?? 0) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">自然互动</div>
+          <div class="metric-value">{{ fmtWan(organicSummary?.interaction ?? 0) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">自然涨粉</div>
+          <div class="metric-value">{{ fmtNum(organicSummary?.follow ?? 0) }}</div>
+        </div>
+      </div>
 
-      <div class="metric-grid metric-grid-5">
+      <div class="metric-grid metric-grid-5" v-if="caliber !== 'organic'">
         <div class="metric-card">
           <div class="metric-label">点击成本</div>
           <div class="metric-value">{{ summary.click ? fmtNum(summary.cpc) : '—' }}</div>
@@ -138,11 +192,11 @@
       </div>
 
       <div class="charts-row">
-        <a-card :bordered="false" size="small" class="chart-card">
+        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber !== 'organic'">
           <template #title><div class="chart-title"><span class="bar"></span>消费趋势</div></template>
           <div :ref="(el) => (consumeEl = el)" class="chart-area" />
         </a-card>
-        <a-card :bordered="false" size="small" class="chart-card">
+        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber !== 'organic'">
           <template #title>
             <div class="chart-title-wrap">
               <div class="chart-title"><span class="bar"></span>私信留资数趋势</div>
@@ -154,6 +208,10 @@
             </div>
           </template>
           <div :ref="(el) => (leadsEl = el)" class="chart-area" />
+        </a-card>
+        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber === 'organic'" style="width: 100%">
+          <template #title><div class="chart-title"><span class="bar"></span>自然流趋势（按发布日）</div></template>
+          <div :ref="(el) => (organicEl = el)" class="chart-area" />
         </a-card>
       </div>
     </a-card>
@@ -346,6 +404,9 @@ import { useAuthStore } from '../../stores/auth';
 const auth = useAuthStore();
 // 特斯拉按客户要求隐藏「按账号汇总」页签
 const isTesla = computed(() => (auth.currentBrandId ?? 0) === 6);
+// Morgandada：投放三口径切换（自然流 / 聚光投放 / 汇总）
+const isMdd = computed(() => (auth.currentBrandId ?? 0) === 5);
+const caliber = ref('juguang');
 const PAGE_SIZE = 10;
 
 /* ---------- 演示模式（表空回退） ---------- */
@@ -370,6 +431,26 @@ const summary = ref({});
 const trend = ref([]);
 const platform = ref(null);
 const coverage = ref(null);
+const organicSummary = ref(null);
+const organicEl = ref(null);
+let organicChart = null;
+
+// 三口径展示值：聚光=报表原值；自然流=自然块；汇总=投+自相加（消耗仅聚光有）
+const displayMetrics = computed(() => {
+  const s = summary.value ?? {};
+  const o = organicSummary.value ?? {};
+  if (caliber.value === 'organic') {
+    return { impression: o.exposure ?? 0, views: o.views ?? 0, interaction: o.interaction ?? 0 };
+  }
+  if (caliber.value === 'total') {
+    return {
+      impression: Number(s.impression ?? 0) + Number(o.exposure ?? 0),
+      views: Number(o.views ?? 0),
+      interaction: Number(s.interaction ?? 0) + Number(o.interaction ?? 0),
+    };
+  }
+  return { impression: s.impression ?? 0, views: s.click ?? 0, interaction: s.interaction ?? 0 };
+});
 const accountRows = ref([]);
 const accountTotal = ref(0);
 const exporting = ref(false);
@@ -455,6 +536,7 @@ function applyData(sumRes, listRes) {
   trend.value = sumRes.trend ?? [];
   platform.value = sumRes.platform ?? null;
   coverage.value = sumRes.coverage ?? null;
+  organicSummary.value = sumRes.organic ?? null;
   accountTotal.value = listRes.total ?? 0;
   accountRows.value = listRes.list ?? [];
   nextTick(renderCharts);
@@ -540,6 +622,10 @@ function areaOption(dates, values, name, yName) {
 
 function renderCharts() {
   const dates = trend.value.map((t) => t.date);
+  if (isMdd.value && caliber.value === 'organic') {
+    renderOrganicTrend();
+    return;
+  }
   if (consumeEl.value) {
     if (!consumeChart) consumeChart = echarts.init(consumeEl.value);
     consumeChart.setOption(areaOption(dates, trend.value.map((t) => t.fee), '总消费', '元'), { notMerge: true });
@@ -552,9 +638,34 @@ function renderCharts() {
   }
 }
 
+/** Morgandada 自然流趋势（按笔记发布日） */
+function renderOrganicTrend() {
+  if (!organicEl.value) return;
+  if (!organicChart) organicChart = echarts.init(organicEl.value);
+  const o = organicSummary.value ?? {};
+  const t = o.trend ?? [];
+  const dates = t.map((x) => x.date);
+  organicChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, data: ['自然曝光', '自然阅读', '自然互动'] },
+      grid: { left: 60, right: 30, top: 24, bottom: 46 },
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: { type: 'value' },
+      series: [
+        { name: '自然曝光', type: 'line', smooth: true, showSymbol: false, itemStyle: { color: '#3456e6' }, data: t.map((x) => x.exposure ?? 0) },
+        { name: '自然阅读', type: 'line', smooth: true, showSymbol: false, itemStyle: { color: '#10b981' }, data: t.map((x) => x.views ?? 0) },
+        { name: '自然互动', type: 'line', smooth: true, showSymbol: false, itemStyle: { color: '#f59e0b' }, data: t.map((x) => x.interaction ?? 0) },
+      ],
+    },
+    { notMerge: true },
+  );
+}
+
 function onResize() {
   consumeChart?.resize();
   leadsChart?.resize();
+  organicChart?.resize();
 }
 
 /* ---------- Excel 导出 ---------- */
