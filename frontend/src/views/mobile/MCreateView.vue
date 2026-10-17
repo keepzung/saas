@@ -64,6 +64,7 @@
           <span v-for="t in tags" :key="t">#{{ t }}</span>
         </div>
       </div>
+      <a-button block style="margin-top: 10px" @click="step = 1">上一步</a-button>
       <a-button block :loading="generating" style="margin-top: 10px" @click="regenerate">换一版</a-button>
       <a-button type="primary" block size="large" class="go-btn" @click="step = 3">
         确认点击下一步
@@ -85,6 +86,7 @@
           <span v-if="img._sel" class="sel-badge">{{ selOrder(img) }}</span>
         </div>
       </div>
+      <a-button block style="margin-top: 10px" @click="step = 2">上一步</a-button>
       <a-button block style="margin-top: 10px" :loading="matching" @click="loadPool(true)">换一批图片</a-button>
       <a-button type="primary" block size="large" class="go-btn" :disabled="!selCount" @click="step = 4">
         自动生成（{{ selCount }} 张）
@@ -100,6 +102,7 @@
         <div class="pv-tags"><span v-for="t in tags" :key="t">#{{ t }}</span></div>
       </div>
       <a-space direction="vertical" style="width: 100%; margin-top: 12px" :size="10">
+        <a-button block @click="step = 3">上一步（修改标题 / 配图）</a-button>
         <a-button type="primary" block size="large" :loading="publishing" @click="publish">
           <SendOutlined /> 保存草稿，去小红书发布
         </a-button>
