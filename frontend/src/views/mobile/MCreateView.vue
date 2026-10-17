@@ -101,6 +101,36 @@
         <div class="pv-body">{{ content }}</div>
         <div class="pv-tags"><span v-for="t in tags" :key="t">#{{ t }}</span></div>
       </div>
+      <!-- 标题与话题编辑：发布前可增删话题、修改标题（完成判定：话题标签或标题含任务指定话题） -->
+      <div class="pub-edit">
+        <div class="pe-label">标题（发布前可修改）</div>
+        <a-input v-model:value="titles[selectedTitle]" :maxlength="20" show-count />
+        <div class="pe-label" style="margin-top: 10px">
+          话题标签（点 × 删除）
+          <template v-if="missingTaskHashtags.length">
+            <a-button
+              v-for="h in missingTaskHashtags"
+              :key="h"
+              size="small"
+              style="margin-left: 6px"
+              @click="addHashtag(h)"
+            >+#{{ h }}</a-button>
+          </template>
+        </div>
+        <div class="tags-edit-row">
+          <a-tag v-for="(t, i) in tags" :key="t + i" closable @close="tags.splice(i, 1)">#{{ t }}</a-tag>
+          <a-input
+            v-if="tagAdding"
+            v-model:value="tagDraft"
+            size="small"
+            style="width: 110px"
+            placeholder="输入话题"
+            @pressEnter="addTag"
+            @blur="addTag"
+          />
+          <a-button v-else size="small" @click="tagAdding = true"><PlusOutlined /> 加话题</a-button>
+        </div>
+      </div>
       <a-space direction="vertical" style="width: 100%; margin-top: 12px" :size="10">
         <a-button block @click="step = 3">上一步（修改标题 / 配图）</a-button>
         <a-button type="primary" block size="large" :loading="publishing" @click="publish">
@@ -120,7 +150,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
-import { CopyOutlined, DownloadOutlined, SendOutlined } from '@ant-design/icons-vue';
+import { CopyOutlined, DownloadOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons-vue';
 import { useAuthStore } from '../../stores/auth';
 import { getProducts } from '../../api/content';
 import {
@@ -284,6 +314,24 @@ const copyText = async () => {
 
 const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
 const downloadingImg = ref(false);
+// 发布页话题/标题编辑
+const tagAdding = ref(false);
+const tagDraft = ref('');
+// 任务指定话题中尚未加入标签的（一键补齐）
+const missingTaskHashtags = computed(() => {
+  const hs = task.value?.hashtags ?? [];
+  return hs.filter((h) => !tags.value.includes(h));
+});
+const addHashtag = (h) => {
+  const v = String(h).trim().replace(/^#/, '');
+  if (v && !tags.value.includes(v)) tags.value.push(v);
+};
+const addTag = () => {
+  const v = tagDraft.value.trim().replace(/^#/, '');
+  if (v && !tags.value.includes(v)) tags.value.push(v);
+  tagDraft.value = '';
+  tagAdding.value = false;
+};
 
 const saveBlob = (blob, filename) => {
   const url = URL.createObjectURL(blob);
@@ -658,5 +706,30 @@ onMounted(async () => {
   padding: 10px 12px;
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+.pub-edit {
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.pe-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.tags-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tags-edit-row :deep(.ant-tag) {
+  margin: 0;
 }
 </style>
