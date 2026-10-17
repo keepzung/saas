@@ -1662,6 +1662,57 @@ export class ContentproService {
     };
   }
 
+  /** 修改任务（仅任务信息；派发对象与状态不可改；作废任务拒改） */
+  async updateContentTask(brandId: number, id: number, dto: {
+    name?: string;
+    startTime?: string;
+    endTime?: string;
+    platform?: string;
+    hashtags?: string[];
+    requireMinWords?: number | null;
+    requireMinImages?: number | null;
+    exampleImages?: string[];
+    exampleLink?: string;
+    instructions?: string;
+    reward?: string;
+  }, role?: string) {
+    if (role && !['ADMIN', 'MANAGER'].includes(role)) {
+      throw new ForbiddenException('仅管理员可修改任务');
+    }
+    const t = await this.prisma.contentTask.findUnique({ where: { id } });
+    if (!t || t.brandId !== brandId) throw new NotFoundException('任务不存在');
+    if (t.status === 'voided') throw new BadRequestException('已作废任务不可修改');
+
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    let start = t.startTime;
+    let end = t.endTime;
+    if (dto.startTime !== undefined) {
+      start = new Date(dto.startTime);
+      if (Number.isNaN(start.getTime())) throw new BadRequestException('开始时间不合法');
+      data.startTime = start;
+    }
+    if (dto.endTime !== undefined) {
+      end = new Date(dto.endTime);
+      if (Number.isNaN(end.getTime())) throw new BadRequestException('结束时间不合法');
+      data.endTime = end;
+    }
+    if (end <= start) throw new BadRequestException('结束时间必须晚于开始时间');
+    if (dto.platform !== undefined) data.platform = dto.platform;
+    if (dto.hashtags !== undefined) {
+      data.hashtags = dto.hashtags.map((h) => String(h).trim().replace(/^#/, '')).filter(Boolean);
+    }
+    if (dto.requireMinWords !== undefined) data.requireMinWords = dto.requireMinWords || null;
+    if (dto.requireMinImages !== undefined) data.requireMinImages = dto.requireMinImages || null;
+    if (dto.exampleImages !== undefined) data.exampleImages = dto.exampleImages;
+    if (dto.exampleLink !== undefined) data.exampleLink = dto.exampleLink || null;
+    if (dto.instructions !== undefined) data.instructions = dto.instructions || null;
+    if (dto.reward !== undefined) data.reward = dto.reward || null;
+
+    await this.prisma.contentTask.update({ where: { id }, data });
+    return { id, updated: true };
+  }
+
   async voidContentTask(brandId: number, id: number, role?: string) {
     if (role && !['ADMIN', 'MANAGER'].includes(role)) {
       throw new ForbiddenException('仅管理员可作废任务');

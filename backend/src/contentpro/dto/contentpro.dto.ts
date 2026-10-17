@@ -130,7 +130,7 @@ export class UpdateHistoryContentDto {
   @IsOptional() coverUrl?: string | null;
 }
 
-// ─── 内容创作任务（任务分发）─────────────────────────────────────────
+/** 任务修改（派发对象与状态不可改） */
 export class ContentTaskDto {
   @IsString() @MaxLength(80) name: string;
   @IsString() startTime: string;
@@ -150,6 +150,21 @@ export class ContentTaskDto {
   @IsOptional() @IsInt() requireMinWords?: number | null;
   /** 创作要求：配图最少张数（空=不要求） */
   @IsOptional() @IsInt() requireMinImages?: number | null;
+}
+
+/** 任务修改（派发对象与状态不可改） */
+export class UpdateContentTaskDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsString() startTime?: string;
+  @IsOptional() @IsString() endTime?: string;
+  @IsOptional() @IsString() platform?: string;
+  @IsOptional() hashtags?: string[];
+  @IsOptional() @IsInt() requireMinWords?: number | null;
+  @IsOptional() @IsInt() requireMinImages?: number | null;
+  @IsOptional() exampleImages?: string[];
+  @IsOptional() @IsString() exampleLink?: string;
+  @IsOptional() @IsString() instructions?: string;
+  @IsOptional() @IsString() reward?: string;
 }
 
 // ─── 配图打包下载 ────────────────────────────────────────────────────

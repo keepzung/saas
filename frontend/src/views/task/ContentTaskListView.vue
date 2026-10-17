@@ -51,6 +51,7 @@
             <div class="tcard-ops">
               <template v-if="!isEmployee">
                 <a-button size="small" type="primary" @click="goDetail(t)">查看详情</a-button>
+                <a-button v-if="t.effective_status !== 'voided'" size="small" @click="goEdit(t)">修改</a-button>
                 <a-button v-if="t.effective_status !== 'voided'" size="small" danger @click="voidTask(t)">任务作废</a-button>
                 <a-button size="small" @click="exportTask(t)">导出数据</a-button>
               </template>
@@ -188,6 +189,7 @@ const onTableChange = (p) => {
 };
 
 const goDetail = (t) => router.push(`/kox_task/content-task/task-detail?id=${t.id}`);
+const goEdit = (t) => router.push(`/kox_task/content-task/create-task?id=${t.id}`);
 
 const voidTask = (t) => {
   Modal.confirm({

@@ -1,13 +1,14 @@
 <template>
-  <PageWrapper title="新建任务" subtitle="创建各种类型的任务并下发给不同区域账号，销售终端会收到实时的任务推送。">
+  <PageWrapper :title="editId ? '修改任务' : '新建任务'" :subtitle="editId ? '修改任务信息（派发对象创建后不可更改）；保存后完成度将按新口径重新计算。' : '创建各种类型的任务并下发给不同区域账号，销售终端会收到实时的任务推送。'">
     <template #extra>
       <a-space>
         <a-button @click="$router.push('/kox_task/content-task/task-list')">取消</a-button>
-        <a-button type="primary" :loading="submitting" @click="submit">提 交</a-button>
+        <a-button type="primary" :loading="submitting" @click="submit">{{ editId ? '保 存' : '提 交' }}</a-button>
       </a-space>
     </template>
 
     <div class="ct-body">
+      <a-alert v-if="editId" type="info" show-icon style="margin-bottom: 14px" message="编辑模式：派发对象（矩阵号/员工）创建后不可修改；时间与话题的变更会影响完成度重新计算。" />
       <div class="sec">
         <div class="sec-title"><span class="bar" /> 任务基本信息</div>
         <div class="form-row">
@@ -18,52 +19,54 @@
           <span class="form-label"><i>*</i> 任务持续时间：</span>
           <a-range-picker v-model:value="form.range" value-format="YYYY-MM-DD" style="width: 320px" />
         </div>
-        <div class="form-row">
-          <span class="form-label"><i>*</i> 参与任务的团队：</span>
-          <a-radio-group v-model:value="form.scopeType" @change="onScopeChange">
-            <a-radio value="all">全部大区</a-radio>
-            <a-radio value="regions">指定大区</a-radio>
-            <a-radio value="users">指定员工</a-radio>
-          </a-radio-group>
-          <a-select
-            v-if="form.scopeType === 'regions'"
-            v-model:value="form.regions"
-            mode="multiple"
-            style="width: 320px"
-            placeholder="选择大区"
-            :options="regionOptions"
-          />
-          <a-select
-            v-if="form.scopeType === 'users'"
-            v-model:value="form.userIds"
-            mode="multiple"
-            show-search
-            allow-clear
-            style="width: 420px"
-            placeholder="按姓名 / 手机号搜索并选择员工"
-            :options="candidateOptions"
-            :filter-option="filterCandidate"
-          />
-        </div>
-        <div class="form-row" v-if="form.scopeType !== 'users'">
-          <span class="form-label"><i>*</i> 账号类型：</span>
-          <a-radio-group v-model:value="form.accountType">
-            <a-radio value="">不限</a-radio>
-            <a-radio value="KOS">仅KOS</a-radio>
-            <a-radio value="KOB">仅KOB</a-radio>
-            <a-radio value="素人">仅素人</a-radio>
-          </a-radio-group>
-        </div>
-        <div class="form-row">
-          <span class="form-label"><i>*</i> 任务目标平台：</span>
-          <a-checkbox-group v-model:value="form.platforms" :options="[{ label: '小红书', value: 'xhs' }]" />
-          <span class="form-hint">所勾选的平台的社媒账号参与与考核</span>
-        </div>
-        <div class="form-row">
-          <span class="form-label">预估参与：</span>
-          <span v-if="form.scopeType === 'users'" class="estimate">{{ form.userIds.length }} 名员工将参与该任务</span>
-          <span v-else class="estimate">{{ previewCount }} 个账号将参与该任务</span>
-        </div>
+        <template v-if="!editId">
+          <div class="form-row">
+            <span class="form-label"><i>*</i> 参与任务的团队：</span>
+            <a-radio-group v-model:value="form.scopeType" @change="onScopeChange">
+              <a-radio value="all">全部大区</a-radio>
+              <a-radio value="regions">指定大区</a-radio>
+              <a-radio value="users">指定员工</a-radio>
+            </a-radio-group>
+            <a-select
+              v-if="form.scopeType === 'regions'"
+              v-model:value="form.regions"
+              mode="multiple"
+              style="width: 320px"
+              placeholder="选择大区"
+              :options="regionOptions"
+            />
+            <a-select
+              v-if="form.scopeType === 'users'"
+              v-model:value="form.userIds"
+              mode="multiple"
+              show-search
+              allow-clear
+              style="width: 420px"
+              placeholder="按姓名 / 手机号搜索并选择员工"
+              :options="candidateOptions"
+              :filter-option="filterCandidate"
+            />
+          </div>
+          <div class="form-row" v-if="form.scopeType !== 'users'">
+            <span class="form-label"><i>*</i> 账号类型：</span>
+            <a-radio-group v-model:value="form.accountType">
+              <a-radio value="">不限</a-radio>
+              <a-radio value="KOS">仅KOS</a-radio>
+              <a-radio value="KOB">仅KOB</a-radio>
+              <a-radio value="素人">仅素人</a-radio>
+            </a-radio-group>
+          </div>
+          <div class="form-row">
+            <span class="form-label"><i>*</i> 任务目标平台：</span>
+            <a-checkbox-group v-model:value="form.platforms" :options="[{ label: '小红书', value: 'xhs' }]" />
+            <span class="form-hint">所勾选的平台的社媒账号参与与考核</span>
+          </div>
+          <div class="form-row">
+            <span class="form-label">预估参与：</span>
+            <span v-if="form.scopeType === 'users'" class="estimate">{{ form.userIds.length }} 名员工将参与该任务</span>
+            <span v-else class="estimate">{{ previewCount }} 个账号将参与该任务</span>
+          </div>
+        </template>
       </div>
 
       <div class="sec">
@@ -160,7 +163,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import {
   UploadOutlined,
@@ -171,13 +174,16 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { createContentTask, getTaskCandidates, uploadTaskDoc } from '../../api/contentpro';
+import { createContentTask, getTaskCandidates, uploadTaskDoc, updateContentTask, getContentTaskDetail } from '../../api/contentpro';
 import { getKoxAccounts } from '../../api/kox';
 import { uploadMaterialImage } from '../../api/contentpro';
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
+// 编辑模式：?id=任务ID（派发对象不可改，仅任务信息）
+const editId = computed(() => (route.query.id ? Number(route.query.id) : null));
 
 const form = ref({
   name: '',
@@ -293,42 +299,73 @@ const submit = async () => {
   }
   submitting.value = true;
   try {
-    const res = await createContentTask(
-      {
-        name: form.value.name.trim(),
-        startTime: form.value.range[0],
-        endTime: form.value.range[1],
-        platform: form.value.platforms[0] ?? 'xhs',
-        scopeType: form.value.scopeType,
-        regions: form.value.scopeType === 'regions' ? form.value.regions : [],
-        accountTypes: form.value.scopeType === 'users' ? [] : form.value.accountType ? [form.value.accountType] : [],
-        userIds: form.value.scopeType === 'users' ? form.value.userIds : undefined,
-        hashtags: form.value.hashtags.map((h) => String(h).trim().replace(/^#/, '')).filter(Boolean),
-        requireMinWords: form.value.requireMinWords ?? undefined,
-        requireMinImages: form.value.requireMinImages ?? undefined,
-        exampleImages: [
-          ...form.value.exampleImages,
-          ...form.value.exampleDocs.map((d) => d.url),
-        ],
-        exampleLink: form.value.exampleLink || undefined,
-        instructions: form.value.instructions || undefined,
-        reward: form.value.reward || undefined,
-      },
-      { brandId: brandId.value },
-    );
-    const total = (res?.user_total ?? 0) + (res?.account_total ?? 0);
-    message.success(`任务已创建，${total} 个对象参与`);
+    const infoPayload = {
+      name: form.value.name.trim(),
+      startTime: form.value.range[0],
+      endTime: form.value.range[1],
+      platform: form.value.platforms[0] ?? 'xhs',
+      hashtags: form.value.hashtags.map((h) => String(h).trim().replace(/^#/, '')).filter(Boolean),
+      requireMinWords: form.value.requireMinWords ?? undefined,
+      requireMinImages: form.value.requireMinImages ?? undefined,
+      exampleImages: [
+        ...form.value.exampleImages,
+        ...form.value.exampleDocs.map((d) => d.url),
+      ],
+      exampleLink: form.value.exampleLink || undefined,
+      instructions: form.value.instructions || undefined,
+      reward: form.value.reward || undefined,
+    };
+    if (editId.value) {
+      await updateContentTask(editId.value, infoPayload, { brandId: brandId.value });
+      message.success('任务已更新');
+    } else {
+      const res = await createContentTask(
+        {
+          ...infoPayload,
+          scopeType: form.value.scopeType,
+          regions: form.value.scopeType === 'regions' ? form.value.regions : [],
+          accountTypes: form.value.scopeType === 'users' ? [] : form.value.accountType ? [form.value.accountType] : [],
+          userIds: form.value.scopeType === 'users' ? form.value.userIds : undefined,
+        },
+        { brandId: brandId.value },
+      );
+      const total = (res?.user_total ?? 0) + (res?.account_total ?? 0);
+      message.success(`任务已创建，${total} 个对象参与`);
+    }
     router.push('/kox_task/content-task/task-list');
   } catch (e) {
-    message.error(e?.response?.data?.msg ?? '创建失败');
+    message.error(e?.response?.data?.msg ?? (editId.value ? '保存失败' : '创建失败'));
   } finally {
     submitting.value = false;
+  }
+};
+
+const loadForEdit = async () => {
+  try {
+    const t = await getContentTaskDetail(editId.value, { brandId: brandId.value });
+    form.value.name = t?.name ?? '';
+    form.value.range = t?.start_time && t?.end_time ? [t.start_time.slice(0, 10), t.end_time.slice(0, 10)] : [];
+    form.value.hashtags = t?.hashtags ?? [];
+    form.value.requireMinWords = t?.require_min_words ?? null;
+    form.value.requireMinImages = t?.require_min_images ?? null;
+    form.value.exampleImages = (t?.example_images ?? []).filter((u) => !/\.pdf($|\?)/i.test(u));
+    form.value.exampleDocs = (t?.example_images ?? [])
+      .filter((u) => /\.pdf($|\?)/i.test(u))
+      .map((u) => ({ url: u, name: '示例文档.pdf' }));
+    form.value.exampleLink = t?.example_link ?? '';
+    form.value.instructions = t?.instructions ?? '';
+    form.value.reward = t?.reward ?? '';
+    form.value.platforms = [t?.platform ?? 'xhs'];
+  } catch (e) {
+    message.error('任务加载失败');
+    router.push('/kox_task/content-task/task-list');
   }
 };
 
 onMounted(() => {
   loadAccounts();
   loadCandidates();
+  if (editId.value) loadForEdit();
 });
 </script>
 

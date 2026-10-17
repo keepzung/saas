@@ -40,6 +40,7 @@ import {
   RejectDto,
   SaveArticleDto,
   StrategyDto,
+  UpdateContentTaskDto,
   UpdateHistoryContentDto,
 } from './dto/contentpro.dto';
 
@@ -494,6 +495,17 @@ export class ContentproController {
   @Get('content-tasks/:id')
   contentTaskDetail(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
     return this.service.contentTaskDetail(Number(brandId ?? 1), id);
+  }
+
+  @Put('content-tasks/:id')
+  updateContentTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateContentTaskDto,
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+  ) {
+    const user = req.user as { id: number; role: string };
+    return this.service.updateContentTask(Number(brandId ?? 1), id, dto, user.role);
   }
 
   @Post('content-tasks/:id/void')
