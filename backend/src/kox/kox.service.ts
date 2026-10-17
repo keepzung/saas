@@ -2033,16 +2033,18 @@ export class KoxService {
       for (const r of prevRows) addRow(prevMap, r.account, r);
     }
 
-    // Morgandada(5)：私信三数叠加（星火员工矩阵按账号 → 维度聚合）+ 投流花费按曝光占比分摊
+    // Morgandada(5)：私信三数叠加（星火员工矩阵按账号 → 维度聚合）+ 投流花费按账号 UID 真实归属（rtbIncomeAmt）
     if (Number(query.brandId) === 5) {
       const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
         where: { brandId: 5, statDate: { gte: start, lte: end } },
         select: {
+          userId: true,
           staffName: true,
           nickname: true,
           messageOpenCnt: true,
           messageDrivingOpenCnt: true,
           msgLeadsNum: true,
+          rtbIncomeAmt: true,
         },
       });
       const mddAccounts = await this.prisma.kosAccount.findMany({
@@ -2056,14 +2058,22 @@ export class KoxService {
           saleArea: true,
           areaName: true,
           accountTag: true,
+          authorUrl: true,
         },
       });
+      // uid（小红书 userid）→ 账号：客户底表 UID↔门店对应关系的库内映射
+      const mddUidToAcc = new Map<string, (typeof mddAccounts)[number]>();
+      for (const a of mddAccounts) {
+        const uid = (a.authorUrl ?? '').match(/\/profile\/([0-9a-zA-Z]+)$/)?.[1];
+        if (uid) mddUidToAcc.set(uid, a);
+      }
       const mddNickToAcc = new Map(mddAccounts.map((a) => [a.nickname, a]));
       const mddOpToAcc = new Map(
         mddAccounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a]),
       );
       for (const r of staffRows) {
         const acct =
+          mddUidToAcc.get(r.userId) ??
           (r.nickname ? mddNickToAcc.get(r.nickname) : undefined) ??
           (r.staffName ? mddNickToAcc.get(r.staffName) : undefined) ??
           (r.staffName ? mddOpToAcc.get(r.staffName) : undefined);
@@ -2075,24 +2085,8 @@ export class KoxService {
         g.pm_inquiries += r.messageOpenCnt;
         g.pm_openings += r.messageDrivingOpenCnt;
         g.pm_leads += r.msgLeadsNum;
+        g.fee_alloc += Number(r.rtbIncomeAmt ?? 0);
         curMap.set(key, g);
-      }
-      // 投流花费（星火种草账户，品牌级）按各维度曝光占比分摊
-      const feeRows = await this.prisma.koxCampaignDailyStat.findMany({
-        where: { brandId: 5, statDate: { gte: start, lte: end } },
-        select: { fee: true },
-      });
-      const totalFee = Math.round(
-        feeRows.reduce((a, r) => a + Number(r.fee ?? 0), 0),
-      );
-      const totalExposure = [...curMap.values()].reduce(
-        (a, g) => a + g.exposure_sum,
-        0,
-      );
-      if (totalFee > 0 && totalExposure > 0) {
-        for (const g of curMap.values()) {
-          g.fee_alloc = Math.round((totalFee * g.exposure_sum) / totalExposure);
-        }
       }
     }
 
@@ -3029,6 +3023,7 @@ export class KoxService {
         regionName: true,
         storeName: true,
         operatorName: true,
+        authorUrl: true,
         authorId: true,
       },
     });
@@ -3241,19 +3236,28 @@ export class KoxService {
       const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
         where: { brandId: 5, statDate: { gte: start, lte: end } },
         select: {
+          userId: true,
           staffName: true,
           nickname: true,
           messageOpenCnt: true,
           messageDrivingOpenCnt: true,
           msgLeadsNum: true,
+          rtbIncomeAmt: true,
         },
       });
       const nickToAcc = new Map(accounts.map((a) => [a.nickname, a]));
       const opToAcc = new Map(
         accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a]),
       );
+      // uid（小红书 userid）→ 账号：客户底表 UID↔门店对应关系的库内映射
+      const uidToAcc = new Map<string, (typeof accounts)[number]>();
+      for (const a of accounts) {
+        const uid = (a.authorUrl ?? '').match(/\/profile\/([0-9a-zA-Z]+)$/)?.[1];
+        if (uid) uidToAcc.set(uid, a);
+      }
       for (const r of staffRows) {
         const acc =
+          uidToAcc.get(r.userId) ??
           (r.nickname ? nickToAcc.get(r.nickname) : undefined) ??
           (r.staffName ? nickToAcc.get(r.staffName) : undefined) ??
           (r.staffName ? opToAcc.get(r.staffName) : undefined);
@@ -3266,16 +3270,15 @@ export class KoxService {
           b.pm_leads += r.msgLeadsNum;
         }
       }
-      // 投流花费（星火种草账户，品牌级）按各门店曝光占比分摊
-      const feeRows = await this.prisma.koxCampaignDailyStat.findMany({
-        where: { brandId: 5, statDate: { gte: start, lte: end } },
-        select: { fee: true },
-      });
-      const totalFee = Math.round(feeRows.reduce((a, r) => a + Number(r.fee ?? 0), 0));
-      const totalExposure = [...groups.values()].reduce((a, g) => a + g.exposure, 0);
-      if (totalFee > 0 && totalExposure > 0) {
-        for (const g of groups.values()) {
-          g.fee_alloc = Math.round((totalFee * g.exposure) / totalExposure);
+      // 投流花费：星火员工矩阵按账号 UID 真实归属（rtbIncomeAmt=该账号投流金额），
+      // UID → KosAccount（authorUrl 主页 id，客户底表 UID↔门店对应）→ 门店/城市汇总
+      for (const r of staffRows) {
+        const acc = uidToAcc.get(r.userId);
+        if (!acc) continue;
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        for (const b of [g, tg]) {
+          b.fee_alloc += Number(r.rtbIncomeAmt ?? 0);
         }
       }
     }
