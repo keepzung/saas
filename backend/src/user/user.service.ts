@@ -211,58 +211,6 @@ export class UserService {
     return 'kos_operator';
   }
 
-  /** 默认模块集（按角色）：KOS 员工=任务派发+内容工厂；项目管理员=管理默认集（任务/KOX/内容工厂管理） */
-  private static readonly KOS_DEFAULT_PATHS = [
-    '/content-pro/content-factory/xhs-image-text-single',
-    '/content-pro/history',
-    '/kox_task/content-task/task-list',
-  ];
-  private static readonly MANAGER_DEFAULT_PATHS = [
-    '/content-pro/workbench',
-    '/content-pro/config/products',
-    '/content-pro/config/material',
-    '/content-pro/config/strategies',
-    '/content-pro/content-factory/xhs-image-text-single',
-    '/content-pro/content-factory/xhs-image-text-batch',
-    '/content-pro/comment',
-    '/content-pro/history',
-    '/content-pro/package',
-    '/content-pro/audit',
-    '/content-pro/claim-log',
-    '/content-pro/hot-content',
-    '/kox_df/operation-analysis/overview',
-    '/kox_df/operation-analysis/dealer-ranking',
-    '/kox_df/operation-analysis/author-ranking',
-    '/kox_df/operation-analysis/note-ranking',
-    '/kox_df/operation-analysis/region-data',
-    '/kox_df/operation-analysis/hot-content',
-    '/kox_df/operation-analysis/feedback',
-    '/kox_df/campaign-analysis/plans',
-    '/kox_df/campaign-analysis/project-reports',
-    '/kox_df/campaign-analysis/cycle-report',
-    '/kox_df/monitoring/list',
-    '/kox_df/monitoring/add',
-    '/kox_df/monitoring/records',
-    '/kox_task/content-task/task-list',
-    '/kox_task/content-task/create-task',
-    '/users/manage',
-  ];
-
-  private async resolveDefaultModuleIds(role: string): Promise<number[]> {
-    const paths =
-      role === 'MANAGER'
-        ? UserService.MANAGER_DEFAULT_PATHS
-        : role === 'SALES'
-          ? UserService.KOS_DEFAULT_PATHS
-          : [];
-    if (!paths.length) return [];
-    const nodes = await this.prisma.moduleNode.findMany({
-      where: { path: { in: paths }, type: 'feature' },
-      select: { id: true },
-    });
-    return nodes.map((n) => n.id);
-  }
-
   async createUser(operatorId: number, dto: CreateUserDto) {
     const operatorRole = await this.assertOperator(operatorId);
     if (operatorRole !== 'ADMIN' && dto.role === 'ADMIN') {
@@ -297,11 +245,7 @@ export class UserService {
       return { ...adopted, adopted: true };
     }
 
-    // 未显式指定模块时按角色给默认集（KOS 员工=任务派发+内容工厂；项目管理员=管理默认集）
-    const defaultModuleIds =
-      dto.moduleIds === undefined && dto.brandId
-        ? await this.resolveDefaultModuleIds(dto.role)
-        : (dto.moduleIds ?? []);
+    // 未显式指定模块 → moduleIds 为空 = 页面空白（严格分配制：需管理员在「分配权限」中授权后才可见业务页面）
     const user = await this.prisma.user.create({
       data: {
         phone: dto.phone,
@@ -310,7 +254,7 @@ export class UserService {
         role: dto.role,
         adminFlag: dto.role === 'ADMIN' ? 1 : 0,
         companyId: 1,
-        moduleIds: defaultModuleIds,
+        moduleIds: dto.moduleIds ?? [],
         createdById: operatorId,
       },
       select: USER_SELECT,
