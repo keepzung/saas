@@ -55,7 +55,15 @@
                 <a-button v-if="t.effective_status !== 'voided'" size="small" danger @click="voidTask(t)">任务作废</a-button>
                 <a-button size="small" @click="exportTask(t)">导出数据</a-button>
               </template>
-              <span v-else class="muted-hint">请在手机端领取任务并创作</span>
+              <a-button
+                v-else-if="t.effective_status === 'active'"
+                type="primary"
+                size="small"
+                @click="goClaim(t)"
+              >
+                领取任务，去创作
+              </a-button>
+              <span v-else class="muted-hint">任务已截止</span>
             </div>
           </div>
         </div>
@@ -190,6 +198,8 @@ const onTableChange = (p) => {
 
 const goDetail = (t) => router.push(`/kox_task/content-task/task-detail?id=${t.id}`);
 const goEdit = (t) => router.push(`/kox_task/content-task/create-task?id=${t.id}`);
+// 员工领取任务：跳转 H5 创作流程（复制文案/保存图片/去小红书发布）
+const goClaim = (t) => router.push({ path: '/m/aigc/create', query: { taskId: t.id } });
 
 const voidTask = (t) => {
   Modal.confirm({
