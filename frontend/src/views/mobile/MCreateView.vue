@@ -8,7 +8,7 @@
         <span class="tcard-time">{{ fmt(task.start_time) }} ~ {{ fmt(task.end_time) }}</span>
       </div>
       <div v-if="task.instructions" class="tcard-line"><span>要求</span>{{ task.instructions }}</div>
-      <div v-if="task.hashtags?.length" class="tcard-line"><span>话题</span>{{ task.hashtags.map((h) => '#' + h).join('  ') }}（标题含话题才算完成）</div>
+      <div v-if="task.hashtags?.length" class="tcard-line"><span>话题</span>{{ task.hashtags.map((h) => '#' + h).join('  ') }}（笔记话题或标题含话题词即算完成）</div>
       <div v-if="task.require_min_words || task.require_min_images" class="tcard-line req">
         <span>创作要求</span>
         {{ [task.require_min_words ? `正文≥${task.require_min_words}字` : '', task.require_min_images ? `配图≥${task.require_min_images}张` : ''].filter(Boolean).join(' · ') }}
