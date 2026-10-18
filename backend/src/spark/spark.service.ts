@@ -136,7 +136,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       where: { syncType: type, statDate, status: 'success', brandId },
     });
     if (!done) return false;
-    if (type === 'notes' && done.fetched === 0) return false;
+    // fetched=0 的"成功"多为平台当日未出数时的空跑，不锁定该日，后续轮次自愈重拉
+    if (done.fetched === 0) return false;
     return true;
   }
 
