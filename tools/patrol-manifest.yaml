@@ -1,0 +1,234 @@
+# ============================================================
+# 数据源巡检清单 — tools/patrol.cjs 引擎的唯一输入
+# 衍生自《小红书数据抓取清单》(2026-10-18 扫描), 为每个数据源补充四层巡检定义:
+#   l1 登录态探活 / l2 接口结构断言 / l3 数据新鲜度 / l4 基线合理性
+# 凭证不入库不入单: {cookie}/{gatewayToken}/{baseUrl} 等占位符由引擎从 DB 配置行注入
+# ============================================================
+manifest_version: 1
+
+meta:
+  报告目录: patrol-reports
+  巡检窗口天数: 9          # L3/L4 扫描窗 (D-8 .. 今天, 按上海自然日)
+  基线天数: 7              # 昨日 vs 前 7 天日均
+  骤降阈值: 0.3            # 昨日 < 基线*0.3 判"骤降"
+  http:
+    超时ms: 15000
+    重试: 2
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    登录跳转正则: "login|passport|signin"
+
+# 品牌显示名兜底 (引擎优先读 DB Brand 表, 查不到才用这里)
+brands:
+  2: 荣威
+  5: Morgandada
+  6: 特斯拉
+  7: 东风奕境
+  8: 格力
+
+# ------------------------------------------------------------
+# 数据源定义
+#   judge 判定优先级: dead(失效) → ok(有效) → unknown(未知); 均未命中视为 unknown
+#   l2 默认仅在 l1 有效时执行; reuse_probe=true 复用 l1 的响应
+# ------------------------------------------------------------
+sources:
+
+  spark_mcc:                        # 聚光/星火 MCC (cookie 存 SparkOrgConfig, keepalive 续期)
+    label: 聚光MCC
+    brands_from:
+      table: SparkOrgConfig
+      where: { active: true, channel: mcc }
+    l1:
+      type: http
+      request:
+        method: GET
+        url: "https://mcc.xiaohongshu.com/api/mcc/board/get_table_latest_calculate_date?tableName=redapp.app_ads_crm_mcc_org_brand_note_df"
+        headers:
+          Cookie: "{cookie}"
+          Referer: "https://mcc.xiaohongshu.com/micro/clues-data"
+      judge:
+        dead:
+          - { status_in: [401, 403] }
+          - { redirect_regex: "login|passport|signin" }
+          - { path: code, equals: 902 }
+          - { paths: [message, msg], regex: "登录已过期|请登录" }
+        ok:
+          - { path: code, equals: 0 }
+      ok_warnings:
+        - { path: data, not_exists: true, reason: "L1 通过但无分区日(分区表无数据?)" }
+    l2:
+      - request:
+          method: POST
+          url: "https://mcc.xiaohongshu.com/api/mcc/board/rtb_metrics"
+          headers:
+            Cookie: "{cookie}"
+            Content-Type: "application/json"
+            Origin: "https://mcc.xiaohongshu.com"
+            Referer: "https://mcc.xiaohongshu.com/micro/aurora-data"
+          body:
+            timeStart: "{yesterday}"
+            timeEnd: "{today}"
+            showStar: false
+            accountOrgCode: "{orgCode}"
+            accountCode: ""
+            pageIndex: 1
+            pageSize: 1
+            tagIds: []
+            launchStatus: ""
+        must_exist: ["data.rtbAccountMetricsVos", "data.total"]
+        must_exist_reason: "L2 rtb_metrics 缺 rtbAccountMetricsVos/total (疑似改版)"
+    l3:
+      sync_log: [campaign, notes, staff_matrix]
+      config_last_sync: [lastSyncAt]
+      freshness:
+        - { label: 员工矩阵, model: SparkStaffUserDaily, date_field: statDate }
+      staleness:
+        - { label: 笔记快照, model: KoxNote, field: updatedAt, max_age_days: 3 }
+    l4:
+      # 不限定 accountKind: MDD 等品牌的日消耗落 agent_sub 行; 仅排除 partner 通道防重复计入
+      - { label: 消耗, model: KoxCampaignDailyStat, date_field: statDate, value_field: fee, where: { accountKind: { not: partner_vseller } } }
+
+  spark_partner:                    # 商业化合作伙伴平台 (brand6 特斯拉, 自动重登)
+    label: 合作伙伴
+    brands_from:
+      table: SparkOrgConfig
+      where: { active: true, channel: partner }
+    l1:
+      type: http
+      request:
+        method: POST
+        url: "https://partner.xiaohongshu.com/api/vision/dashboard/target_detail_list"
+        headers:
+          Cookie: "{cookie}"
+          Content-Type: "application/json"
+          Origin: "https://partner.xiaohongshu.com"
+          Referer: "https://partner.xiaohongshu.com/partner/watch-dashboard"
+        body:
+          reportCode: ""
+          viewAlias: "partner_customerManage_monitorAssistant_vsellerMonitorView"
+          chart: "virtual_seller"
+          dynamicTargets: ["virtual_seller_name", "virtual_seller_id", "pre_1_day_cost"]
+          sorts: [{ sortField: "pre_1_day_cost", sortType: "desc" }]
+          page: { pageNo: 1, pageSize: 1 }
+          frontFilterList: []
+          compFrontFilterList: []
+      judge:
+        dead:
+          - { status_in: [401, 403] }
+          - { redirect_regex: "login|passport|signin" }
+          - { path: msg, regex: "登录|ticket" }
+        ok:
+          - { any_of: [{ path: code, equals: 0 }, { path: success, equals: true }] }
+    l2:
+      - reuse_probe: true
+        list_paths: ["data.detailListVo.detailDataList", "data.detailListVo.detailVoList"]
+        item_array_field: [targetList, targetVos]
+        item_must_have_target_code: pre_1_day_cost
+    l3:
+      sync_log: [campaign]
+      config_last_sync: [lastSyncAt]
+    l4:
+      - { label: 消耗, model: KoxCampaignDailyStat, date_field: statDate, value_field: fee, where: { accountKind: partner_vseller } }
+
+  juguang_note:                     # 聚光标准投笔记报表 (sync-juguang.cjs, 经 partner 跳转)
+    label: 聚光标准投
+    credential_note: "随 partner(brand6)"
+    brands_from: { type: data_presence, table: KoxJuguangNoteDaily, date_field: day, distinct: brandId }
+    l3:
+      sync_log: [juguang_note]
+    l4:
+      - { label: 消耗, model: KoxJuguangNoteDaily, date_field: day, value_field: fee }
+
+  juguang_content:                  # 聚光商业内容管理 (sync-juguang-content.cjs)
+    label: 聚光商业内容
+    credential_note: "随 partner(brand6)"
+    brands_from: { type: data_presence, table: KoxContentStatDaily, date_field: day, distinct: brandId }
+    l3:
+      sync_log: [juguang_content, content_stat_daily]
+    l4:
+      - { label: 曝光, model: KoxContentStatDaily, date_field: day, value_field: impNum }
+
+  xhs_pro:                          # 专业号平台 KOS (ProOrgConfig.storageState; shield 反爬无法裸探活)
+    label: 专业号KOS
+    brands_from:
+      table: ProOrgConfig
+      where: { active: true }
+    l1:
+      type: storage_state            # 静态检查: 解析 storageState cookie 有效期
+      field: storageState
+      warn_within_hours: 72
+    l3:
+      config_last_sync: [lastSyncAt]
+      freshness:
+        - { label: KOS员工日档, model: ProKosStaff, date_field: statDate, where: { dateType: 4 } }
+    l4:
+      - { label: 发帖数, model: ProKosStaff, date_field: statDate, value_field: createNoteNum, where: { dateType: 4 } }
+
+  pro_clue:                         # 专业号线索经营 (sync-pro-clues.cjs, 登录态同 xhs_pro)
+    label: 专业号线索
+    credential_note: "随专业号登录态"
+    brands_from: { type: data_presence, table: ProClueDaily, date_field: day, distinct: brandId }
+    l3:
+      sync_log: [pro_clue]
+    l4:
+      - { label: 进线, model: ProClueDaily, date_field: day, value_field: enterAll }
+      - { label: 留资, model: ProClueDaily, date_field: day, value_field: leadsAll, only_zero: true, min_baseline: 1 }
+
+  laigu:                            # 来鼓评论/私信 (LaiguOrgConfig.gatewayToken, 自动重登)
+    label: 来鼓
+    brands_from:
+      table: LaiguOrgConfig
+      where: { active: true }
+    l1:
+      type: http
+      request:
+        method: POST
+        url: "{baseUrl}/spectrum/workbench/redbook/comment/list"
+        headers:
+          authorization: "{gatewayToken}"
+          Content-Type: "application/json"
+          Origin: "https://pro.laigu.com"
+          Referer: "https://pro.laigu.com/"
+          User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"
+        body:
+          curPage: 1
+          size: 1
+          keyword: ""
+          channelCorpIds: []
+          beginCreatedAt: "{now_minus_hours:2}"
+          endCreatedAt: "{now}"
+          replyState: []
+      judge:
+        dead:
+          - { paths: [message], regex: "登录|token|auth", flags: i }
+        ok:
+          - { path: success, equals: true }
+        unknown:
+          - { path: success, not_equals: true }
+    l2:
+      - reuse_probe: true
+        list_paths: ["data.data"]
+        first_row_must_have: [commentId]
+    l3:
+      config_last_sync: [lastCommentSyncAt, lastSyncAt]
+      freshness:
+        - { label: 评论, model: LaiguComment, date_field: createdAt, zero_alert_if_sync_stale_days: 3 }
+      info:
+        - { label: 最近会话, model: LaiguLead, field: lastMessageAt }
+    l4: []
+
+  # ---- 以下源暂不纳入自动巡检 (enabled: false), 保留定义以对齐抓取清单 ----
+  xhs_web:                          # 主站封面/头像: 一次性脚本, 扫码登录态过期只能人工发现
+    label: 小红书主站
+    enabled: false
+    credential_note: "扫码 storageState 文件"
+    brands_from: { type: data_presence, table: KoxNote, date_field: updatedAt, distinct: brandId }
+    l4:
+      - { label: 封面更新, model: KoxNote, date_field: updatedAt, value_field: null, count_only: true }
+
+  ranf_deprecated:                  # 乐允第三方平台: 2026-10-08 确认弃用, 脚本入口已 exit(0)
+    label: 乐允(已弃用)
+    enabled: false
+
+  marketine_migration:              # 市场易旧系统: 一次性迁移爬取, 不定时
+    label: 市场易迁移
+    enabled: false

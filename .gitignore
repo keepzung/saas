@@ -28,3 +28,4 @@ data-import/vw-kos-accounts.csv
 vw-handover.tar
 data-import/backup-laigu-brand5-*.json
 tools/laigu/state/
+tools/patrol-reports/
