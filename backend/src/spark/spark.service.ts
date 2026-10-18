@@ -109,7 +109,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
       for (const org of orgs) {
         await this.safeSyncOrg(
-          { brandId: org.brandId, orgCode: org.orgCode, cookie: org.cookie, email: org.email },
+          { brandId: org.brandId, orgCode: org.orgCode, cookie: org.cookie, email: org.email, channel: org.channel },
         );
       }
     } catch (error) {
