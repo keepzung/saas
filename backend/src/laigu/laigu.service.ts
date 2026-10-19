@@ -984,31 +984,29 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         });
       }
     }
-    // 明细按时间倒序
+    // 明细按时间倒序（先建 noteId→明细映射再排序，避免按索引错位回填）
+    const detailByNoteId = new Map<string, (typeof detail)[number]>();
+    for (let i = 0; i < detail.length; i++) {
+      const nid = rows[i]?.noteId;
+      if (nid) detailByNoteId.set(nid, detail[i]);
+    }
     detail.sort((a, b) => b.time.localeCompare(a.time));
     // 评论 → 具体笔记：按 noteId 匹配 KoxNote（noteUrl 带 xsec_token 可直接打开）
-    const detailNoteIds = [
-      ...new Set(
-        rows
-          .slice(0, detail.length)
-          .map((r) => r.noteId)
-          .filter((n): n is string => !!n),
-      ),
-    ];
-    if (detailNoteIds.length) {
+    // KoxNote 无命中时兜底 explore 短链（无 xsec_token，多数场景可打开），保证「查看笔记」恒可点
+    if (detailByNoteId.size) {
       const noteRows = await this.prisma.koxNote.findMany({
-        where: { brandId, noteId: { in: detailNoteIds } },
+        where: { brandId, noteId: { in: [...detailByNoteId.keys()] } },
         select: { noteId: true, noteUrl: true, coverUrl: true, title: true },
       });
       const noteByUrl = new Map(noteRows.map((n) => [n.noteId, n]));
-      for (let i = 0; i < detail.length; i++) {
-        const r = rows[i];
-        if (!r?.noteId) continue;
-        const n = noteByUrl.get(r.noteId);
+      for (const [nid, d] of detailByNoteId) {
+        const n = noteByUrl.get(nid);
         if (n) {
-          detail[i].note_url = n.noteUrl;
-          if (!detail[i].note_cover) detail[i].note_cover = n.coverUrl;
-          if (!detail[i].note_title) detail[i].note_title = n.title;
+          d.note_url = n.noteUrl;
+          if (!d.note_cover) d.note_cover = n.coverUrl;
+          if (!d.note_title) d.note_title = n.title;
+        } else {
+          d.note_url = `https://www.xiaohongshu.com/explore/${nid}`;
         }
       }
     }

@@ -60,7 +60,7 @@
           <div class="stat-value hl-blue">{{ fmt(cards.total_leads) }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">总销量（台）</div>
+          <div class="stat-label">总销量</div>
           <div class="stat-value">{{ fmt(cards.total_sales) }}</div>
           <div v-if="orderSummary.orders" class="stat-sub muted mini">销售额 ¥{{ fmt(orderSummary.amount) }} · {{ orderSummary.orders }} 单</div>
         </div>
@@ -167,7 +167,7 @@
           />
         </div>
         <div class="order-summary-row muted mini" v-if="orderSummary.orders">
-          共 {{ orderSummary.orders }} 单 · {{ orderSummary.qty }} 台 · ¥{{ fmt(orderSummary.amount) }} ·
+          共 {{ orderSummary.orders }} 单 · {{ orderSummary.qty }} 件 · ¥{{ fmt(orderSummary.amount) }} ·
           客户 {{ orderSummary.customers }} 人 · 复购率 {{ orderSummary.repurchase_rate }}%
         </div>
       </a-card>
@@ -293,7 +293,7 @@ const detailColumns = computed(() => {
 const staffColumns = [
   { title: '排名', key: 'rank', width: 60, customRender: ({ index }) => index + 1 },
   { title: '销售顾问', dataIndex: 'staff', width: 140 },
-  { title: '销量（台）', dataIndex: 'qty', width: 100, align: 'right', sorter: (a, b) => a.qty - b.qty },
+  { title: '销量', dataIndex: 'qty', width: 100, align: 'right', sorter: (a, b) => a.qty - b.qty },
   { title: '销售额（元）', dataIndex: 'amount', width: 120, align: 'right', sorter: (a, b) => a.amount - b.amount, customRender: ({ text }) => fmt(text) },
 ];
 

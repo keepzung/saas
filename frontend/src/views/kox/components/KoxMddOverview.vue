@@ -79,7 +79,10 @@
             <template #tab><span class="tab-ic"><EditOutlined /></span>内容发布&互动</template>
             <div class="metric-blocks">
               <div v-for="m in publishBlocks" :key="m.label" class="mblock">
-                <div class="mb-label">{{ m.label }}</div>
+                <div class="mb-label">
+                  <a-tooltip v-if="m.tip" :title="m.tip"><span class="mb-label-tip">{{ m.label }}</span></a-tooltip>
+                  <template v-else>{{ m.label }}</template>
+                </div>
                 <div class="mb-value">{{ typeof m.value === 'number' ? fmt(m.value) : m.value }}</div>
                 <div v-if="m.d" class="mb-delta" :class="m.d.up ? 'up' : 'down'">
                   {{ m.d.up ? '↑' : '↓' }}{{ Math.abs(m.d.pct) }}%
@@ -300,7 +303,14 @@ function delta(cur, prev) {
 const publishBlocks = computed(() => {
   const s = ov.value?.summary ?? {};
   const pv = ov.value?.prev?.summary ?? {};
+  const pvOrg = ov.value?.prev?.organic ?? {};
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
+  const showOrganic = ov.value?.caliber ? ov.value.caliber === 'total' : caliber.value === 'total';
+  const organic = [
+    { label: '自然曝光', tip: '自然曝光 = 总曝光 − 投放曝光（聚光日报）', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
+    { label: '自然点击（阅读）', tip: '自然点击（阅读）= 总点击（阅读）− 投放点击（聚光日报）', value: s.organic_view, d: delta(s.organic_view, pvOrg.view) },
+    { label: '自然互动', tip: '自然互动 = 总互动 − 投放互动（聚光日报）', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
+  ];
   return [
     { label: '门店数', value: s.store_num ?? 0 },
     { label: 'KOS 账号数', value: s.kos_num ?? 0 },
@@ -310,6 +320,7 @@ const publishBlocks = computed(() => {
     d('新增粉丝数', s.follow_sum, pv.follow_sum),
     d('总阅读量', s.view_sum, pv.view_sum),
     d('总互动量', s.interaction_sum, pv.interaction_sum),
+    ...(showOrganic ? organic : []),
     { label: '互动率', value: `${s.interaction_rate ?? 0}%` },
   ];
 });
@@ -682,6 +693,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mb-label-tip {
+  cursor: help;
+  border-bottom: 1px dashed #cbd5e1;
 }
 
 .mb-value {

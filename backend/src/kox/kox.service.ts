@@ -2790,7 +2790,7 @@ export class KoxService {
         }),
         this.prisma.koxCampaignDailyStat.findMany({
           where: { brandId, statDate: { gte: wStart, lte: wEnd }, advertiserId: mddAdvertiserId },
-          select: { fee: true, impression: true, click: true, msgLeadsNum: true },
+          select: { fee: true, impression: true, click: true, interaction: true, msgLeadsNum: true },
         }),
         this.prisma.proClueDaily.findMany({
           where: clueWin(wStart, wEnd),
@@ -2870,8 +2870,18 @@ export class KoxService {
           cost: caliber === 'natural' ? 0 : r2(sum(camps.map((x) => n(x.fee)))),
           impression: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.impression))),
           click: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.click))),
+          interaction: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.interaction))),
           msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
         },
+        // 自然三数（媒体级拆分，客户公式）：总(日表) − 投放(聚光日报)；仅汇总口径有意义，负值归 0
+        organic:
+          caliber === 'total'
+            ? {
+                exposure: Math.max(0, exposureSum - sum(camps.map((x) => n(x.impression)))),
+                view: Math.max(0, viewSum - sum(camps.map((x) => n(x.click)))),
+                interaction: Math.max(0, interactionSum - sum(camps.map((x) => n(x.interaction)))),
+              }
+            : null,
       };
     };
 
@@ -2987,6 +2997,9 @@ export class KoxService {
         avg_publish: cur.avg_publish,
         ctr: cur.exposure_sum ? r2((cur.view_sum / cur.exposure_sum) * 100) : 0,
         interaction_rate: cur.view_sum ? r2((cur.interaction_sum / cur.view_sum) * 100) : 0,
+        organic_exposure: cur.organic?.exposure ?? null,
+        organic_view: cur.organic?.view ?? null,
+        organic_interaction: cur.organic?.interaction ?? null,
       },
       lead_funnel: {
         pm_inquiries: cur.lead.pm_inquiries,
@@ -3018,6 +3031,7 @@ export class KoxService {
         },
         lead_funnel: prev.lead,
         ad: prev.ad,
+        organic: prev.organic,
       },
       tag_facets: tagFacetList,
       trend: [...trendMap.values()],
@@ -3748,39 +3762,85 @@ export class KoxService {
       }
       if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else if (brandId === 5) {
-      // Morgandada(5)：私信三数口径 = MCC 星火员工矩阵（SparkStaffUserDaily 按员工/账号出三数，2026-10 客户确认切换）
-      // 进线=messageOpenCnt、开口=messageDrivingOpenCnt、留资=msgLeadsNum
-      // 匹配：员工矩阵 nickname/staffName → KosAccount 昵称 / 使用人（operatorName）
-      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
-        where: { brandId: 5, statDate: { gte: start, lte: end } },
+      // Morgandada(5)：私信三数口径 = 专业号-线索管理「用户列表」按归属账号（客户确认 2026-10-19）
+      // 归属匹配：belongUserId↔KosAccount.authorId 优先，belongUserName↔昵称/门店名兜底；窗口内按客户去重
+      const clueRows = await this.prisma.proClueUserDay.findMany({
+        where: { brandId: 5, day: { gte: start, lte: end } },
         select: {
-          staffName: true,
-          nickname: true,
-          messageOpenCnt: true,
-          messageDrivingOpenCnt: true,
-          msgLeadsNum: true,
+          customerUserId: true, belongUserId: true, belongUserName: true,
+          entered: true, opened: true, leads: true,
         },
       });
-      const nickToId = new Map(accounts.map((a) => [a.nickname, a.id]));
-      const opToId = new Map(
-        accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a.id]),
+      const authorToId = new Map(
+        accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a.id]),
       );
-      let staffHit = 0;
-      for (const r of staffRows) {
+      const nickToId = new Map(accounts.map((a) => [a.nickname, a.id]));
+      const storeToId = new Map(
+        accounts.filter((a) => a.storeName).map((a) => [a.storeName as string, a.id]),
+      );
+      let clueHit = 0;
+      const byCustomer = new Map<
+        string,
+        { entered: boolean; opened: boolean; leads: boolean; accId: number | null }
+      >();
+      for (const r of clueRows) {
+        if (!r.customerUserId) continue;
+        const cur =
+          byCustomer.get(r.customerUserId) ??
+          { entered: false, opened: false, leads: false, accId: null };
+        if (r.entered) cur.entered = true;
+        if (r.opened) cur.opened = true;
+        if (r.leads) cur.leads = true;
         const accId =
-          (r.nickname ? nickToId.get(r.nickname) : undefined) ??
-          (r.staffName ? nickToId.get(r.staffName) : undefined) ??
-          (r.staffName ? opToId.get(r.staffName) : undefined) ??
+          (r.belongUserId ? authorToId.get(r.belongUserId) : undefined) ??
+          (r.belongUserName ? nickToId.get(r.belongUserName) : undefined) ??
+          (r.belongUserName ? storeToId.get(r.belongUserName) : undefined) ??
           null;
-        if (accId == null || !idSet.has(accId)) continue;
-        staffHit += 1;
-        bump(accId, (a) => {
-          a.pm_inquiries += r.messageOpenCnt;
-          a.pm_openings += r.messageDrivingOpenCnt;
-          a.pm_leads += r.msgLeadsNum;
+        if (accId != null) cur.accId = accId;
+        byCustomer.set(r.customerUserId, cur);
+      }
+      for (const c of byCustomer.values()) {
+        if (c.accId == null || !idSet.has(c.accId)) continue;
+        clueHit += 1;
+        bump(c.accId, (a) => {
+          if (c.entered) a.pm_inquiries += 1;
+          if (c.opened) a.pm_openings += 1;
+          if (c.leads) a.pm_leads += 1;
         });
       }
-      if (staffRows.length) metric_source += '+spark_staff_matrix';
+      if (clueHit) metric_source += '+pro_clue_user_belong';
+      if (!clueRows.length || !clueHit) {
+        // 回退：专业号线索未接入（storageState 未推送/未回补）时沿用员工矩阵口径
+        const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+          where: { brandId: 5, statDate: { gte: start, lte: end } },
+          select: {
+            staffName: true,
+            nickname: true,
+            messageOpenCnt: true,
+            messageDrivingOpenCnt: true,
+            msgLeadsNum: true,
+          },
+        });
+        const opToId = new Map(
+          accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a.id]),
+        );
+        let staffHit = 0;
+        for (const r of staffRows) {
+          const accId =
+            (r.nickname ? nickToId.get(r.nickname) : undefined) ??
+            (r.staffName ? nickToId.get(r.staffName) : undefined) ??
+            (r.staffName ? opToId.get(r.staffName) : undefined) ??
+            null;
+          if (accId == null || !idSet.has(accId)) continue;
+          staffHit += 1;
+          bump(accId, (a) => {
+            a.pm_inquiries += r.messageOpenCnt;
+            a.pm_openings += r.messageDrivingOpenCnt;
+            a.pm_leads += r.msgLeadsNum;
+          });
+        }
+        if (staffHit) metric_source += '+spark_staff_matrix(fallback)';
+      }
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {
