@@ -2697,8 +2697,8 @@ export class KoxService {
   /** ─── Morgandada(5) 专业号线索「区间直查」实时客户端（2026-10-20 探针验证纯 fetch 可用）。
    *  与平台「用户列表」页同接口：进线/开口/留资 = 各事件类型的区间客户总数（与平台页面一致），
    *  卡片 11/12 = 进线的广告/自然流量拆分。结果内存缓存 10 分钟；任何失败返回 null（调用方回退日表聚合）。 ─── */
-  private proClueLiveCache = new Map<string, { at: number; data: { enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null } }>();
-  private async proClueLive(brandId: number, start: string, end: string): Promise<{ enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null } | null> {
+  private proClueLiveCache = new Map<string, { at: number; data: { enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null; stageEnter: number | null; stageOpen: number | null; stageLeads: number | null } }>();
+  private async proClueLive(brandId: number, start: string, end: string): Promise<{ enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null; stageEnter: number | null; stageOpen: number | null; stageLeads: number | null } | null> {
     const key = `${brandId}|${start}|${end}`;
     const hit = this.proClueLiveCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60_000) return hit.data;
@@ -2737,9 +2737,17 @@ export class KoxService {
         return j?.cluePageInfo?.total ?? null;
       };
       const [enter, open, leads] = await Promise.all([total([1]), total([2]), total([3])]);
-      const st = (await post('user/statistic', { startTime: start, endTime: end, sysTagIds: ['11', '12'], userTagIds: [] })) as { tagStatList?: { tagId: number; count?: number }[] } | null;
+      const st = (await post('user/statistic', { startTime: start, endTime: end, sysTagIds: ['2', '3', '4', '11', '12'], userTagIds: [] })) as { tagStatList?: { tagId: number; count?: number }[] } | null;
       const tags = new Map((st?.tagStatList ?? []).map((t) => [t.tagId, t.count ?? 0]));
-      const data = { enter, open, leads, ad: tags.has(11) ? tags.get(11)! : null, organic: tags.has(12) ? tags.get(12)! : null };
+      const data = {
+        enter, open, leads,
+        ad: tags.has(11) ? tags.get(11)! : null,
+        organic: tags.has(12) ? tags.get(12)! : null,
+        // 阶段卡片（按客户去重，与线索管理首页「数据概览」一致）：进线未开口/开口未留资/留资完成
+        stageEnter: tags.has(2) ? tags.get(2)! : null,
+        stageOpen: tags.has(3) ? tags.get(3)! : null,
+        stageLeads: tags.has(4) ? tags.get(4)! : null,
+      };
       this.proClueLiveCache.set(key, { at: Date.now(), data });
       return data;
     } catch {
@@ -2910,16 +2918,27 @@ export class KoxService {
         total_leads: 0 as number | null,
       };
       lead.total_leads = lead.pm_leads;
-      // 实时区间直查覆盖（与平台「用户列表」页一致，按客户去重）；自然/聚光口径的进线用平台流量卡片拆分
+      // 实时区间直查覆盖（与平台一致）：
+      // 漏斗 = 线索管理首页「数据概览」阶段卡片（按客户去重）：进线=进线未开口+开口未留资+留资完成，开口=开口未留资+留资完成，留资=留资完成
+      // 自然/聚光口径的进线 = 平台流量卡片（自然流量客户/广告流量客户）
       if (live) {
-        if (caliber === 'natural' && live.organic != null) lead.pm_inquiries = live.organic;
-        else if (caliber === 'juguang' && live.ad != null) lead.pm_inquiries = live.ad;
-        else if (caliber === 'total' && live.enter != null) lead.pm_inquiries = live.enter;
-        if (caliber === 'total' && live.open != null) lead.pm_openings = live.open;
-        if (live.leads != null) {
-          lead.pm_leads = live.leads;
-          lead.total_leads = live.leads;
+        if (live.stageEnter != null && live.stageOpen != null && live.stageLeads != null) {
+          lead.pm_inquiries = live.stageEnter + live.stageOpen + live.stageLeads;
+          lead.pm_openings = live.stageOpen + live.stageLeads;
+          lead.pm_leads = live.stageLeads;
+          lead.total_leads = live.stageLeads;
+        } else {
+          if (caliber === 'natural' && live.organic != null) lead.pm_inquiries = live.organic;
+          else if (caliber === 'juguang' && live.ad != null) lead.pm_inquiries = live.ad;
+          else if (caliber === 'total' && live.enter != null) lead.pm_inquiries = live.enter;
+          if (caliber === 'total' && live.open != null) lead.pm_openings = live.open;
+          if (live.leads != null) {
+            lead.pm_leads = live.leads;
+            lead.total_leads = live.leads;
+          }
         }
+        if (caliber === 'natural' && live.organic != null) lead.pm_inquiries = live.organic;
+        if (caliber === 'juguang' && live.ad != null) lead.pm_inquiries = live.ad;
       }
 
       return {
@@ -3073,7 +3092,7 @@ export class KoxService {
         open_rate: cur.lead.pm_inquiries && cur.lead.pm_openings != null ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : null,
         lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
         total_leads: cur.lead.total_leads,
-        scope_note: '进线/开口/留资=专业号-线索管理「用户列表」区间直查（按客户去重，与平台页面一致）；自然/聚光口径的进线按平台流量卡片拆分，留资拆分平台不提供',
+        scope_note: '进线/开口/留资=专业号-线索管理首页「数据概览」口径（实时区间直查，按客户去重，与平台完全一致）；自然/聚光口径的进线按平台流量卡片拆分，留资拆分平台不提供',
       },
       ad: {
         cost: cur.ad.cost,
