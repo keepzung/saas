@@ -2694,8 +2694,60 @@ export class KoxService {
   }
 
   /** ─── Morgandada(5) 基线账号集合（笔记归属过滤用，缓存 5 分钟） ─── */
-  private mddScopeCache: { ids: number[]; nicknames: string[]; at: number } | null = null;
-  private async mddAuthorScope(): Promise<{ ids: number[]; nicknames: string[] }> {
+  /** ─── Morgandada(5) 专业号线索「区间直查」实时客户端（2026-10-20 探针验证纯 fetch 可用）。
+   *  与平台「用户列表」页同接口：进线/开口/留资 = 各事件类型的区间客户总数（与平台页面一致），
+   *  卡片 11/12 = 进线的广告/自然流量拆分。结果内存缓存 10 分钟；任何失败返回 null（调用方回退日表聚合）。 ─── */
+  private proClueLiveCache = new Map<string, { at: number; data: { enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null } }>();
+  private async proClueLive(brandId: number, start: string, end: string): Promise<{ enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null } | null> {
+    const key = `${brandId}|${start}|${end}`;
+    const hit = this.proClueLiveCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.data;
+    try {
+      const cfg = await this.prisma.proOrgConfig.findUnique({ where: { brandId }, select: { storageState: true } });
+      if (!cfg?.storageState) return null;
+      const cookies = (JSON.parse(cfg.storageState).cookies as { name: string; value: string; domain: string }[])
+        .filter((c) => /xiaohongshu\.com$/.test(c.domain))
+        .map((c) => `${c.name}=${c.value}`)
+        .join('; ');
+      const post = async (p: string, body: Record<string, unknown>) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        try {
+          const res = await fetch('https://pro.xiaohongshu.com/ads/api/clue/' + p, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Cookie: cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              Origin: 'https://pro.xiaohongshu.com',
+              Referer: 'https://pro.xiaohongshu.com/enterprise/data/new-clue-management',
+            },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+          });
+          const j = (await res.json().catch(() => null)) as { code?: number; data?: Record<string, unknown> } | null;
+          return j?.code === 0 ? j.data : null;
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const R = { startTime: start, endTime: end };
+      const total = async (ev: number[]): Promise<number | null> => {
+        const j = (await post('user/list', { ...R, clueEventTypeList: ev, pageNum: 1, pageSize: 1 })) as { cluePageInfo?: { total?: number } } | null;
+        return j?.cluePageInfo?.total ?? null;
+      };
+      const [enter, open, leads] = await Promise.all([total([1]), total([2]), total([3])]);
+      const st = (await post('user/statistic', { startTime: start, endTime: end, sysTagIds: ['11', '12'], userTagIds: [] })) as { tagStatList?: { tagId: number; count?: number }[] } | null;
+      const tags = new Map((st?.tagStatList ?? []).map((t) => [t.tagId, t.count ?? 0]));
+      const data = { enter, open, leads, ad: tags.has(11) ? tags.get(11)! : null, organic: tags.has(12) ? tags.get(12)! : null };
+      this.proClueLiveCache.set(key, { at: Date.now(), data });
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  private mddScopeCache: { ids: number[]; nicknames: string[]; at: number } | null = null;  private async mddAuthorScope(): Promise<{ ids: number[]; nicknames: string[] }> {
     if (this.mddScopeCache && Date.now() - this.mddScopeCache.at < 5 * 60_000) {
       return this.mddScopeCache;
     }
@@ -2779,6 +2831,8 @@ export class KoxService {
 
     // 单窗口聚合（cur/prev 复用）。专业号流量标签：sysTagId 11=广告流量 12=自然流量
     const aggWindow = async (wStart: Date, wEnd: Date) => {
+      // 实时区间直查专业号线索（与平台页面一致）；失败回退下方日表聚合
+      const live = await this.proClueLive(brandId, dayKey08(wStart), dayKey08(wEnd));
       const [dailyRows, notes, camps, clues, clueUsers] = await Promise.all([
         this.prisma.koxNoteDailyStat.findMany({
           where: dailyBase(wStart, wEnd),
@@ -2856,6 +2910,17 @@ export class KoxService {
         total_leads: 0 as number | null,
       };
       lead.total_leads = lead.pm_leads;
+      // 实时区间直查覆盖（与平台「用户列表」页一致，按客户去重）；自然/聚光口径的进线用平台流量卡片拆分
+      if (live) {
+        if (caliber === 'natural' && live.organic != null) lead.pm_inquiries = live.organic;
+        else if (caliber === 'juguang' && live.ad != null) lead.pm_inquiries = live.ad;
+        else if (caliber === 'total' && live.enter != null) lead.pm_inquiries = live.enter;
+        if (caliber === 'total' && live.open != null) lead.pm_openings = live.open;
+        if (live.leads != null) {
+          lead.pm_leads = live.leads;
+          lead.total_leads = live.leads;
+        }
+      }
 
       return {
         item_cnt: itemCnt,
@@ -3008,7 +3073,7 @@ export class KoxService {
         open_rate: cur.lead.pm_inquiries && cur.lead.pm_openings != null ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : null,
         lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
         total_leads: cur.lead.total_leads,
-        scope_note: '进线/开口/留资=专业号-线索经营（MCC 数据→经营分析→进入专业号）；自然/聚光口径按平台流量标签拆分',
+        scope_note: '进线/开口/留资=专业号-线索管理「用户列表」区间直查（按客户去重，与平台页面一致）；自然/聚光口径的进线按平台流量卡片拆分，留资拆分平台不提供',
       },
       ad: {
         cost: cur.ad.cost,
