@@ -10,6 +10,7 @@
           @change="onFilterChange"
         />
         <a-select
+          v-if="!isMdd"
           v-model:value="modelFilter"
           size="small"
           style="width: 130px"
@@ -216,7 +217,7 @@
           </template>
           <template v-else-if="column.key === 'tags'">
             <a-tag v-if="!isTesla" class="mini">{{ record.type }}</a-tag>
-            <a-tag class="mini" color="blue">{{ record.model }}</a-tag>
+            <a-tag v-if="!isMdd" class="mini" color="blue">{{ record.model }}</a-tag>
             <a-tag class="mini" :color="record.accountType === 'KOS' ? 'green' : 'purple'">
               {{ record.accountType }}
             </a-tag>
@@ -440,7 +441,7 @@ const modelOptions = computed(() =>
 const columns = computed(() => [
   { key: 'title', title: '标题', width: 300 },
   { title: '发布者', dataIndex: 'author', width: 130, ellipsis: true },
-  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : '内容 / 车型 / 账号类型', width: 220 },
+  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 220 },
   { title: '点赞', dataIndex: 'digg', width: 80, sorter: (a, b) => a.digg - b.digg },
   { title: '评论', dataIndex: 'comment', width: 80, sorter: (a, b) => a.comment - b.comment },
   { title: '分享', dataIndex: 'share', width: 80 },

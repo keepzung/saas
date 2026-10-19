@@ -271,7 +271,7 @@
       </div>
       <div v-if="detailTab === 'region'" class="note-filter-row">
         <a-radio-group v-model:value="regionGroupby" size="small" @change="loadRegionTab">
-          <a-radio-button value="region">按大区</a-radio-button>
+          <a-radio-button v-if="!isMdd" value="region">按大区</a-radio-button>
           <a-radio-button value="store">按门店</a-radio-button>
         </a-radio-group>
         <span class="muted small">口径：投放数据按账户归属映射至大区/门店，未匹配账户单独归组</span>
@@ -1039,7 +1039,8 @@ async function loadAuthorTab() {
 /* ---------- 区域汇总 ---------- */
 const regionRows = ref([]);
 const regionLoading = ref(false);
-const regionGroupby = ref('region');
+// MDD：单一投放账户无大区映射，去掉「按大区」只留按门店
+const regionGroupby = ref(isMdd.value ? 'store' : 'region');
 
 const regionColumns = computed(() => {
   const cols = [];

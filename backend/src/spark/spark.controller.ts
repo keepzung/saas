@@ -57,7 +57,17 @@ export class SparkController {
         continue;
       }
       if (type === 'campaign') {
-        results.push(await this.sparkService.syncCampaign(dto?.date, ctx));
+        // Morgandada(5)：投放日报当日同步存在未结算尾差（实测 10-18 单日差 75 元），无显式日期时连刷近 3 天回补
+        if (Number(brandId) === 5 && !dto?.date) {
+          const multi = [];
+          for (let i = 1; i <= 3; i++) {
+            const d = new Date(Date.now() + 8 * 3600000 - i * 86400000).toISOString().slice(0, 10);
+            multi.push(await this.sparkService.syncCampaign(d, ctx));
+          }
+          results.push({ brandId, campaign_recent3: multi });
+        } else {
+          results.push(await this.sparkService.syncCampaign(dto?.date, ctx));
+        }
       } else if (type === 'notes') {
         results.push(await this.sparkService.syncNotes(dto?.date, noteOpts, ctx));
       } else if (type === 'notes_daily') {

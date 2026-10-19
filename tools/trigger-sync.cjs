@@ -11,10 +11,12 @@ const m = env.match(/JWT_SECRET="([^"]+)"/);
   const type = process.argv[2] || 'campaign';
   const brandId = process.argv[3] || '6';
   const body = { type, brandId: Number(brandId) };
-  // 透传 noteOpts 标记：--full / --backfill / --promoted
+  // 透传 noteOpts 标记：--full / --backfill / --promoted；--date=YYYY-MM-DD 指定补数日期
   if (process.argv.includes('--full')) body.full = true;
   if (process.argv.includes('--backfill')) body.backfill = true;
   if (process.argv.includes('--promoted')) body.promoted = true;
+  const dateArg = process.argv.find((a) => a.startsWith('--date='));
+  if (dateArg) body.date = dateArg.slice(7);
   const { PrismaClient } = backendRequire('@prisma/client');
   const p = new PrismaClient();
   const u = await p.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true, phone: true, role: true } });
