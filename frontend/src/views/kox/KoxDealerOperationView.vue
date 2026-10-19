@@ -341,6 +341,8 @@ async function reload() {
       });
       list = (res.list ?? []).map((r) => ({
         ...r,
+        // 模板 dealer_name 列渲染 record.name（与荣威门店排行同构），此处两个名都给
+        name: r.nickname,
         dealer_name: r.nickname,
         account_num: 1,
         item_cnt: Number(r.item_cnt ?? 0),
