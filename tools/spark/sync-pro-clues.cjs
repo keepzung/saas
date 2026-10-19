@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 专业号「线索经营」同步器——进线/开口/留资（客户行为三分类）+ 概览卡参考值
-// 链路：pro.xiaohongshu.com storageState（DB ProOrgConfig / state 文件）→ 账密兜底（PRO_ACCOUNT/PRO_PASSWORD）
+// 链路：pro.xiaohongshu.com storageState（DB ProOrgConfig / state 文件）→ 失效时 MCC「进入专业号」SSO 跳转自愈
+//       （星火→数据→经营分析→专业号，仅用同 brandId 的 SparkOrgConfig cookie，两道品牌硬校验防串号；PRO_JUMP=0 禁用）
+//       → 账密兜底（PRO_ACCOUNT/PRO_PASSWORD）
 //       → POST /ads/api/clue/user/list {startTime,endTime,clueEventTypeList:[1|2|3],pageNum,pageSize:1000}
 //       → POST /ads/api/clue/user/statistic（概览卡：进线未开口/开口未留资/留资完成/广告流量/自然流量，全口径参考值）
 // 口径：行为时间=当日，按客户去重；KOS-only = 剔除归属账号官号（仅特斯拉 brand 6：
@@ -95,6 +97,77 @@ const isOfficial = (r) =>
   !!OFFICIAL_BELONG_ID &&
   (r.belongUserId === OFFICIAL_BELONG_ID || r.belongUserName === OFFICIAL_BELONG_NAME);
 
+/**
+ * MCC「进入专业号」SSO 跳转 bootstrap（2026-10-19 探针验证：星火→数据→经营分析→专业号→进入专业号）。
+ * 仅用**同 brandId** 的 SparkOrgConfig MCC cookie，绝无跨品牌读取；落地前后两道品牌身份硬校验
+ * （预期账号名 + 禁止词），命中立即失败，杜绝串号（如 brand5 误跳特斯拉专业号）。
+ * 成功后 context 即为已登录专业号平台态，调用方负责持久化 storageState。
+ */
+async function bootstrapViaMccJump(browser, brandId, prisma) {
+  const expectRe = brandId === 5 ? /morgandada/i : brandId === 6 ? /特斯拉/ : null;
+  const forbidden = brandId === 5 ? ['特斯拉'] : brandId === 6 ? ['MorganDaDa', '荣威'] : [];
+  if (!expectRe) throw new Error(`MCC 跳转 bootstrap 未配置品牌 ${brandId} 的预期账号名`);
+  const mcc = await prisma.sparkOrgConfig.findUnique({ where: { brandId } });
+  if (!mcc?.cookie) throw new Error(`MCC 跳转失败: SparkOrgConfig brandId=${brandId} 无 cookie`);
+  const bctx = await browser.newContext({ userAgent: UA, locale: 'zh-CN', viewport: { width: 1600, height: 1000 } });
+  try {
+    await bctx.addCookies(
+      mcc.cookie
+        .split(/;\s*/)
+        .map((p) => {
+          const i = p.indexOf('=');
+          return i > 0 ? { name: p.slice(0, i).trim(), value: p.slice(i + 1).trim(), domain: '.xiaohongshu.com', path: '/' } : null;
+        })
+        .filter(Boolean),
+    );
+    const bpage = await bctx.newPage();
+    await bpage.goto('https://mcc.xiaohongshu.com/micro/pro-data', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(6000);
+    // 校验①：MCC 经营分析→专业号页身份
+    const mccText = await bpage.evaluate(() => document.body?.innerText || '');
+    if (!expectRe.test(mccText) || forbidden.some((f) => mccText.includes(f))) {
+      throw new Error(`MCC pro-data 页品牌校验失败（预期=${expectRe}，命中禁止词=${forbidden.filter((f) => mccText.includes(f)).join('/') || '无'}）`);
+    }
+    // 拦截 window.open 抓 SSO 地址（进入专业号为无 href 的 JS 处理链接）
+    await bpage.evaluate(() => {
+      window.__opened = [];
+      const orig = window.open;
+      window.open = function (...args) {
+        window.__opened.push(args.map((a) => String(a)));
+        try {
+          return orig.apply(window, args);
+        } catch {
+          return null;
+        }
+      };
+    });
+    const clicked = await bpage.evaluate(() => {
+      const el = [...document.querySelectorAll('a, button, span, div')].find(
+        (e) => (e.textContent || '').trim() === '进入专业号' && e.children.length <= 1,
+      );
+      if (el) el.click();
+      return Boolean(el);
+    });
+    if (!clicked) throw new Error('MCC pro-data 页未找到「进入专业号」入口');
+    await sleep(8000);
+    const opened = await bpage.evaluate(() => window.__opened || []);
+    const ssoUrl = opened[0]?.[0];
+    if (!ssoUrl || !/^https:\/\/pro\.xiaohongshu\.com\//.test(ssoUrl)) throw new Error('未捕获专业号 SSO 跳转地址');
+    await bpage.goto(ssoUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    await sleep(8000);
+    // 校验②：专业号落地页身份（登录页/串号均失败）
+    const landText = await bpage.evaluate(() => document.body?.innerText || '');
+    if (/login|passport/i.test(bpage.url()) || !expectRe.test(landText) || forbidden.some((f) => landText.includes(f))) {
+      throw new Error('专业号落地页品牌校验失败（未登录或串号）');
+    }
+    console.log(`[login] MCC「进入专业号」跳转成功，专业号身份已落地（brand=${brandId}）`);
+    return { ctx: bctx, page: bpage };
+  } catch (e) {
+    await bctx.close().catch(() => {});
+    throw e;
+  }
+}
+
 (async () => {
   const prisma = new PrismaClient();
   const cfg = await prisma.proOrgConfig.findUnique({ where: { brandId: BRAND_ID } });
@@ -112,12 +185,32 @@ const isOfficial = (r) =>
   let storageState;
   if (cfg?.storageState) { try { storageState = JSON.parse(cfg.storageState); } catch {} }
   if (!storageState && fs.existsSync(STATE_FILE)) { try { storageState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch {} }
-  const ctx = await browser.newContext(storageState ? { ...ctxOpts, storageState } : ctxOpts);
-  const page = await ctx.newPage();
+  let ctx = await browser.newContext(storageState ? { ...ctxOpts, storageState } : ctxOpts);
+  let page = await ctx.newPage();
 
-  // ── 登录 ──
-  await page.goto(CLUE_PAGE, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  await sleep(5000);
+  // ── 登录（顺序：storageState → MCC「进入专业号」SSO 跳转自愈 → 账密/人工；PRO_JUMP=0 可禁用跳转） ──
+  let loggedIn = false;
+  if (storageState) {
+    await page.goto(CLUE_PAGE, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(5000);
+    loggedIn = !/login|passport/i.test(page.url());
+  }
+  if (!loggedIn && process.env.PRO_JUMP !== '0') {
+    try {
+      console.log('[login] 登录态缺失/失效，尝试 MCC「进入专业号」SSO 跳转 bootstrap ...');
+      await ctx.close().catch(() => {});
+      ({ ctx, page } = await bootstrapViaMccJump(browser, BRAND_ID, prisma));
+      loggedIn = true;
+    } catch (e) {
+      console.log('[login] MCC 跳转 bootstrap 失败，回退账密/人工:', String(e?.message ?? e).slice(0, 200));
+      ctx = await browser.newContext(storageState ? { ...ctxOpts, storageState } : ctxOpts);
+      page = await ctx.newPage();
+    }
+  }
+  if (!loggedIn) {
+    await page.goto(CLUE_PAGE, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(5000);
+  }
   if (/login|passport/i.test(page.url())) {
     console.log('[login] 账密登录 ...');
     // 品牌凭据：优先 PRO_ACCOUNT_B{brand}/PRO_PASSWORD_B{brand}（多品牌并存），否则共用 PRO_ACCOUNT/PRO_PASSWORD
@@ -169,6 +262,15 @@ const isOfficial = (r) =>
   }
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(await ctx.storageState()), 'utf8');
+  // 登录成功后把最新登录态回写 ProOrgConfig（含 MCC 跳转派生态），下次直接命中 storageState；失败不影响同步
+  await prisma.proOrgConfig
+    .upsert({
+      where: { brandId: BRAND_ID },
+      update: { storageState: JSON.stringify(await ctx.storageState()), active: true },
+      create: { brandId: BRAND_ID, storageState: JSON.stringify(await ctx.storageState()), active: true },
+    })
+    .then(() => console.log('[login] 登录态已回写 ProOrgConfig brand=' + BRAND_ID))
+    .catch((e) => console.log('[login] ProOrgConfig 回写失败(不影响同步):', String(e).slice(0, 120)));
   if (cfg) {
     const cookieStr = (await ctx.storageState()).cookies.filter((c) => /xiaohongshu\.com$/.test(c.domain)).map((c) => `${c.name}=${c.value}`).join('; ');
     void cookieStr;
