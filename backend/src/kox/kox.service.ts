@@ -2702,6 +2702,20 @@ export class KoxService {
     const key = `${brandId}|${start}|${end}`;
     const hit = this.proClueLiveCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60_000) return hit.data;
+    // 首次冷调用偶发超时（ statistic 慢），失败重试一次
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const data = await this.proClueLiveOnce(brandId, start, end, key);
+      if (data) return data;
+    }
+    return null;
+  }
+
+  private async proClueLiveOnce(
+    brandId: number,
+    start: string,
+    end: string,
+    key: string,
+  ): Promise<{ enter: number | null; open: number | null; leads: number | null; ad: number | null; organic: number | null; stageEnter: number | null; stageOpen: number | null; stageLeads: number | null } | null> {
     try {
       const cfg = await this.prisma.proOrgConfig.findUnique({ where: { brandId }, select: { storageState: true } });
       if (!cfg?.storageState) return null;
@@ -2711,7 +2725,7 @@ export class KoxService {
         .join('; ');
       const post = async (p: string, body: Record<string, unknown>) => {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const timer = setTimeout(() => ctrl.abort(), 15000);
         try {
           const res = await fetch('https://pro.xiaohongshu.com/ads/api/clue/' + p, {
             method: 'POST',
