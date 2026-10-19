@@ -2849,9 +2849,9 @@ export class KoxService {
         pm_openings: caliber === 'natural' ? openSplit.organic : caliber === 'juguang' ? openSplit.ad : openAll,
         pm_leads:
           caliber === 'natural'
-            ? (leadsSplit.organic ?? (flowOrganic || null)) ?? leadsAll
+            ? leadsSplit.organic ?? leadsAll
             : caliber === 'juguang'
-              ? (leadsSplit.ad ?? (flowAd || null)) ?? leadsAll
+              ? leadsSplit.ad ?? leadsAll
               : leadsAll,
         total_leads: 0 as number | null,
       };
@@ -2973,9 +2973,9 @@ export class KoxService {
 
     const caliberScopeNote =
       caliber === 'natural'
-        ? '自然流口径：内容/阅读/互动仅非投流笔记（MCC 笔记分析日维度）；进线/留资=专业号-线索经营自然流量（开口不拆分）'
+        ? '自然流口径：内容/阅读/互动仅非投流笔记（MCC 笔记分析日维度）；进线=专业号-线索经营自然流量客户；留资暂用汇总值（平台仅提供进线级流量拆分）'
         : caliber === 'juguang'
-          ? '聚光投放口径：内容/阅读/互动仅投流笔记（MCC 笔记分析日维度）；进线/留资=专业号-线索经营广告流量（开口不拆分）；消耗=聚光账户日报（10847045）'
+          ? '聚光投放口径：内容/阅读/互动仅投流笔记（MCC 笔记分析日维度）；进线=专业号-线索经营广告流量客户；留资暂用汇总值（平台仅提供进线级流量拆分）；消耗=聚光账户日报（10847045）'
           : '汇总口径：账号=小红书 KOS 专业号（启用，仅员工/门店账号）；内容/阅读/互动=MCC 笔记分析日维度（发布时间在筛选区间）；爆文=单篇互动（赞+藏+评+享）≥500；进线/开口/留资=专业号-线索经营（MCC 数据→经营分析→进入专业号，含自然+广告流量）；投放=聚光账户日报（10847045）；环比=上一等长周期对比';
 
     return {
