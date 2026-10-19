@@ -2923,8 +2923,11 @@ export class KoxService {
       // 自然/聚光口径的进线 = 平台流量卡片（自然流量客户/广告流量客户）
       if (live) {
         if (live.stageEnter != null && live.stageOpen != null && live.stageLeads != null) {
-          lead.pm_inquiries = live.stageEnter + live.stageOpen + live.stageLeads;
-          lead.pm_openings = live.stageOpen + live.stageLeads;
+          if (caliber === 'total') {
+            lead.pm_inquiries = live.stageEnter + live.stageOpen + live.stageLeads;
+            lead.pm_openings = live.stageOpen + live.stageLeads;
+          }
+          // 留资=留资完成客户数（平台不提供留资的流量拆分，自然/聚光口径同样取该值）
           lead.pm_leads = live.stageLeads;
           lead.total_leads = live.stageLeads;
         } else {
