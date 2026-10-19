@@ -44,6 +44,9 @@ function shDateTime(d) {
 function winUTC(dayStr) {
   return new Date(`${dayStr}T00:00:00.000Z`);
 }
+function daysAgoStr(n) {
+  return shDayStr(new Date(Date.now() - n * 86400_000));
+}
 
 // ── 通用小件 ──────────────────────────────────────────────────────────────
 function getPath(obj, dotPath) {
@@ -326,23 +329,27 @@ async function main() {
     return log ? `${shDateTime(log.createdAt)} ${String(log.message || '').slice(0, 120)}` : null;
   }
   // 逐日值 → { maxDay, yestVal, baseAvg, verdict }
-  function analyzeDaily(pairs) {
-    if (!pairs.length) return { maxDay: null, yestVal: null, baseAvg: null, verdict: '近9天无数据' };
+  // lagDays: 数据源固有滞后 (如专业号 T-1 日档+20h去重, 早上巡检时最新完整日是 D-2), 此时
+  // "昨日"基准整体后移 lagDays, 避免每天早上固定误报
+  function analyzeDaily(pairs, lagDays = 0) {
+    const yStr = daysAgoStr(1 + lagDays);
+    const baseStart = daysAgoStr(1 + lagDays + BASE_DAYS);
+    if (!pairs.length) return { maxDay: null, yestVal: null, baseAvg: null, verdict: `近${SCAN_DAYS}天无数据` };
     const byDay = new Map();
     for (const { day, value } of pairs) {
       const k = shDayStr(day);
       byDay.set(k, (byDay.get(k) || 0) + value);
     }
     const maxDay = [...byDay.keys()].sort().pop();
-    const yestVal = byDay.get(yestStr) ?? 0;
+    const yestVal = byDay.get(yStr) ?? 0;
     const base = [];
-    for (const [k, v] of byDay) if (k >= d8Str && k < yestStr) base.push(v);
+    for (const [k, v] of byDay) if (k >= baseStart && k < yStr) base.push(v);
     const baseAvg = base.length ? base.reduce((a, b) => a + b, 0) / base.length : null;
     let verdict = '正常';
-    if (maxDay < yestStr) verdict = `最新数据停在 ${maxDay}`;
+    if (maxDay < yStr) verdict = `最新数据停在 ${maxDay}`;
     else if (baseAvg !== null && baseAvg > 0 && yestVal === 0) verdict = '昨日归零';
     else if (baseAvg !== null && baseAvg > 0 && yestVal < baseAvg * DROP_RATIO) verdict = '较基线骤降';
-    else if (baseAvg === null && maxDay >= yestStr) verdict = '无基线可比(新数据源)';
+    else if (baseAvg === null && maxDay >= yStr) verdict = '无基线可比(新数据源)';
     return { maxDay, yestVal, baseAvg, verdict };
   }
   async function fetchDaily(model, dateField, valueField, brandId, where) {
@@ -422,7 +429,7 @@ async function main() {
       // L4
       let primary = null;
       for (const item of spec.l4 || []) {
-        const a = analyzeDaily(await fetchDaily(item.model, item.date_field, item.value_field, brandId, item.where));
+        const a = analyzeDaily(await fetchDaily(item.model, item.date_field, item.value_field, brandId, item.where), item.lag_days || 0);
         if (!primary) primary = { item, a };
         const flagged =
           a.verdict === '近9天无数据' ||

@@ -161,7 +161,8 @@ sources:
       freshness:
         - { label: KOS员工日档, model: ProKosStaff, date_field: statDate, where: { dateType: 4 } }
     l4:
-      - { label: 发帖数, model: ProKosStaff, date_field: statDate, value_field: createNoteNum, where: { dateType: 4 } }
+      # lag_days=1: T-1 日档 + 20h 去重, 每天上午巡检时最新完整日是 D-2, 下午自动同步后才到 D-1
+      - { label: 发帖数, model: ProKosStaff, date_field: statDate, value_field: createNoteNum, where: { dateType: 4 }, lag_days: 1 }
 
   pro_clue:                         # 专业号线索经营 (sync-pro-clues.cjs, 登录态同 xhs_pro)
     label: 专业号线索
