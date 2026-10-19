@@ -8,6 +8,12 @@
             <a-radio-button value="30">近30天</a-radio-button>
           </a-radio-group>
           <a-range-picker v-model:value="range" size="small" @change="onRangeChange" />
+          <span class="f-label">口径：</span>
+          <a-radio-group v-model:value="caliber" size="small" @change="reload">
+            <a-radio-button value="total">汇总</a-radio-button>
+            <a-radio-button value="natural">自然流</a-radio-button>
+            <a-radio-button value="juguang">聚光投放</a-radio-button>
+          </a-radio-group>
           <span class="f-label">账号标签：</span>
           <a-select
             v-model:value="accountTag"
@@ -237,17 +243,18 @@ const RANK_METRICS = [
 ];
 const OPS_PILLS = [
   { key: 'item_cnt', label: '内容数' },
-  { key: 'ad_msg_leads', label: '留资数' },
-  { key: 'ad_msg_enter', label: '私信进线' },
+  { key: 'lead_leads', label: '留资数' },
+  { key: 'lead_enter', label: '私信进线' },
 ];
 const AD_PILLS = [
   { key: 'ad_cost', label: '消耗' },
-  { key: 'ad_msg_leads', label: '留资数' },
-  { key: 'ad_msg_enter', label: '进线数' },
+  { key: 'lead_leads', label: '留资数' },
+  { key: 'lead_enter', label: '进线数' },
 ];
 
 const quick = ref('30');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);
+const caliber = ref('total');
 const accountTag = ref(undefined);
 const tagOptions = ref([]);
 const blockTab = ref('publish');
@@ -311,12 +318,13 @@ const leadBlocks = computed(() => {
   const f = ov.value?.lead_funnel ?? {};
   const pv = ov.value?.prev?.lead_funnel ?? {};
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
+  const dOrDash = (label, cur, prev) => ({ label, value: cur ?? '—', d: cur == null ? null : delta(cur, prev) });
   return [
     d('私信进线', f.pm_inquiries, pv.pm_inquiries),
-    d('私信开口', f.pm_openings, pv.pm_openings),
+    dOrDash('私信开口', f.pm_openings, pv.pm_openings),
     d('私信留资', f.pm_leads, pv.pm_leads),
     d('总留资（留资∪电话）', f.total_leads, pv.total_leads),
-    { label: '开口率', value: `${f.open_rate ?? 0}%` },
+    { label: '开口率', value: f.open_rate != null ? `${f.open_rate}%` : '—' },
     { label: '留资率', value: `${f.lead_rate ?? 0}%` },
   ];
 });
@@ -336,7 +344,7 @@ const adBlocks = computed(() => {
 });
 
 function dateParams() {
-  const p = { brandId: auth.currentBrandId ?? undefined };
+  const p = { brandId: auth.currentBrandId ?? undefined, caliber: caliber.value };
   if (range.value?.[0]) {
     p.start = range.value[0].format('YYYY-MM-DD');
     p.end = range.value[1].format('YYYY-MM-DD');

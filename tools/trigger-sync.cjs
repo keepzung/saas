@@ -14,7 +14,7 @@ const m = env.match(/JWT_SECRET="([^"]+)"/);
   const p = new PrismaClient();
   const u = await p.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true, phone: true, role: true } });
   await p.$disconnect();
-  const token = jwt.sign({ sub: u.id, phone: u.phone, role: u.role, brandId: 6 }, m[1], { expiresIn: '30m' });
+  const token = jwt.sign({ sub: u.id, phone: u.phone, role: u.role, brandId: Number(brandId) }, m[1], { expiresIn: '30m' });
   const res = await fetch('http://127.0.0.1:3000/api/agency-api/spark/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', token },

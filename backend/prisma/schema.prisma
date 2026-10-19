@@ -1557,3 +1557,33 @@ model KoxJuguangNoteDaily {
   @@unique([brandId, noteId, day])
   @@index([brandId, day])
 }
+
+// MCC 笔记分析「日维度」笔记×日指标（MDD 总览日维度权威口径；数据源 viewAlias=mcc_assets_creativityContent_noteAnalysisView
+// + time_dim=date_key，支持长回溯）。自然/聚光口径按 isRtbAdver 拆分。
+model KoxNoteDailyStat {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(5)
+  noteId       String
+  day          DateTime
+  title        String?
+  authorName   String?
+  accountId    Int?
+  noteType     String?
+  isRtbAdver   Boolean?
+  exposure     Int      @default(0)
+  views        Int      @default(0)
+  likes        Int      @default(0)
+  collects     Int      @default(0)
+  comments     Int      @default(0)
+  shares       Int      @default(0)
+  followCount  Int      @default(0)
+  pmInquiries  Int      @default(0)
+  pmOpenings   Int      @default(0)
+  pmLeads      Int      @default(0)
+  formLeads    Int      @default(0)
+  fetchedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, noteId, day])
+  @@index([brandId, day])
+  @@index([brandId, isRtbAdver, day])
+}

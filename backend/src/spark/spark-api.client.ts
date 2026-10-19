@@ -185,7 +185,8 @@ export class SparkApiClient {
     );
   }
 
-  /** 笔记明细行（原始 targetList 结构，值经 pickTarget 提取；publishStart/End 圈定发布日期范围） */
+  /** 笔记明细行（原始 targetList 结构，值经 pickTarget 提取；publishStart/End 圈定发布日期范围）
+   *  timeDim='date_key' 时返回笔记×日行（dynamicTargets 需含 date_key），供 KoxNoteDailyStat 日维度同步 */
   async noteDetailList(params: {
     timeStart: string;
     timeEnd: string;
@@ -193,13 +194,16 @@ export class SparkApiClient {
     publishEnd?: string;
     promotedOnly?: boolean;
     noteSources?: string[];
+    timeDim?: 'all_key' | 'date_key';
     pageNo: number;
     pageSize?: number;
   }, ctx?: SparkOrgCtx): Promise<{ total: number; rows: Record<string, unknown>[] }> {
+    const timeDim = params.timeDim ?? 'all_key';
     const body = {
       viewAlias: 'mcc_assets_creativityContent_noteAnalysisView',
       chart: 'noteList',
       dynamicTargets: [
+        ...(timeDim === 'date_key' ? ['date_key'] : []),
         'note_id',
         'note_title',
         'note_publish_time',
@@ -235,7 +239,11 @@ export class SparkApiClient {
             selectType: 10,
             selectShowType: 0,
             valueSource: 0,
-            selectLabels: [{ selected: 1, labelValue: 'all_key', labelName: '合计' }],
+            selectLabels: [
+              timeDim === 'date_key'
+                ? { selected: 1, labelValue: 'date_key', labelName: '日维度' }
+                : { selected: 1, labelValue: 'all_key', labelName: '合计' },
+            ],
           },
         },
         {

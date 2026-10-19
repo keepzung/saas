@@ -681,12 +681,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         : opts?.promoted
           ? NOTE_PROMOTED_MAX_PAGES
           : NOTE_DAILY_MAX_PAGES;
+    // Morgandada(5)：daily 模式也刷新整个发布窗口（指标为滚动窗口快照，仅抓当日新笔记会让老笔记冻结在发布日）
     const publishStart = opts?.full || opts?.promoted
       ? undefined
-      : opts?.backfill
-        ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - 34 * 86400000)
+      : org.brandId === 5
+        ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000)
             .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
-        : statDate;
+        : opts?.backfill
+          ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - 34 * 86400000)
+              .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
+          : statDate;
     const timeStart = new Date(
       new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000,
     )
@@ -894,6 +898,112 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       accountsAdded,
       accountsRemoved: 0,
       message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}`,
+      brandId: org.brandId,
+    };
+    await this.prisma.sparkSyncLog.create({ data: result });
+    return result;
+  }
+
+  /**
+   * 笔记日维度同步（MCC 笔记分析 time_dim=date_key，笔记×日行；2026-10 探针验证支持 ≥79 天回溯）。
+   * MDD 总览日维度权威口径：每次刷新 statDate 往前 34 天（30 天窗口 + 4 天重叠容忍晚到），行按自身 date_key 落库。
+   */
+  async syncNoteDaily(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
+    const org = ctx ?? (await this.orgs.forBrand());
+    if (!org) throw new Error('无可用星火组织配置');
+    const statDate = date ?? this.syncDate();
+    const lookback = 34;
+    const timeStart = new Date(
+      new Date(`${statDate}T00:00:00+08:00`).getTime() - (lookback - 1) * 86400000,
+    ).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      const s = String(v ?? '').replace(/,/g, '').trim();
+      if (!s || s === '-' || s === '--') return 0;
+      if (/万$/.test(s)) return Math.round(parseFloat(s) * 10000) || 0;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const str = (v: unknown): string => String(v ?? '').trim();
+    const bool = (v: unknown): boolean | null => {
+      const s = str(v);
+      if (!s) return null;
+      return s === '1' || s.toLowerCase() === 'true' || s.includes('已推广');
+    };
+
+    // 账号归属（Morgandada(5) 仅基线账号，与 syncNotes 同口径）
+    const accounts = await this.prisma.kosAccount.findMany({
+      where: { brandId: org.brandId },
+      select: { id: true, nickname: true },
+    });
+    const byNickname = new Map(
+      accounts.filter((a) => a.nickname).map((a) => [a.nickname as string, a.id]),
+    );
+
+    const rows: Record<string, unknown>[] = [];
+    let total = 0;
+    const maxPages = 100;
+    for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
+      const data = await this.api.noteDetailList(
+        { timeStart, timeEnd: statDate, timeDim: 'date_key', pageNo, pageSize: NOTE_PAGE_SIZE },
+        org,
+      );
+      total = data.total;
+      rows.push(...data.rows);
+      if (rows.length >= total || !data.rows.length) break;
+    }
+
+    let upserted = 0;
+    for (const r of rows) {
+      const m = this.staffRowMap(r);
+      const noteId = str(m.get('note_id'));
+      const dayStr = str(m.get('date_key'));
+      if (!noteId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
+      const authorName = str(m.get('author_name')) || null;
+      const accountId = authorName ? (byNickname.get(authorName) ?? null) : null;
+      if (org.brandId === 5 && !accountId) continue;
+      const data = {
+        title: str(m.get('note_title')) || null,
+        authorName,
+        accountId,
+        noteType: str(m.get('note_type')) === '2' ? 'video' : 'normal',
+        isRtbAdver: bool(m.get('is_rtb_adver')),
+        exposure: num(m.get('imp_num')),
+        views: num(m.get('read_feed_num')),
+        likes: num(m.get('like_num')),
+        collects: num(m.get('fav_num')),
+        comments: num(m.get('cmt_num')),
+        shares: num(m.get('share_num')),
+        followCount: num(m.get('follow_num')),
+        pmInquiries: num(m.get('message_open_cnt')),
+        pmOpenings: num(m.get('message_driving_open_cnt')),
+        pmLeads: num(m.get('msg_leads_num')),
+        formLeads: num(m.get('leads_success')),
+      };
+      await this.prisma.koxNoteDailyStat.upsert({
+        where: {
+          brandId_noteId_day: {
+            brandId: org.brandId,
+            noteId,
+            day: new Date(`${dayStr}T00:00:00.000Z`),
+          },
+        },
+        create: { brandId: org.brandId, noteId, day: new Date(`${dayStr}T00:00:00.000Z`), ...data },
+        update: data,
+      });
+      upserted += 1;
+    }
+
+    const result: SyncResult = {
+      syncType: 'notes_daily',
+      statDate,
+      status: 'success',
+      fetched: rows.length,
+      upserted,
+      accountsAdded: 0,
+      accountsRemoved: 0,
+      message: `total=${total}, window=${timeStart}~${statDate}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });

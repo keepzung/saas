@@ -2712,10 +2712,15 @@ export class KoxService {
     return scope;
   }
 
-  /** ─── Morgandada(5) 运营总览（客户看板版）：hero 大盘 + 三 Tab 指标（含上一等长周期 prev 环比）
-   *      + 爆文数 + 账号标签 facets；数据映射集中在此方法，切换数据源只改这里 ─── */
-  async mddOverview(query: { start?: string; end?: string; accountTag?: string }) {
+  /** ─── Morgandada(5) 运营总览（客户看板版，2026-10 口径改造）：
+   *      内容/阅读/互动 = MCC 笔记分析日维度（KoxNoteDailyStat，仅员工/门店笔记，isRtbAdver 拆自然/投流）
+   *      进线/开口/留资 = 专业号-线索经营（ProClueDaily；MCC 数据→经营分析→进入专业号），不再从来鼓取数
+   *      消耗/曝光/点击 = 聚光账户日报（仅 advertiserId=10847045）
+   *      caliber: total=汇总 | natural=自然流 | juguang=聚光投放；爆文数 + 账号标签 facets；环比=上一等长周期 ─── */
+  async mddOverview(query: { start?: string; end?: string; accountTag?: string; caliber?: string }) {
     const brandId = 5;
+    const caliber = query.caliber === 'natural' || query.caliber === 'juguang' ? query.caliber : 'total';
+    const mddAdvertiserId = (process.env.SPARK_MDD_ADVERTISER_ID ?? '10847045').trim();
     /** 爆文阈值：单篇互动量（赞+藏+评+享）≥ 500 */
     const NOTE_HIT_INTERACTION = 500;
     const asDay = (s: string | undefined, endOfDay = false) =>
@@ -2746,56 +2751,125 @@ export class KoxService {
     const tagFacetList = [...new Set(tagRows.map((x) => x.accountTag).filter(Boolean))] as string[];
     const ids = kosAccounts.map((a) => a.id);
     const nicknames = kosAccounts.map((a) => a.nickname).filter(Boolean) as string[];
+    // 口径 → 投流标记过滤（undefined = 不过滤）
+    const rtbFilter: boolean | undefined =
+      caliber === 'natural' ? false : caliber === 'juguang' ? true : undefined;
     const noteBase = (wStart: Date, wEnd: Date): Prisma.KoxNoteWhereInput => ({
       brandId,
       publishTime: { gte: wStart, lte: wEnd },
+      ...(rtbFilter !== undefined ? { isRtbAdver: rtbFilter } : {}),
       OR: [{ accountId: { in: ids } }, { authorName: { in: nicknames } }],
     });
-    const leadWin = (wStart: Date, wEnd: Date): Prisma.LaiguLeadWhereInput => ({
+    // 笔记×日行（MCC 笔记分析日维度）：内容指标权威口径
+    const dailyBase = (wStart: Date, wEnd: Date): Prisma.KoxNoteDailyStatWhereInput => ({
       brandId,
-      isMdd: true,
-      sessionCreatedAt: { gte: wStart, lte: wEnd },
+      day: { gte: wStart, lte: wEnd },
+      ...(rtbFilter !== undefined ? { isRtbAdver: rtbFilter } : {}),
+      OR: [{ accountId: { in: ids } }, { authorName: { in: nicknames } }],
+    });
+    // 专业号-线索经营（进线/开口/留资权威口径；卡片区含广告/自然流量拆分）
+    const clueWin = (wStart: Date, wEnd: Date): Prisma.ProClueDailyWhereInput => ({
+      brandId,
+      day: { gte: wStart, lte: wEnd },
     });
 
     const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
     const n = (v: unknown) => Number(v ?? 0) || 0;
     const r2 = (v: number) => (Math.round(v * 100) / 100) || 0;
 
-    // 单窗口聚合（cur/prev 复用）
+    // 单窗口聚合（cur/prev 复用）。专业号流量标签：sysTagId 11=广告流量 12=自然流量
     const aggWindow = async (wStart: Date, wEnd: Date) => {
-      const [notes, leads, camps] = await Promise.all([
+      const [dailyRows, notes, camps, clues, clueUsers] = await Promise.all([
+        this.prisma.koxNoteDailyStat.findMany({
+          where: dailyBase(wStart, wEnd),
+          select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true, followCount: true },
+        }),
         this.prisma.koxNote.findMany({
           where: noteBase(wStart, wEnd),
           select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true },
         }),
-        this.prisma.laiguLead.findMany({
-          where: leadWin(wStart, wEnd),
-          select: { isResource: true, phone: true, clientMessageCount: true },
-        }),
         this.prisma.koxCampaignDailyStat.findMany({
-          where: { brandId, statDate: { gte: wStart, lte: wEnd } },
+          where: { brandId, statDate: { gte: wStart, lte: wEnd }, advertiserId: mddAdvertiserId },
           select: { fee: true, impression: true, click: true, msgLeadsNum: true },
+        }),
+        this.prisma.proClueDaily.findMany({
+          where: clueWin(wStart, wEnd),
+          select: { enterAll: true, openAll: true, leadsAll: true, cardAdTraffic: true, cardOrganic: true },
+        }),
+        this.prisma.proClueUserDay.findMany({
+          where: { brandId, day: { gte: wStart, lte: wEnd } },
+          select: { sysTagId: true, opened: true, leads: true },
         }),
       ]);
       const itemCnt = notes.length;
+      // 内容指标：日维度权威口径；日表空窗时回退笔记快照求和（notes_daily 回填完成前的兜底）
+      const useDaily = dailyRows.length > 0;
+      const viewSum = useDaily
+        ? sum(dailyRows.map((x) => x.views))
+        : sum(notes.map((x) => x.views));
+      const exposureSum = useDaily
+        ? sum(dailyRows.map((x) => x.exposure))
+        : sum(notes.map((x) => x.exposure));
+      const interactionSum = useDaily
+        ? sum(dailyRows.map((x) => x.likes + x.collects + x.comments + x.shares))
+        : sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares));
+      const followSum = useDaily
+        ? sum(dailyRows.map((x) => x.followCount))
+        : sum(notes.map((x) => x.followCount));
+
+      // 线索经营：汇总口径 = 平台全量；自然/聚光口径 = 流量标签拆分（客户明细 sysTagId）
+      const enterAll = sum(clues.map((c) => c.enterAll));
+      const openAll = sum(clues.map((c) => c.openAll));
+      const leadsAll = sum(clues.map((c) => c.leadsAll));
+      const flowAd = sum(clues.map((c) => n(c.cardAdTraffic)));
+      const flowOrganic = sum(clues.map((c) => n(c.cardOrganic)));
+      const splitByTag = (flag: 'opened' | 'leads'): { ad: number | null; organic: number | null } => {
+        let ad = 0;
+        let organic = 0;
+        let tagged = 0;
+        for (const u of clueUsers) {
+          if (!u[flag]) continue;
+          if (u.sysTagId === 11) {
+            ad += 1;
+            tagged += 1;
+          } else if (u.sysTagId === 12) {
+            organic += 1;
+            tagged += 1;
+          }
+        }
+        // 明细无流量标签（标签体系变化）时回退汇总值，避免口径显示虚低
+        if (!tagged) return { ad: null, organic: null };
+        return { ad, organic };
+      };
+      const openSplit = splitByTag('opened');
+      const leadsSplit = splitByTag('leads');
+      const lead = {
+        pm_inquiries:
+          caliber === 'natural' ? (flowOrganic || null) ?? enterAll : caliber === 'juguang' ? (flowAd || null) ?? enterAll : enterAll,
+        pm_openings: caliber === 'natural' ? openSplit.organic : caliber === 'juguang' ? openSplit.ad : openAll,
+        pm_leads:
+          caliber === 'natural'
+            ? (leadsSplit.organic ?? (flowOrganic || null)) ?? leadsAll
+            : caliber === 'juguang'
+              ? (leadsSplit.ad ?? (flowAd || null)) ?? leadsAll
+              : leadsAll,
+        total_leads: 0 as number | null,
+      };
+      lead.total_leads = lead.pm_leads;
+
       return {
         item_cnt: itemCnt,
-        exposure_sum: sum(notes.map((x) => x.exposure)),
-        view_sum: sum(notes.map((x) => x.views)),
-        interaction_sum: sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares)),
-        follow_sum: sum(notes.map((x) => x.followCount)),
+        exposure_sum: exposureSum,
+        view_sum: viewSum,
+        interaction_sum: interactionSum,
+        follow_sum: followSum,
         hit_notes: notes.filter((x) => x.likes + x.collects + x.comments + x.shares >= NOTE_HIT_INTERACTION).length,
         avg_publish: kosAccounts.length ? r2(itemCnt / kosAccounts.length) : 0,
-        lead: {
-          pm_inquiries: leads.length,
-          pm_openings: leads.filter((x) => x.clientMessageCount > 0).length,
-          pm_leads: leads.filter((x) => x.isResource).length,
-          total_leads: leads.filter((x) => x.isResource || x.phone).length,
-        },
+        lead,
         ad: {
-          cost: r2(sum(camps.map((x) => n(x.fee)))),
-          impression: sum(camps.map((x) => n(x.impression))),
-          click: sum(camps.map((x) => n(x.click))),
+          cost: caliber === 'natural' ? 0 : r2(sum(camps.map((x) => n(x.fee)))),
+          impression: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.impression))),
+          click: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.click))),
           msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
         },
       };
@@ -2808,19 +2882,27 @@ export class KoxService {
     const storeNames = [...new Set(kosAccounts.map((a) => (a.storeName ?? '').trim()).filter(Boolean))];
     const fansSum = sum(kosAccounts.map((a) => a.fans ?? 0));
 
-    // 趋势（东八区日键；字段名对齐特斯拉 overview）
-    const [trendNotes, trendLeads, trendCamps] = await Promise.all([
+    // 趋势（东八区日键；内容指标走日维度表，线索走专业号线索经营）
+    const [trendDaily, trendNotes, trendClues, trendCamps, trendClueUsers] = await Promise.all([
+      this.prisma.koxNoteDailyStat.findMany({
+        where: dailyBase(start, end),
+        select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true },
+      }),
       this.prisma.koxNote.findMany({
         where: noteBase(start, end),
-        select: { publishTime: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true },
+        select: { publishTime: true },
       }),
-      this.prisma.laiguLead.findMany({
-        where: leadWin(start, end),
-        select: { isResource: true, phone: true, clientMessageCount: true, sessionCreatedAt: true, lastMessageAt: true },
+      this.prisma.proClueDaily.findMany({
+        where: clueWin(start, end),
+        select: { day: true, enterAll: true, openAll: true, leadsAll: true, cardAdTraffic: true, cardOrganic: true },
       }),
       this.prisma.koxCampaignDailyStat.findMany({
-        where: { brandId, statDate: { gte: start, lte: end } },
+        where: { brandId, statDate: { gte: start, lte: end }, advertiserId: mddAdvertiserId },
         select: { statDate: true, fee: true },
+      }),
+      this.prisma.proClueUserDay.findMany({
+        where: { brandId, day: { gte: start, lte: end }, leads: true },
+        select: { day: true, sysTagId: true },
       }),
     ]);
     const days: string[] = [];
@@ -2828,35 +2910,68 @@ export class KoxService {
       days.push(new Date(t).toISOString().slice(0, 10));
     }
     const trendMap = new Map(
-      days.map((d) => [d, { date: d, item_cnt: 0, view_sum: 0, exposure_sum: 0, interaction_sum: 0, ad_cost: 0, ad_msg_enter: 0, ad_msg_open: 0, ad_msg_leads: 0 }]),
+      days.map((d) => [
+        d,
+        { date: d, item_cnt: 0, view_sum: 0, exposure_sum: 0, interaction_sum: 0, ad_cost: 0, lead_enter: 0, lead_open: 0, lead_leads: 0 },
+      ]),
     );
-    for (const x of trendNotes) {
-      if (!x.publishTime) continue;
-      const row = trendMap.get(dayKey08(x.publishTime));
+    for (const x of trendDaily) {
+      const row = trendMap.get(dayKey08(x.day));
       if (row) {
-        row.item_cnt += 1;
         row.view_sum += x.views;
         row.exposure_sum += x.exposure;
         row.interaction_sum += x.likes + x.collects + x.comments + x.shares;
       }
     }
+    for (const x of trendNotes) {
+      if (!x.publishTime) continue;
+      const row = trendMap.get(dayKey08(x.publishTime));
+      if (row) row.item_cnt += 1;
+    }
     for (const x of trendCamps) {
       const row = trendMap.get(dayKey08(x.statDate));
-      if (row) row.ad_cost += n(x.fee);
+      if (row && caliber !== 'natural') row.ad_cost += n(x.fee);
     }
-    for (const x of trendLeads) {
-      const at = x.sessionCreatedAt ?? x.lastMessageAt;
-      if (!at) continue;
-      const row = trendMap.get(dayKey08(at));
+    for (const x of trendClues) {
+      const row = trendMap.get(dayKey08(x.day));
       if (!row) continue;
-      row.ad_msg_enter += 1;
-      if (x.clientMessageCount > 0) row.ad_msg_open += 1;
-      if (x.isResource || x.phone) row.ad_msg_leads += 1;
+      row.lead_enter =
+        caliber === 'natural' ? n(x.cardOrganic) : caliber === 'juguang' ? n(x.cardAdTraffic) : x.enterAll;
+      row.lead_open = caliber === 'total' ? x.openAll : 0;
+      row.lead_leads = x.leadsAll;
     }
+    // 自然/聚光口径的留资日拆分（客户明细流量标签；全窗无标签时维持汇总值）
+    if (caliber !== 'total') {
+      const tagged = trendClueUsers.filter((u) => u.sysTagId === 11 || u.sysTagId === 12);
+      if (tagged.length) {
+        const byDay = new Map<string, number>();
+        for (const u of tagged) {
+          const k = dayKey08(u.day);
+          if (caliber === 'natural' ? u.sysTagId === 12 : u.sysTagId === 11) {
+            byDay.set(k, (byDay.get(k) ?? 0) + 1);
+          }
+        }
+        for (const [k, v] of byDay) {
+          const row = trendMap.get(k);
+          if (row) row.lead_leads = v;
+        }
+        for (const row of trendMap.values()) {
+          if (!byDay.has(row.date)) row.lead_leads = 0;
+        }
+      }
+    }
+
+    const caliberScopeNote =
+      caliber === 'natural'
+        ? '自然流口径：内容/阅读/互动仅非投流笔记（MCC 笔记分析日维度）；进线/留资=专业号-线索经营自然流量（开口不拆分）'
+        : caliber === 'juguang'
+          ? '聚光投放口径：内容/阅读/互动仅投流笔记（MCC 笔记分析日维度）；进线/留资=专业号-线索经营广告流量（开口不拆分）；消耗=聚光账户日报（10847045）'
+          : '汇总口径：账号=小红书 KOS 专业号（启用，仅员工/门店账号）；内容/阅读/互动=MCC 笔记分析日维度（发布时间在筛选区间）；爆文=单篇互动（赞+藏+评+享）≥500；进线/开口/留资=专业号-线索经营（MCC 数据→经营分析→进入专业号，含自然+广告流量）；投放=聚光账户日报（10847045）；环比=上一等长周期对比';
 
     return {
       start: dayKey08(start),
       end: dayKey08(end),
+      caliber,
       days,
       global: { kos_num: kosNum, store_num: storeNames.length, fans_sum: fansSum },
       summary: {
@@ -2877,10 +2992,10 @@ export class KoxService {
         pm_inquiries: cur.lead.pm_inquiries,
         pm_openings: cur.lead.pm_openings,
         pm_leads: cur.lead.pm_leads,
-        open_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : 0,
+        open_rate: cur.lead.pm_inquiries && cur.lead.pm_openings != null ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : null,
         lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
         total_leads: cur.lead.total_leads,
-        scope_note: '线索=来鼓私信会话（仅 Morgandada 投放账户/门店账号），留资=留资卡∪电话',
+        scope_note: '进线/开口/留资=专业号-线索经营（MCC 数据→经营分析→进入专业号）；自然/聚光口径按平台流量标签拆分',
       },
       ad: {
         cost: cur.ad.cost,
@@ -2906,8 +3021,7 @@ export class KoxService {
       },
       tag_facets: tagFacetList,
       trend: [...trendMap.values()],
-      scope_note:
-        '账号=小红书 KOS 专业号（启用）；内容/阅读/互动=笔记累计口径（发布时间在筛选区间，支持账号标签筛选）；爆文=单篇互动（赞+藏+评+享）≥500；线索=来鼓私信会话（仅 Morgandada 投放账户/门店账号），留资=留资卡∪电话；投放=聚光账户日报；环比=上一等长周期对比',
+      scope_note: caliberScopeNote,
     };
   }
 

@@ -99,7 +99,15 @@ const isOfficial = (r) =>
   const prisma = new PrismaClient();
   const cfg = await prisma.proOrgConfig.findUnique({ where: { brandId: BRAND_ID } });
 
-  const browser = await chromium.launch({ headless: process.env.HEADLESS !== '0', args: ['--no-proxy-server', '--disable-blink-features=AutomationControlled'] });
+  const browser = await chromium.launch({
+    headless: process.env.HEADLESS !== '0',
+    args: [
+      '--no-proxy-server',
+      '--disable-blink-features=AutomationControlled',
+      // root 下必须 --no-sandbox，否则 chromium 挂起（deploy 用户跑 cron 无此问题）
+      ...(process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : []),
+    ],
+  });
   const ctxOpts = { userAgent: UA, locale: 'zh-CN', viewport: { width: 1600, height: 1000 } };
   let storageState;
   if (cfg?.storageState) { try { storageState = JSON.parse(cfg.storageState); } catch {} }
@@ -283,7 +291,14 @@ const isOfficial = (r) =>
     if (r.err) { console.log(`[${day}] 失败: ${r.err}`); continue; }
     const { totals, users, cards } = r;
     if (DRY) {
+      const flowDist = {};
+      const leadsFlowDist = {};
+      for (const u of users.values()) {
+        flowDist[u.sysTagId ?? 'null'] = (flowDist[u.sysTagId ?? 'null'] ?? 0) + 1;
+        if (u.leads) leadsFlowDist[u.sysTagId ?? 'null'] = (leadsFlowDist[u.sysTagId ?? 'null'] ?? 0) + 1;
+      }
       console.log(`[${day}] dry: enterAll=${totals.enterAll} openAll=${totals.openAll} leadsAll=${totals.leadsAll} | KOS ${totals.enterKos}/${totals.openKos}/${totals.leadsKos} | 卡 ${cards.enterNotOpen}/${cards.openNotLeads}/${cards.leadsDone}/${cards.adTraffic}/${cards.organic} | 用户日 ${users.length}`);
+      console.log(`[${day}] dry sysTagId 分布 全体=${JSON.stringify(flowDist)} 留资用户=${JSON.stringify(leadsFlowDist)}`);
       done++;
       continue;
     }
