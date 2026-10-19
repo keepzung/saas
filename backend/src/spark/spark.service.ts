@@ -943,10 +943,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const rows: Record<string, unknown>[] = [];
     let total = 0;
-    const maxPages = 100;
+    // 全创作者的笔记×日行很大（34 天 ≈ 8 万行，探针实测 30 天 69,729 行），pageSize 500 × 200 页覆盖；
+    // 视图的 author_name 服务端过滤不生效（2026-10 探针），基线账号在客户端过滤
+    const maxPages = 200;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList(
-        { timeStart, timeEnd: statDate, timeDim: 'date_key', pageNo, pageSize: NOTE_PAGE_SIZE },
+        { timeStart, timeEnd: statDate, timeDim: 'date_key', pageNo, pageSize: 500 },
         org,
       );
       total = data.total;
