@@ -3849,9 +3849,54 @@ export class KoxService {
       }
       if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else if (brandId === 5) {
-      // Morgandada(5)：私信咨询/开口 = 笔记分析私信列（上方 notes 循环按账号累加，快照累计）；
-      // 线索数（留资）= 线索管理→线索分析 按归属账户（含广告/自然线索拆分，2026-10-21 客户拍板）。
-      // 归属匹配：sub_user_id↔KosAccount.authorId 优先，sub_user_name↔昵称/门店名兜底。
+      // Morgandada(5)：
+      // 私信进线/开口/留资 = MCC 员工矩阵→员工数据明细（SparkStaffUserDaily 逐日×员工号求和，
+      // 2026-10-22 客户拍板，与区域数据分析同源；日增量行，平台 T+1 出数，库存自 2026-10-06 起）。
+      // 归属：userId↔authorUrl 主页 uid 优先，昵称/员工名/运营人兜底（23/23 全覆盖）。
+      const staffRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: {
+          userId: true, staffName: true, nickname: true,
+          messageOpenCnt: true, messageDrivingOpenCnt: true, msgLeadsNum: true,
+        },
+      });
+      const uidToIdS = new Map<string, number>();
+      for (const a of accounts) {
+        const uid = (a.authorUrl ?? '').match(/\/profile\/([0-9a-zA-Z]+)$/)?.[1];
+        if (uid) uidToIdS.set(uid, a.id);
+      }
+      const nickToIdS = new Map(accounts.map((a) => [a.nickname, a.id]));
+      const opToIdS = new Map(
+        accounts.filter((a) => a.operatorName).map((a) => [a.operatorName as string, a.id]),
+      );
+      const staffByAcc = new Map<number, { enter: number; open: number; leads: number }>();
+      let staffHit = 0;
+      for (const r of staffRows) {
+        const accId =
+          uidToIdS.get(r.userId) ??
+          (r.nickname ? nickToIdS.get(r.nickname) : undefined) ??
+          (r.staffName ? nickToIdS.get(r.staffName) : undefined) ??
+          (r.staffName ? opToIdS.get(r.staffName) : undefined) ??
+          null;
+        if (accId == null || !idSet.has(accId)) continue;
+        staffHit += 1;
+        const cur = staffByAcc.get(accId) ?? { enter: 0, open: 0, leads: 0 };
+        cur.enter += r.messageOpenCnt;
+        cur.open += r.messageDrivingOpenCnt;
+        cur.leads += r.msgLeadsNum;
+        staffByAcc.set(accId, cur);
+      }
+      for (const [accId, v] of staffByAcc) {
+        bump(accId, (a) => {
+          // 覆盖上方 notes 循环的笔记私信快照累计值（快照口径保留给总览/投流 hero）
+          a.pm_inquiries = v.enter;
+          a.pm_openings = v.open;
+          a.pm_leads = v.leads;
+        });
+      }
+      if (staffHit) metric_source += '+staff_matrix_belong';
+
+      // 广告/自然线索拆分 = 线索管理→线索分析 按归属账户（留资主列已切员工数据明细口径）
       const clueRows = await this.prisma.clueAnalysisDaily.findMany({
         where: { brandId: 5, day: { gte: start, lte: end } },
         select: { subUserId: true, subUserName: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
@@ -3881,8 +3926,6 @@ export class KoxService {
       for (const [accId, v] of clueByAcc) {
         clueHit += 1;
         bump(accId, (a) => {
-          // 线索数覆盖笔记口径的 pm_leads（上方 notes 循环累加值作废）
-          a.pm_leads = v.c;
           a.pm_leads_ad = v.ad;
           a.pm_leads_nature = v.nature;
         });
@@ -4010,7 +4053,9 @@ export class KoxService {
       ],
       metric_note: metric_source.startsWith('weekly_snapshot')
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
-        : metric_source.includes('leyoon_daily')
+        : metric_source.includes('staff_matrix_belong')
+          ? '私信进线/开口/留资=员工矩阵→员工数据明细按所选区间逐日求和（2026-10-22 客户拍板；员工号数据平台 T+1 出数，2026-10-06 起有数）；广告/自然线索=线索管理→线索分析按归属账户；内容指标=笔记周期累计口径；分层=周度留资折算'
+          : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
             : metric_source.startsWith('pro_staff')
               ? `内容指标=专业号员工矩阵窗口快照（发布/曝光/阅读/互动，快照 ${metric_source.match(/statDate=([\d-]+)/)?.[1] || '无匹配分区'}，每日自动同步）；进线/开口/留资=客户管理获客工具统计按日×账号求和（留资含私信+服务卡+企微+落地页+个微复制等全部组件）；赞/藏/评/CES=聚光「商业内容管理」按笔记累计口径；分层=周度留资折算`
