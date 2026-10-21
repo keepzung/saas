@@ -440,6 +440,18 @@ export class MddSalesController {
       .map(([productLine, qty]) => ({ product_line: productLine, quantity: qty }))
       .sort((a, b) => b.quantity - a.quantity);
 
+    // 订单品名销量排行（按订单明细 productName，前 20）
+    const byName = new Map<string, number>();
+    for (const r of orderRows) {
+      const name = (r.productName ?? '').trim();
+      if (!name) continue;
+      byName.set(name, (byName.get(name) ?? 0) + n(r.quantity));
+    }
+    const orderRanking = [...byName.entries()]
+      .map(([name, qty]) => ({ name, qty }))
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 20);
+
     // 日度趋势（订单按 date 求销量/销售额；月度汇总数据无日维度时不返回，前端回退月度）
     const dailyMap = new Map<string, { qty: number; amount: number }>();
     for (const r of orderRows) {
@@ -503,6 +515,7 @@ export class MddSalesController {
       trend,
       daily_trend: dailyTrend,
       ranking,
+      order_ranking: orderRanking,
       detail,
       facets: {
         provinces: provinces.map((x) => x.province).filter(Boolean),

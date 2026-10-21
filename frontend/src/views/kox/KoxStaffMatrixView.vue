@@ -12,22 +12,22 @@
       <div class="hero-banner">
         <div class="hero-item">
           <div class="hero-label">绑定主账户</div>
-          <div class="hero-value">{{ fmt(summary.bind_brand_num) }}</div>
+          <div class="hero-value">{{ isMdd ? 0 : fmt(summary.bind_brand_num) }}</div>
         </div>
         <div class="hero-divider"></div>
-        <div class="hero-item">
+        <div class="hero-item" v-if="!isMdd">
           <div class="hero-label">开通员工号权限</div>
           <div class="hero-value primary">{{ fmt(summary.open_kos_brand_num) }}</div>
         </div>
-        <div class="hero-divider"></div>
+        <div class="hero-divider" v-if="!isMdd"></div>
         <div class="hero-item">
           <div class="hero-label">绑定员工号</div>
-          <div class="hero-value violet">{{ fmt(summary.kos_account_num) }}</div>
+          <div class="hero-value violet">{{ isMdd ? fmt(mddAccountTotal) : fmt(summary.kos_account_num) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">员工笔记数</div>
-          <div class="hero-value green">{{ fmt(summary.create_note_num) }}</div>
+          <div class="hero-value green">{{ isMdd ? fmt(mddNoteCnt) : fmt(summary.create_note_num) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
@@ -128,6 +128,8 @@ import PageWrapper from '../../components/PageWrapper.vue';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
 import { getStaffMatrixSummary, getStaffMatrixBrands, getStaffMatrixUsers } from '../../api/spark';
+import { getMddOverview } from '../../api/kox';
+import request from '../../api/request';
 
 const auth = useAuthStore();
 
@@ -190,10 +192,26 @@ const staffColumns = [
 
 const columns = computed(() => (dim.value === 'brand' ? brandColumns : staffColumns));
 
+// MDD：绑定员工号对齐运营账号数、员工笔记数对齐运营总览「产出内容数」（同窗口同源）
+const mddAccountTotal = ref(0);
+const mddNoteCnt = ref(0);
+async function reloadMddHero() {
+  if (!isMdd.value) return;
+  try {
+    const rank = await request.get('/kox/account-ranking', { params: { brandId: auth.currentBrandId ?? 5, page_size: 1, metric: 'pm_leads' } });
+    mddAccountTotal.value = rank.total ?? (rank.data ?? {}).total ?? 0;
+  } catch { /* ignore */ }
+  try {
+    const ov = await getMddOverview({ brandId: auth.currentBrandId ?? 5, start: dateParams().start, end: dateParams().end });
+    mddNoteCnt.value = ov.summary?.item_cnt ?? 0;
+  } catch { /* ignore */ }
+}
+
 async function reloadSummary() {
   const res = await getStaffMatrixSummary(dateParams());
   summary.value = res.latest ?? {};
   summaryDays.value = res.days ?? [];
+  await reloadMddHero();
   nextTick(renderChart);
 }
 

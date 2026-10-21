@@ -269,6 +269,7 @@ const emptyHint = ref(null);
 const detail = ref([]);
 const trend = ref([]);
 const dailyTrend = ref([]);
+const orderRanking = ref([]);
 const storeKos = ref(new Map());
 const COLORS = ['#3456e6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
 
@@ -364,6 +365,7 @@ async function reload() {
     detail.value = res.detail ?? [];
     trend.value = res.trend ?? [];
     dailyTrend.value = res.daily_trend ?? [];
+    orderRanking.value = res.order_ranking ?? [];
     facets.value = res.facets ?? {};
     await nextTick();
     renderTrend();
@@ -462,7 +464,34 @@ function renderTrend() {
 function renderRank() {
   if (!rankEl.value) return;
   if (!rankChart) rankChart = echarts.init(rankEl.value);
-  const rows = rankFromDetail().slice(0, 12);
+  // 按订单品名的销量排行（订单明细 productName；无订单数据回退门店品系推导）
+  const rows = (orderRanking.value.length ? orderRanking.value : rankFromDetail()).slice(0, 10);
+  if (orderRanking.value.length) {
+    rankChart.setOption(
+      {
+        tooltip: { trigger: 'axis', valueFormatter: (v) => Number(v ?? 0).toLocaleString() + ' 件' },
+        grid: { left: 44, right: 16, top: 24, bottom: 74 },
+        xAxis: {
+          type: 'category',
+          data: rows.map((r) => r.name),
+          axisLabel: { rotate: 40, fontSize: 10, interval: 0, overflow: 'truncate', width: 90 },
+        },
+        yAxis: { type: 'value', name: '件' },
+        series: [
+          {
+            name: '销量',
+            type: 'bar',
+            barMaxWidth: 22,
+            itemStyle: { color: '#5b7cf0', borderRadius: [4, 4, 0, 0] },
+            label: { show: true, position: 'top', fontSize: 10, color: '#475569' },
+            data: rows.map((r) => r.qty),
+          },
+        ],
+      },
+      { notMerge: true },
+    );
+    return;
+  }
   rankChart.setOption(
     {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -475,7 +504,7 @@ function renderRank() {
           barMaxWidth: 18,
           itemStyle: { borderRadius: [0, 6, 6, 0], color: '#5b7cf0' },
           label: { show: true, position: 'right', fontSize: 11, color: '#475569' },
-          data: rows.map((r) => r.qty),
+          data: rows.map((r) => r.qty).reverse(),
         },
       ],
     },
