@@ -339,7 +339,9 @@ await backToList();
         let stat = null;
         const noteUpserts = [];
         let totalPages = 1;
-        for (let page = 1; page <= totalPages && page <= 20; page++) {
+        let emptyPages = 0;
+        // 上限 100 页×100 行 = 1 万行/天/账号：20 页（2000 行）会截断特斯拉大投放日的逐笔记行
+        for (let page = 1; page <= totalPages && page <= 100; page++) {
           const r = await noteRowsCall(day, page);
           if (!r) { console.log(`[${acc.name} ${day}] p${page} 无响应`); break; }
           if (r.stat) stat = r.stat;
@@ -358,6 +360,8 @@ await backToList();
               isRtbAdver: row.isRtb,
             });
           }
+          // 深分页被平台截断（页码递增但返回空行）时及时止损，避免空转到 totalPages
+          if (!r.rows.length) { emptyPages += 1; if (emptyPages >= 2) break; } else { emptyPages = 0; }
           if (totalPages <= 1) break;
           await sleep(400);
         }
