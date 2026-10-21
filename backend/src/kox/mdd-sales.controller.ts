@@ -366,7 +366,7 @@ export class MddSalesController {
     // 订单级明细（9月起客户底表）：有数据时销量/转化卡以订单为准，与「订单明细」tab 同源
     const orderRows = await this.prisma.mddSalesOrder.findMany({
       where: { brandId: 5, month: { gte: startMonth, lte: endMonth } },
-      select: { quantity: true, amount: true, staff: true, storeName: true, productName: true, repurchase: true, phone: true },
+      select: { quantity: true, amount: true, staff: true, storeName: true, productName: true, repurchase: true, phone: true, date: true },
     });
     const orderQty = orderRows.reduce((a, r) => a + n(r.quantity), 0);
     const orderAmount =
@@ -440,6 +440,20 @@ export class MddSalesController {
       .map(([productLine, qty]) => ({ product_line: productLine, quantity: qty }))
       .sort((a, b) => b.quantity - a.quantity);
 
+    // 日度趋势（订单按 date 求销量/销售额；月度汇总数据无日维度时不返回，前端回退月度）
+    const dailyMap = new Map<string, { qty: number; amount: number }>();
+    for (const r of orderRows) {
+      if (!r.date) continue;
+      const key = new Date(r.date.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+      const cur = dailyMap.get(key) ?? { qty: 0, amount: 0 };
+      cur.qty += n(r.quantity);
+      cur.amount += Number(r.amount ?? 0);
+      dailyMap.set(key, cur);
+    }
+    const dailyTrend = [...dailyMap.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([date, v]) => ({ date, qty: v.qty, amount: Math.round(v.amount * 100) / 100 }));
+
     // 门店明细（矩阵：门店 × 品系）
     const byStore = new Map<
       string,
@@ -487,6 +501,7 @@ export class MddSalesController {
       },
       staff_ranking: [...staffRankingMap.values()].sort((a, b) => b.qty - a.qty),
       trend,
+      daily_trend: dailyTrend,
       ranking,
       detail,
       facets: {

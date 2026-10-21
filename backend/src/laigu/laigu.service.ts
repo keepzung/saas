@@ -445,6 +445,8 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     const messages = session.messages ?? [];
     const times = messages.map((m) => m.created_at).filter((t): t is number => typeof t === 'number');
     const clientMessages = messages.filter((m) => m.role === 'client');
+    // 客户头像：取第一条带 avatar 的客户消息（来鼓消息级头像）
+    const clientAvatar = clientMessages.find((m) => m.avatar)?.avatar ?? null;
     const lastClientText = [...clientMessages]
       .reverse()
       .find((m) => (m.type === 'text' || !m.type) && m.content)?.content;
@@ -457,6 +459,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       sessionId: String(session.session_id),
       clientId: session.client_id ?? null,
       clientName: session.client_name ?? null,
+      clientAvatar: clientAvatar ?? null,
       phone: this.extractPhone(session),
       isResource: Boolean(session.is_resource),
       source: session.source ?? null,
@@ -482,6 +485,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       create: data,
       update: {
         clientName: data.clientName,
+        clientAvatar: data.clientAvatar ?? undefined,
         phone: data.phone ?? undefined,
         isResource: data.isResource,
         clientAttrs: data.clientAttrs,
@@ -596,6 +600,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         id: row.id,
         session_id: row.sessionId,
         client_name: row.clientName,
+        client_avatar: row.clientAvatar ?? null,
         phone: row.phone,
         is_resource: row.isResource,
         source: row.source,
@@ -1054,6 +1059,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       sub_source: lead.subSource,
       chat_entry: lead.chatEntry,
       ip_location: lead.ipLocation,
+      client_avatar: lead.clientAvatar ?? null,
       client_attrs: lead.clientAttrs,
       ad_info: lead.adInfo,
       message_count: lead.messageCount,

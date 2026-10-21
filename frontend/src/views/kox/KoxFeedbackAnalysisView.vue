@@ -128,27 +128,31 @@
           <span class="title">私信内容监控（引流企微 × 话术转化）</span>
         </div>
       </template>
-      <div class="monitor-grid">
-        <div class="mblock">
-          <div class="mb-label">引流企微会话</div>
-          <div class="mb-value" style="color: #16a34a">{{ monitorData.wechat_leads }}</div>
+      <div class="mon-cards">
+        <div class="mon-card">
+          <div class="mon-num" style="color: #16a34a">{{ monitorData.wechat_leads }}</div>
+          <div class="mon-label">引流企微会话</div>
         </div>
-        <div class="mblock">
-          <div class="mb-label">有话术回复会话</div>
-          <div class="mb-value">{{ (monitorData.script_stats || []).reduce((s, v) => s + v.count, 0) }}</div>
+        <div class="mon-card">
+          <div class="mon-num">{{ scriptTotal }}</div>
+          <div class="mon-label">有话术回复会话</div>
+        </div>
+        <div class="mon-card">
+          <div class="mon-num" style="color: #7c3aed">{{ scriptLeadTotal }}</div>
+          <div class="mon-label">话术留资合计</div>
         </div>
       </div>
-      <div class="script-block">
-        <div class="script-title">客服话术 × 留资转化</div>
-        <div v-for="s in monitorData.script_stats" :key="s.name" class="script-row">
-          <span class="script-name">{{ s.name }}</span>
-          <div class="script-track">
-            <div class="script-bar" :style="{ width: s.conv + '%' }"></div>
-          </div>
-          <span class="script-val">{{ s.count }} 会话 · 留资 {{ s.lead }} · 转化 {{ s.conv }}%</span>
+      <div class="script-title" style="margin: 4px 0 10px">客服话术 × 留资转化</div>
+      <div class="script-cards">
+        <div v-for="s in monitorData.script_stats" :key="s.name" class="script-card">
+          <div class="sc-name">{{ s.name }}</div>
+          <div class="sc-conv">{{ s.conv }}<span>%</span></div>
+          <div class="sc-meta">{{ s.count }} 会话 · 留资 {{ s.lead }}</div>
+          <a-progress :percent="s.conv" :show-info="false" size="small" stroke-color="#7c3aed" />
         </div>
         <div v-if="!(monitorData.script_stats || []).length" class="muted mini" style="padding: 12px">暂无话术数据</div>
       </div>
+      <div class="script-title" style="margin: 14px 0 8px">企微引流客户明细</div>
       <a-table
         :columns="wechatColumns"
         :data-source="monitorData.wechat_detail"
@@ -167,7 +171,7 @@
       </a-table>
     </a-card>
 
-    <a-card :bordered="false" size="small">
+    <a-card v-if="feedbackScope !== 'monitor'" :bordered="false" size="small">
       <template #title>
         <div class="card-header">
           <span class="bar"></span>
@@ -322,6 +326,8 @@ const syncTime = ref(dayjs().format('MM-DD HH:mm'));
 // 服务端全量聚合（明细仅返回最近 500 条样本，统计卡必须用全量口径，否则 7/30 天数据一样）
 const serverStats = ref(null);
 const monitorData = ref({ wechat_leads: 0, script_stats: [], wechat_detail: [] });
+const scriptTotal = computed(() => (monitorData.value.script_stats || []).reduce((s, v) => s + (v.count || 0), 0));
+const scriptLeadTotal = computed(() => (monitorData.value.script_stats || []).reduce((s, v) => s + (v.lead || 0), 0));
 const wechatColumns = [
   { title: '客户', key: 'author', width: 140 },
   { title: '最后客户消息', key: 'preview', ellipsis: true },
@@ -1190,5 +1196,76 @@ onMounted(() => {
   .charts-row {
     flex-direction: column;
   }
+}
+
+/* 私信内容监控看板 */
+.mon-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.mon-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.mon-num {
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #1e293b;
+  font-family: 'DIN Alternate', 'Bahnschrift', -apple-system, sans-serif;
+}
+
+.mon-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.script-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.script-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-conv {
+  font-size: 24px;
+  font-weight: 800;
+  color: #7c3aed;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-conv span {
+  font-size: 13px;
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.sc-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 </style>

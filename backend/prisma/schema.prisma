@@ -1326,6 +1326,7 @@ model LaiguLead {
   sessionId          String    @unique
   clientId           String?
   clientName         String?
+  clientAvatar       String?
   phone              String?
   isResource         Boolean   @default(false)
   source             String?

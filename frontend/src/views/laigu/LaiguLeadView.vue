@@ -233,7 +233,8 @@
               :class="{ active: selected?.id === item.id, resourced: item.is_resource }"
               @click="selectLead(item)"
             >
-              <span class="conv-avatar">{{ (item.client_name || '#').slice(0, 1) }}</span>
+              <img v-if="item.client_avatar" class="conv-avatar img" :src="item.client_avatar" loading="lazy" referrerpolicy="no-referrer" @error="$event.target.style.display='none'" />
+              <span v-else class="conv-avatar">{{ (item.client_name || '#').slice(0, 1) }}</span>
               <div class="conv-main">
                 <div class="conv-top">
                   <span class="conv-name">{{ item.client_name || '匿名用户' }}</span>
@@ -258,7 +259,8 @@
           <template v-if="selected">
             <div class="conv-head">
               <div class="ch-left">
-                <span class="conv-avatar sm">{{ (selected.client_name || '#').slice(0, 1) }}</span>
+                <img v-if="selected.client_avatar" class="conv-avatar sm img" :src="selected.client_avatar" referrerpolicy="no-referrer" @error="$event.target.style.display='none'" />
+                <span v-else class="conv-avatar sm">{{ (selected.client_name || '#').slice(0, 1) }}</span>
                 <b class="ch-name">{{ selected.client_name || '匿名用户' }}</b>
                 <a-tag :color="selected.is_resource ? 'green' : 'default'">
                   {{ selected.is_resource ? '已留资' : '未留资' }}
@@ -353,7 +355,8 @@
         <div class="conv-profile">
           <template v-if="selected">
             <div class="profile-cust">
-              <span class="conv-avatar lg">{{ (selected.client_name || '#').slice(0, 1) }}</span>
+              <img v-if="selected.client_avatar" class="conv-avatar lg img" :src="selected.client_avatar" referrerpolicy="no-referrer" @error="$event.target.style.display='none'" />
+              <span v-else class="conv-avatar lg">{{ (selected.client_name || '#').slice(0, 1) }}</span>
               <b>{{ selected.client_name || '匿名用户' }}</b>
             </div>
             <div class="profile-section">
@@ -1283,6 +1286,10 @@ onMounted(() => {
   justify-content: center;
   font-weight: 700;
   flex-shrink: 0;
+}
+
+.conv-avatar.img {
+  object-fit: cover;
 }
 
 .conv-avatar.sm {

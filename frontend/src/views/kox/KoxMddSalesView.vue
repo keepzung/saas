@@ -77,7 +77,7 @@
 
       <a-row :gutter="12">
         <a-col :span="15">
-          <a-card size="small" :bordered="false" title="月度销量趋势">
+          <a-card size="small" :bordered="false" title="销量趋势（日度）">
             <div ref="trendEl" style="height: 320px" />
           </a-card>
         </a-col>
@@ -117,7 +117,18 @@
           row-key="store"
           size="small"
           :scroll="{ x: detailColumns.length > 8 ? 1200 : undefined }"
-        />
+        >
+          <template #expandedRowRender="{ record }">
+            <div v-if="(storeKos.get(record.store) ?? []).length" class="store-kos-list">
+              <div v-for="acc in storeKos.get(record.store)" :key="acc.nickname" class="store-kos-row">
+                <span class="kos-nick">{{ acc.nickname }}</span>
+                <a-tag class="mini" :color="acc.account_type === 'KOS' ? 'green' : 'purple'">{{ acc.account_type }}</a-tag>
+                <span class="muted mini">{{ acc.region_name || '' }}</span>
+              </div>
+            </div>
+            <span v-else class="muted mini">该门店暂无 KOS 账号</span>
+          </template>
+        </a-table>
       </a-card>
     </template>
 
@@ -257,6 +268,8 @@ const staffRanking = ref([]);
 const emptyHint = ref(null);
 const detail = ref([]);
 const trend = ref([]);
+const dailyTrend = ref([]);
+const storeKos = ref(new Map());
 const COLORS = ['#3456e6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
 
 let trendChart = null;
@@ -350,10 +363,12 @@ async function reload() {
     emptyHint.value = res.empty_hint ?? null;
     detail.value = res.detail ?? [];
     trend.value = res.trend ?? [];
+    dailyTrend.value = res.daily_trend ?? [];
     facets.value = res.facets ?? {};
     await nextTick();
     renderTrend();
     renderRank();
+    resolveStoreKos();
   } catch (e) {
     message.error(e.message || '加载失败');
   } finally {
@@ -390,6 +405,39 @@ function onOrderTableChange(p) {
 function renderTrend() {
   if (!trendEl.value) return;
   if (!trendChart) trendChart = echarts.init(trendEl.value);
+  // 日度趋势（订单按日销量+销售额）；无订单日数据时回退月度品系趋势
+  const daily = dailyTrend.value;
+  if (daily.length) {
+    trendChart.setOption(
+      {
+        tooltip: { trigger: 'axis', valueFormatter: (v) => Number(v ?? 0).toLocaleString() },
+        legend: { data: ['销量（件）', '销售额（元）'], bottom: 0 },
+        grid: { left: 56, right: 56, top: 24, bottom: 40 },
+        xAxis: { type: 'category', data: daily.map((x) => x.date.slice(5)) },
+        yAxis: [{ type: 'value', name: '件' }, { type: 'value', name: '元' }],
+        series: [
+          {
+            name: '销量（件）',
+            type: 'bar',
+            barMaxWidth: 16,
+            itemStyle: { color: '#3456e6', borderRadius: [4, 4, 0, 0] },
+            data: daily.map((x) => x.qty),
+          },
+          {
+            name: '销售额（元）',
+            type: 'line',
+            smooth: true,
+            symbolSize: 4,
+            yAxisIndex: 1,
+            itemStyle: { color: '#f59e0b' },
+            data: daily.map((x) => x.amount),
+          },
+        ],
+      },
+      { notMerge: true },
+    );
+    return;
+  }
   const products = [...new Set(trend.value.flatMap((p) => Object.keys(p).filter((k) => k !== 'month')))];
   trendChart.setOption(
     {
@@ -595,8 +643,34 @@ function onResize() {
   rankChart?.resize();
 }
 
+// 门店 → KOS 账号映射（账号基线 storeName 与订单门店名模糊匹配）
+const kosAccounts = ref([]);
+async function loadStoreKos() {
+  try {
+    const res = await request.get('/kox/account-ranking', { params: { brandId: 5, page_size: 100, metric: 'pm_leads' } });
+    kosAccounts.value = res.list ?? [];
+  } catch {
+    /* 账号基线加载失败不影响主表 */
+  }
+}
+function resolveStoreKos() {
+  const map = new Map();
+  for (const row of detail.value) {
+    const store = String(row.store ?? '').trim();
+    const matched = kosAccounts.value
+      .filter((a) => {
+        const s = String(a.store_name ?? '').trim();
+        return s && (s === store || store.includes(s) || s.includes(store));
+      })
+      .map((a) => ({ nickname: a.nickname, account_type: a.account_type, region_name: a.region_name }));
+    map.set(store, matched);
+  }
+  storeKos.value = map;
+}
+
 onMounted(() => {
   reload();
+  loadStoreKos().then(resolveStoreKos);
   window.addEventListener('resize', onResize);
 });
 
