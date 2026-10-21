@@ -47,11 +47,24 @@
 
         <div v-if="result" class="result-row">
           <a-alert
-            type="success"
+            :type="appliedCount > 0 ? 'success' : 'error'"
             show-icon
-            :message="`导入完成：新增 ${result.added}，更新 ${result.updated}`"
+            :message="
+              appliedCount > 0
+                ? `导入完成：新增 ${result.added}，更新 ${result.updated}`
+                : '导入失败：没有账号写入，请根据下方错误说明修正后重新提交'
+            "
           />
-          <router-link to="/kox_df/monitoring/list">前往监测列表查看 →</router-link>
+          <a-alert
+            v-if="result.errors && result.errors.length"
+            type="warning"
+            show-icon
+            :message="`以下 ${result.errors.length} 行未导入：${errorSummary}`"
+          />
+          <router-link
+            v-if="appliedCount > 0"
+            to="/kox_df/monitoring/list"
+          >前往监测列表查看 →</router-link>
         </div>
       </div>
     </a-spin>
@@ -59,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { FolderOpenOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -81,6 +94,20 @@ const previewColumns = [
   { title: '大区', dataIndex: 'regionName', width: 110, ellipsis: true },
   { title: '门店', dataIndex: 'storeName', ellipsis: true },
 ];
+
+const appliedCount = computed(
+  () => (result.value?.added ?? 0) + (result.value?.updated ?? 0),
+);
+
+const errorSummary = computed(() => {
+  const errs = result.value?.errors ?? [];
+  if (!errs.length) return '';
+  const head = errs
+    .slice(0, 10)
+    .map((e) => `第 ${e.row} 行：${e.msg}`)
+    .join('；');
+  return errs.length > 10 ? `${head}……等共 ${errs.length} 行` : head;
+});
 
 async function onFile(file) {
   result.value = null;
@@ -117,7 +144,11 @@ async function submit() {
     result.value = res;
     rows.value = [];
     fileList.value = [];
-    message.success('导入完成');
+    if (appliedCount.value > 0) {
+      message.success(`导入完成：新增 ${res.added}，更新 ${res.updated}`);
+    } else {
+      message.error('没有账号被导入，请查看页面上的错误说明');
+    }
   } catch (e) {
     message.error(e.message || '导入失败');
   } finally {

@@ -50,6 +50,7 @@ export interface AccountDto {
   operatorName?: string;
   operatorMobile?: string;
   authorUrl?: string;
+  brandId?: number;
 }
 
 export interface AccountManageDto {
@@ -87,6 +88,7 @@ export interface ImportAccountRow {
   operatorName?: string;
   operatorMobile?: string;
   accountTag?: string;
+  brandId?: string | number;
 }
 
 const num = (v: unknown): number => {
@@ -218,6 +220,7 @@ export class KoxService {
         operatorName: dto.operatorName,
         operatorMobile: dto.operatorMobile,
         authorUrl: dto.authorUrl,
+        ...(dto.brandId ? { brandId: dto.brandId } : {}),
       },
     });
     return { id: account.id };
@@ -4333,6 +4336,9 @@ export class KoxService {
 
       // 仅写入 Excel 提供的非空字段（重叠账号不覆盖系统已有昵称/状态）
       const data: Record<string, unknown> = {};
+      // 品牌归属随前端当前工作区走；重叠账号一并改判，否则导入后客户视图按品牌过滤仍不可见
+      const rowBrandId = Number(r.brandId);
+      if (Number.isInteger(rowBrandId) && rowBrandId > 0) data.brandId = rowBrandId;
       if (type) data.accountType = type;
       if (regionName) data.regionName = regionName;
       if (saleArea) data.saleArea = saleArea;

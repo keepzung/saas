@@ -603,7 +603,7 @@ async function saveAdd() {
   }
   saving.value = true;
   try {
-    await createKoxAccount({ ...addForm });
+    await createKoxAccount({ ...addForm, brandId: auth.currentBrandId ?? undefined });
     message.success('已添加监测');
     addOpen.value = false;
     Object.assign(addForm, {
