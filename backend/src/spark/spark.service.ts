@@ -907,6 +907,68 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * 线索分析日维度同步（MCC 线索管理→线索分析，viewAlias=mcc_assets_clueManage_clueAnalysisListView）：
+   * 归属账户×日的 新增线索/广告线索/自然线索/留资用户数 —— MDD 线索权威口径（含广告/自然拆分）。
+   * 每次刷新 statDate 往前 7 天（容忍晚到数据），行按自身 date_key 落库。
+   */
+  async syncClueAnalysis(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
+    const org = ctx ?? (await this.orgs.forBrand());
+    if (!org) throw new Error('无可用星火组织配置');
+    const statDate = date ?? this.syncDate();
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
+      const s = String(v ?? '').replace(/,/g, '').trim();
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.round(n) : 0;
+    };
+    const str = (v: unknown): string => String(v ?? '').trim();
+    const rows: Record<string, unknown>[] = [];
+    let total = 0;
+    for (let pageNo = 1; pageNo <= 40; pageNo++) {
+      const data = await this.api.clueAnalysisList({ start: statDate, end: statDate, timeDim: 'date_key', pageNo, pageSize: 200 }, org);
+      total = data.total;
+      rows.push(...data.rows);
+      if (rows.length >= total || !data.rows.length) break;
+    }
+    let upserted = 0;
+    for (const r of rows) {
+      const m = this.staffRowMap(r);
+      const subUserId = str(m.get('sub_user_id'));
+      const dayStr = str(m.get('date_key')) || statDate;
+      if (!subUserId) continue;
+      const day = new Date(`${dayStr}T00:00:00.000Z`);
+      const data = {
+        subUserName: str(m.get('sub_user_name')) || null,
+        proUserId: str(m.get('pro_user_id')) || null,
+        proUserName: str(m.get('pro_user_name')) || null,
+        clueCnt: num(m.get('new_clue_cnt')),
+        adsClueCnt: num(m.get('new_ads_clue_cnt')),
+        natureClueCnt: num(m.get('new_nature_clue_cnt')),
+        leadsUserCnt: num(m.get('leads_user_cnt')),
+      };
+      await this.prisma.clueAnalysisDaily.upsert({
+        where: { brandId_day_subUserId: { brandId: org.brandId, day, subUserId } },
+        create: { brandId: org.brandId, day, subUserId, ...data },
+        update: data,
+      });
+      upserted += 1;
+    }
+    const result: SyncResult = {
+      syncType: 'clue_analysis',
+      statDate,
+      status: 'success',
+      fetched: rows.length,
+      upserted,
+      accountsAdded: 0,
+      accountsRemoved: 0,
+      message: `total=${total}, day=${statDate}`,
+      brandId: org.brandId,
+    };
+    await this.prisma.sparkSyncLog.create({ data: result });
+    return result;
+  }
+
+  /**
    * 笔记日维度同步（MCC 笔记分析 time_dim=date_key，笔记×日行；2026-10 探针验证支持 ≥79 天回溯）。
    * MDD 总览日维度权威口径：每次刷新 statDate 往前 34 天（30 天窗口 + 4 天重叠容忍晚到），行按自身 date_key 落库。
    */

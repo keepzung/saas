@@ -1558,6 +1558,26 @@ model KoxJuguangNoteDaily {
   @@index([brandId, day])
 }
 
+// MCC 线索分析「数据明细」按日×归属账户（MDD 线索权威口径；带广告/自然线索拆分与留资用户数）
+// 数据源 viewAlias=mcc_assets_clueManage_clueAnalysisListView（时间维度=日维度，线索生成时间）
+model ClueAnalysisDaily {
+  id            Int      @id @default(autoincrement())
+  brandId       Int      @default(5)
+  day           DateTime
+  subUserId     String
+  subUserName   String?
+  proUserId     String?
+  proUserName   String?
+  clueCnt       Int      @default(0)
+  adsClueCnt    Int      @default(0)
+  natureClueCnt Int      @default(0)
+  leadsUserCnt  Int      @default(0)
+  fetchedAt     DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, day, subUserId])
+  @@index([brandId, day])
+}
+
 // MCC 笔记分析「日维度」笔记×日指标（MDD 总览日维度权威口径；数据源 viewAlias=mcc_assets_creativityContent_noteAnalysisView
 // + time_dim=date_key，支持长回溯）。自然/聚光口径按 isRtbAdver 拆分。
 model KoxNoteDailyStat {

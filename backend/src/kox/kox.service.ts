@@ -2907,11 +2907,7 @@ export class KoxService {
     // 单窗口聚合（cur/prev 复用）。专业号流量标签：sysTagId 11=广告流量 12=自然流量
     const aggWindow = async (wStart: Date, wEnd: Date) => {
       // 实时区间直查专业号线索（与平台页面一致）；失败回退下方日表聚合
-      const [dailyRows, notes, camps] = await Promise.all([
-        this.prisma.koxNoteDailyStat.findMany({
-          where: dailyBase(wStart, wEnd),
-          select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true, followCount: true },
-        }),
+      const [notes, camps] = await Promise.all([
         this.prisma.koxNote.findMany({
           where: noteBase(wStart, wEnd),
           select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true },
@@ -2921,49 +2917,43 @@ export class KoxService {
           select: { fee: true, impression: true, click: true, interaction: true, msgLeadsNum: true },
         }),
       ]);
-      const itemCnt0 = notes.length;
-      // 内容指标：日维度权威口径；日表空窗时回退笔记快照求和（notes_daily 回填完成前的兜底）
-      const useDaily = dailyRows.length > 0;
-      let viewSum = useDaily
-        ? sum(dailyRows.map((x) => x.views))
-        : sum(notes.map((x) => x.views));
-      let exposureSum = useDaily
-        ? sum(dailyRows.map((x) => x.exposure))
-        : sum(notes.map((x) => x.exposure));
-      let interactionSum = useDaily
-        ? sum(dailyRows.map((x) => x.likes + x.collects + x.comments + x.shares))
-        : sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares));
-      const followSum = useDaily
-        ? sum(dailyRows.map((x) => x.followCount))
-        : sum(notes.map((x) => x.followCount));
-      // 总数类指标实时取 MCC「汇总分析」（员工笔记 + 笔记发布日期窗口，与平台页面一致）
-      let cardVals: Record<string, number> | null = null;
-      let itemCnt = itemCnt0;
-      if (caliber === 'total') {
-        cardVals = await this.mccNoteCardLive(brandId, dayKey08(wStart), dayKey08(wEnd));
-        if (cardVals) {
-          if (cardVals.note_cnt != null) itemCnt = cardVals.note_cnt;
-          if (cardVals.imp_num != null) exposureSum = cardVals.imp_num;
-          if (cardVals.read_feed_num != null) viewSum = cardVals.read_feed_num;
-          if (cardVals.engage_num != null) interactionSum = cardVals.engage_num;
-        }
-      }
+      const itemCnt = notes.length;
+      // 内容指标 = 笔记明细分析行（KoxNote 快照，员工笔记）求和——与内容表现/账号表现同口径（2026-10-21 客户拍板）
+      const viewSum = sum(notes.map((x) => x.views));
+      const exposureSum = sum(notes.map((x) => x.exposure));
+      const interactionSum = sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares));
+      const followSum = sum(notes.map((x) => x.followCount));
       const campImpression = sum(camps.map((x) => n(x.impression)));
       const campClick = sum(camps.map((x) => n(x.click)));
       const campInteraction = sum(camps.map((x) => n(x.interaction)));
 
-      // ── 私信三数统一口径（2026-10-20 客户拍板）：MCC 笔记分析「笔记明细分析」（员工笔记）
-      //    的 私信咨询数/私信开口数/私信留资数，全量快照累计（与平台合计视角一致，不随日期筛选变化）。
+      // ── 私信咨询/开口 = MCC 笔记分析私信列（员工笔记），全量快照累计（2026-10-20 客户拍板）；
+      //    线索数（留资）= MCC 线索管理→线索分析（按线索生成时间窗口，含广告/自然拆分，2026-10-21 客户拍板）。
+      //    线索表空窗时回退笔记私信留资快照值。
       const notePmAgg = await this.prisma.koxNote.aggregate({
         where: { brandId },
         _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true },
       });
+      const clueAgg = await this.prisma.clueAnalysisDaily.aggregate({
+        where: { brandId, day: { gte: wStart, lte: wEnd } },
+        _sum: { clueCnt: true, adsClueCnt: true, natureClueCnt: true },
+      });
+      const clueTotal = clueAgg._sum.clueCnt ?? 0;
+      const leadsFallback = notePmAgg._sum.pmLeads ?? 0;
       const lead = {
         pm_inquiries: notePmAgg._sum.pmInquiries ?? 0,
         pm_openings: notePmAgg._sum.pmOpenings ?? 0,
-        pm_leads: notePmAgg._sum.pmLeads ?? 0,
-        total_leads: (notePmAgg._sum.pmLeads ?? 0) as number | null,
+        pm_leads:
+          caliber === 'natural'
+            ? (clueAgg._sum.natureClueCnt ?? 0) || leadsFallback
+            : caliber === 'juguang'
+              ? (clueAgg._sum.adsClueCnt ?? 0) || leadsFallback
+              : clueTotal || leadsFallback,
+        total_leads: 0 as number | null,
+        clue_ad: clueAgg._sum.adsClueCnt ?? 0,
+        clue_nature: clueAgg._sum.natureClueCnt ?? 0,
       };
+      lead.total_leads = lead.pm_leads;
 
       return {
         item_cnt: itemCnt,
@@ -3000,8 +2990,8 @@ export class KoxService {
     const storeNames = [...new Set(kosAccounts.map((a) => (a.storeName ?? '').trim()).filter(Boolean))];
     const fansSum = sum(kosAccounts.map((a) => a.fans ?? 0));
 
-    // 趋势（东八区日键；内容指标与私信线均走笔记日维度表）
-    const [trendDaily, trendNotes, trendCamps] = await Promise.all([
+    // 趋势（东八区日键；内容指标与私信线走笔记日维度表，线索线走线索分析日表）
+    const [trendDaily, trendNotes, trendCamps, trendClues] = await Promise.all([
       this.prisma.koxNoteDailyStat.findMany({
         where: dailyBase(start, end),
         select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true, pmInquiries: true, pmOpenings: true, pmLeads: true },
@@ -3013,6 +3003,10 @@ export class KoxService {
       this.prisma.koxCampaignDailyStat.findMany({
         where: { brandId, statDate: { gte: start, lte: end }, advertiserId: mddAdvertiserId },
         select: { statDate: true, fee: true },
+      }),
+      this.prisma.clueAnalysisDaily.findMany({
+        where: { brandId, day: { gte: start, lte: end } },
+        select: { day: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
       }),
     ]);
     const days: string[] = [];
@@ -3033,8 +3027,14 @@ export class KoxService {
         row.interaction_sum += x.likes + x.collects + x.comments + x.shares;
         row.lead_enter += x.pmInquiries;
         row.lead_open += x.pmOpenings;
-        row.lead_leads += x.pmLeads;
       }
+    }
+    // 线索线 = 线索分析日表（新增线索数；自然/聚光口径取自然/广告线索）
+    for (const x of trendClues) {
+      const row = trendMap.get(dayKey08(x.day));
+      if (!row) continue;
+      row.lead_leads =
+        caliber === 'natural' ? x.natureClueCnt : caliber === 'juguang' ? x.adsClueCnt : x.clueCnt;
     }
     for (const x of trendNotes) {
       if (!x.publishTime) continue;
@@ -3048,10 +3048,10 @@ export class KoxService {
 
     const caliberScopeNote =
       caliber === 'natural'
-        ? '自然流口径：内容/阅读/互动仅非投流笔记；私信三数=笔记分析·私信咨询/开口/留资（员工笔记，累计口径）'
+        ? '自然流口径：内容/阅读/互动仅非投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增自然线索'
         : caliber === 'juguang'
-          ? '聚光投放口径：内容/阅读/互动仅投流笔记；私信三数=笔记分析·私信咨询/开口/留资（员工笔记，累计口径）；消耗=聚光账户日报（10847045）'
-          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；笔记总数/曝光/阅读/互动=MCC 笔记分析·汇总分析（员工笔记，按笔记发布日期窗口的累计值）；爆文=单篇互动（赞+藏+评+享）≥500；进线/开口/留资=笔记分析·私信咨询/开口/留资数合计（员工笔记，累计口径，不随日期筛选变化）；投放=聚光账户日报（10847045）';
+          ? '聚光投放口径：内容/阅读/互动仅投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增广告线索；消耗=聚光账户日报（10847045）'
+          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；内容指标=笔记明细分析行求和（员工笔记，发布时间在筛选区间的累计快照）；爆文=单篇互动（赞+藏+评+享）≥500；私信咨询/开口=笔记分析私信列（员工笔记，累计口径）；线索数=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）；投放=聚光账户日报（10847045）';
 
     return {
       start: dayKey08(start),
@@ -3080,10 +3080,12 @@ export class KoxService {
         pm_inquiries: cur.lead.pm_inquiries,
         pm_openings: cur.lead.pm_openings,
         pm_leads: cur.lead.pm_leads,
+        pm_leads_ad: cur.lead.clue_ad,
+        pm_leads_nature: cur.lead.clue_nature,
         open_rate: cur.lead.pm_inquiries && cur.lead.pm_openings != null ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : null,
         lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
         total_leads: cur.lead.total_leads,
-        scope_note: '进线/开口/留资=MCC 笔记分析·私信咨询/开口/留资数合计（员工笔记，累计口径，与平台笔记明细分析合计视角一致，不随日期筛选变化）',
+        scope_note: '私信咨询/私信开口=笔记分析·私信列（员工笔记，累计口径）；线索数（留资）=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）',
       },
       ad: {
         cost: cur.ad.cost,
@@ -3637,6 +3639,8 @@ export class KoxService {
       pm_inquiries: number;
       pm_openings: number;
       pm_leads: number;
+      pm_leads_ad: number;
+      pm_leads_nature: number;
     }
     const aggById = new Map<number, AccAgg>();
     const idSet = new Set(accounts.map((a) => a.id));
@@ -3654,6 +3658,8 @@ export class KoxService {
       pm_inquiries: 0,
       pm_openings: 0,
       pm_leads: 0,
+      pm_leads_ad: 0,
+      pm_leads_nature: 0,
     });
     const bump = (accountId: number, fn: (a: AccAgg) => void) => {
       let cur = aggById.get(accountId);
@@ -3838,38 +3844,45 @@ export class KoxService {
       }
       if (cumAgg.size) metric_source += '+notes_cum_likes';
     } else if (brandId === 5) {
-      // Morgandada(5)：私信三数统一口径 = MCC 笔记分析（员工笔记）私信咨询/开口/留资——
-      // 全量快照按账号聚合（不随窗口），覆盖上方窗口累加值，合计与总览/内容表现一致（2026-10-20 客户确认）
-      const pmRows = await this.prisma.koxNote.findMany({
-        where: {
-          brandId: 5,
-          OR: [{ accountId: { in: [...idSet] } }, { authorName: { in: [...nameToId.keys()] } }],
-        },
-        select: { accountId: true, authorName: true, pmInquiries: true, pmOpenings: true, pmLeads: true },
+      // Morgandada(5)：私信咨询/开口 = 笔记分析私信列（上方 notes 循环按账号累加，快照累计）；
+      // 线索数（留资）= 线索管理→线索分析 按归属账户（含广告/自然线索拆分，2026-10-21 客户拍板）。
+      // 归属匹配：sub_user_id↔KosAccount.authorId 优先，sub_user_name↔昵称/门店名兜底。
+      const clueRows = await this.prisma.clueAnalysisDaily.findMany({
+        where: { brandId: 5, day: { gte: start, lte: end } },
+        select: { subUserId: true, subUserName: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
       });
-      const pmAgg = new Map<number, { i: number; o: number; l: number }>();
-      for (const n of pmRows) {
+      const authorToIdC = new Map(
+        accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a.id]),
+      );
+      const nickToIdC = new Map(accounts.map((a) => [a.nickname, a.id]));
+      const storeToIdC = new Map(
+        accounts.filter((a) => a.storeName).map((a) => [a.storeName as string, a.id]),
+      );
+      let clueHit = 0;
+      const clueByAcc = new Map<number, { c: number; ad: number; nature: number }>();
+      for (const r of clueRows) {
         const accId =
-          (n.accountId != null && idSet.has(n.accountId) ? n.accountId : null) ??
-          (n.authorName ? nameToId.get(n.authorName) ?? null : null);
-        if (accId == null) continue;
-        const cur = pmAgg.get(accId) ?? { i: 0, o: 0, l: 0 };
-        cur.i += n.pmInquiries ?? 0;
-        cur.o += n.pmOpenings ?? 0;
-        cur.l += n.pmLeads ?? 0;
-        pmAgg.set(accId, cur);
+          (r.subUserId ? authorToIdC.get(r.subUserId) : undefined) ??
+          (r.subUserName ? nickToIdC.get(r.subUserName) : undefined) ??
+          (r.subUserName ? storeToIdC.get(r.subUserName) : undefined) ??
+          null;
+        if (accId == null || !idSet.has(accId)) continue;
+        const cur = clueByAcc.get(accId) ?? { c: 0, ad: 0, nature: 0 };
+        cur.c += r.clueCnt;
+        cur.ad += r.adsClueCnt;
+        cur.nature += r.natureClueCnt;
+        clueByAcc.set(accId, cur);
       }
-      let pmHit = 0;
-      for (const [accId, v] of pmAgg) {
-        if (!idSet.has(accId)) continue;
-        pmHit += 1;
+      for (const [accId, v] of clueByAcc) {
+        clueHit += 1;
         bump(accId, (a) => {
-          a.pm_inquiries = v.i;
-          a.pm_openings = v.o;
-          a.pm_leads = v.l;
+          // 线索数覆盖笔记口径的 pm_leads（上方 notes 循环累加值作废）
+          a.pm_leads = v.c;
+          a.pm_leads_ad = v.ad;
+          a.pm_leads_nature = v.nature;
         });
       }
-      if (pmHit) metric_source += '+note_pm_snapshot';
+      if (clueHit) metric_source += '+clue_analysis_belong';
     } else {
       const campRows = await this.prisma.koxCampaignDailyStat.findMany({
         where: {
@@ -3932,6 +3945,8 @@ export class KoxService {
         pm_inquiries: g.pm_inquiries,
         pm_openings: g.pm_openings,
         pm_leads: g.pm_leads,
+        pm_leads_ad: g.pm_leads_ad,
+        pm_leads_nature: g.pm_leads_nature,
         total_leads: null,
         service_card_leads: null,
         wecom_copy_leads: null,

@@ -177,6 +177,8 @@ const columns = computed(() => {
       ncol('私信进线数', 'pm_inquiries', 100),
       ncol('私信开口数', 'pm_openings', 100),
       ncol('私信留资数', 'pm_leads', 100),
+      ncol('广告线索', 'pm_leads_ad', 92),
+      ncol('自然线索', 'pm_leads_nature', 92),
       ncol('内容发布数', 'item_cnt', 104),
       ncol('内容曝光数', 'exposure_sum', 120),
       { title: '操作', key: 'action', width: 80 },

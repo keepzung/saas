@@ -328,6 +328,51 @@ export class SparkApiClient {
     return { total: vo.total ?? rows.length, rows };
   }
 
+  /** 线索分析「数据明细」行（MDD 线索权威口径：归属账户×日/汇总，新增线索/广告/自然/留资用户数） */
+  async clueAnalysisList(params: { start: string; end: string; timeDim?: 'all_key' | 'date_key'; pageNo: number; pageSize?: number }, ctx?: SparkOrgCtx): Promise<{ total: number; rows: Record<string, unknown>[] }> {
+    const data = (await this.request<{ detailListVo?: { total?: number; detailVoList?: Record<string, unknown>[]; detailDataList?: Record<string, unknown>[] } }>(
+      '/api/vision/mcc_dashboard/target_detail_list',
+      {
+        viewAlias: 'mcc_assets_clueManage_clueAnalysisListView',
+        dynamicTargets: ['pro_user_id', 'pro_user_name', 'sub_user_id', 'sub_user_name', 'new_clue_cnt', 'new_ads_clue_cnt', 'new_nature_clue_cnt', 'leads_user_cnt'],
+        sorts: [],
+        page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 100 },
+        frontFilterList: [
+          { hide: 0, foldType: 0, require: 1, filterField: 'date_key', filterFieldName: '线索生成时间', filterType: 10, timeFilter: { disableRange: 0, limitMax: 366, quickDates: [6, 11, 16, 21, 36, 41, 46, 51], values: [params.start, params.end], pattern: 10, timeShowType: 11 } },
+          { filterType: 20, selectFilter: { selectType: 10, selectShowType: 0, valueSource: 0, selectLabels: [{ labelValue: 'all_key', labelName: '合计', selected: params.timeDim !== 'date_key' ? 1 : 0 }, { selected: params.timeDim === 'date_key' ? 1 : 0, labelValue: 'date_key', labelName: '按天' }, { selected: 0, labelValue: 'week_key', labelName: '按周' }, { selected: 0, labelValue: 'month_key', labelName: '按月' }] }, hide: 0, foldType: 0, require: 1, filterField: 'time_dim', filterFieldName: '时间维度' },
+        ],
+      },
+      `${MCC_BASE}/micro/clues-data`,
+      'POST',
+      ctx,
+    )) as { detailListVo?: { total?: number; detailVoList?: Record<string, unknown>[]; detailDataList?: Record<string, unknown>[] } };
+    const vo = data?.detailListVo ?? {};
+    const rows = vo.detailVoList ?? vo.detailDataList ?? [];
+    return { total: vo.total ?? rows.length, rows };
+  }
+
+  /** 线索分析视图指标码全集（含维度码） */
+  async clueAnalysisTargetCodes(ctx?: SparkOrgCtx): Promise<string[]> {
+    const cfg = (await this.request<Record<string, unknown>>(
+      '/api/vision/mcc_dashboard/target_config_list',
+      { viewAlias: 'mcc_assets_clueManage_clueAnalysisListView', chart: '', bizCode: 'mcc_assets_clueManage' },
+      `${MCC_BASE}/micro/clues-data`,
+      'POST',
+      ctx,
+    )) as Record<string, unknown> | null;
+    const codes = new Set<string>();
+    const walk = (o: unknown) => {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) return o.forEach(walk);
+      for (const [k, v] of Object.entries(o)) {
+        if (k === 'targetCode' && typeof v === 'string') codes.add(v);
+        walk(v);
+      }
+    };
+    walk(cfg);
+    return [...codes];
+  }
+
   /** 表格级最新计算分区日（如 2026-09-20）；无值时返回 null */
   async getLatestCalculateDate(tableName: string, ctx?: SparkOrgCtx): Promise<string | null> {
     const data = await this.request<string | null>(

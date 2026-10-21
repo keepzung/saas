@@ -73,6 +73,9 @@ export class SparkController {
       } else if (type === 'notes_daily') {
         // 笔记×日维度（MDD 总览口径）；需显式传 type，不并入 all（其他品牌无此需求）
         results.push(await this.sparkService.syncNoteDaily(dto?.date, ctx));
+      } else if (type === 'clue_analysis') {
+        // 线索分析日维度（MDD 线索权威口径，含广告/自然拆分）；需显式传 type
+        results.push(await this.sparkService.syncClueAnalysis(dto?.date, ctx));
       } else if (type === 'staff_matrix' || type === 'staff') {
         results.push(await this.sparkService.syncStaffMatrix(dto?.date, ctx));
       } else {
