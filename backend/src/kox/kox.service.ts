@@ -2954,8 +2954,6 @@ export class KoxService {
 
       // ── 私信三数统一口径（2026-10-20 客户拍板）：MCC 笔记分析「笔记明细分析」（员工笔记）
       //    的 私信咨询数/私信开口数/私信留资数，全量快照累计（与平台合计视角一致，不随日期筛选变化）。
-      void clues;
-      void clueUsers;
       const notePmAgg = await this.prisma.koxNote.aggregate({
         where: { brandId },
         _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true },
