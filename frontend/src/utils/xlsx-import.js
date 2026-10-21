@@ -13,8 +13,17 @@ const pick = (row, keyword) => {
   return '';
 };
 
+// 按一组匹配器取值（首个命中的列）：兼容同一字段的多种表头写法
+const pickMatch = (row, ...tests) => {
+  for (const key of Object.keys(row)) {
+    if (tests.some((t) => t(key))) return row[key];
+  }
+  return '';
+};
+
 /**
- * 解析「KOS 账号导入表」：表头含 账号UID / 账号类型 / 大区（或汇总区域）/ 销售区域 / 省份 / 城市 / 门店名称 / 主页地址
+ * 解析「KOS 账号导入表」：表头兼容 账号UID/账号类型/大区（或"区域"）/销售区域/省（份）/市（城市）/
+ * 门店（或"店名"）/主页地址 等写法
  */
 export async function parseAccountWorkbook(file) {
   const buf = await file.arrayBuffer();
@@ -27,12 +36,14 @@ export async function parseAccountWorkbook(file) {
   rows.forEach((r, idx) => {
     const authorId = clean(pick(r, 'UID'));
     if (!authorId) {
-      const store = clean(pick(r, '门店'));
+      const store = clean(pickMatch(r, (k) => k.includes('门店'), (k) => k.includes('店名')));
       if (!store) return;
       errors.push(`第 ${idx + 2} 行：缺少账号UID`);
       return;
     }
-    const region = clean(pick(r, '大区'));
+    const region = clean(
+      pickMatch(r, (k) => k.includes('大区'), (k) => k === '区域'),
+    );
     const summaryRegion = clean(pick(r, '汇总区域'));
     const fansRaw = Number(clean(pick(r, '粉丝')));
     accounts.push({
@@ -42,9 +53,11 @@ export async function parseAccountWorkbook(file) {
       regionName: region || summaryRegion,
       saleArea: clean(pick(r, '销售区域')),
       region,
-      province: clean(pick(r, '省份')),
-      city: clean(pick(r, '城市')),
-      storeName: clean(pick(r, '门店')),
+      province: clean(pickMatch(r, (k) => k.includes('省份'), (k) => k === '省')),
+      city: clean(pickMatch(r, (k) => k.includes('城市'), (k) => k === '市')),
+      storeName: clean(
+        pickMatch(r, (k) => k.includes('门店'), (k) => k.includes('店名')),
+      ),
       authorUrl: clean(pick(r, '主页')),
       fans: Number.isFinite(fansRaw) && fansRaw >= 0 ? fansRaw : undefined,
       operatorName: clean(pick(r, '运营人')) || clean(pick(r, '实操')),

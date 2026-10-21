@@ -3,7 +3,7 @@
     <a-alert
       type="info"
       show-icon
-      message="上传需要监测的创作者链接或账号清单，系统解析后批量加入监测列表"
+      message="上传账号清单 Excel，系统按清单全量同步：清单内账号新增/更新资料，清单中未列出的现存账号将被停用（重新导入即可恢复）"
       style="margin-bottom: 12px"
     />
     <a-spin :spinning="importing">
@@ -51,9 +51,15 @@
             show-icon
             :message="
               appliedCount > 0
-                ? `导入完成：新增 ${result.added}，更新 ${result.updated}`
-                : '导入失败：没有账号写入，请根据下方错误说明修正后重新提交'
+                ? `同步完成：新增 ${result.added}，更新 ${result.updated}${result.removed ? `，剔除 ${result.removed}` : ''}`
+                : '同步失败：没有账号写入，请根据下方错误说明修正后重新提交'
             "
+          />
+          <a-alert
+            v-if="result.removedList && result.removedList.length"
+            type="warning"
+            show-icon
+            :message="`以下 ${result.removedList.length} 个账号不在清单中，已停用：${removedSummary}`"
           />
           <a-alert
             v-if="result.errors && result.errors.length"
@@ -109,6 +115,13 @@ const errorSummary = computed(() => {
   return errs.length > 10 ? `${head}……等共 ${errs.length} 行` : head;
 });
 
+const removedSummary = computed(() => {
+  const list = result.value?.removedList ?? [];
+  if (!list.length) return '';
+  const names = list.slice(0, 10).map((x) => x.nickname || x.authorId);
+  return list.length > 10 ? `${names.join('、')}……等共 ${list.length} 个` : names.join('、');
+});
+
 async function onFile(file) {
   result.value = null;
   try {
@@ -145,9 +158,11 @@ async function submit() {
     rows.value = [];
     fileList.value = [];
     if (appliedCount.value > 0) {
-      message.success(`导入完成：新增 ${res.added}，更新 ${res.updated}`);
+      message.success(
+        `同步完成：新增 ${res.added}，更新 ${res.updated}${res.removed ? `，剔除 ${res.removed}` : ''}`,
+      );
     } else {
-      message.error('没有账号被导入，请查看页面上的错误说明');
+      message.error('没有账号被写入，请查看页面上的错误说明');
     }
   } catch (e) {
     message.error(e.message || '导入失败');

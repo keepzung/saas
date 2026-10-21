@@ -4292,7 +4292,9 @@ export class KoxService {
   async importAccounts(rows: ImportAccountRow[], dryRun = false) {
     let added = 0;
     let updated = 0;
+    let removed = 0;
     const errors: { row: number; msg: string }[] = [];
+    const removedList: { authorId: string; nickname: string | null }[] = [];
 
     const clean = (v?: unknown) => {
       const s = (v ?? '').toString().trim();
@@ -4313,6 +4315,7 @@ export class KoxService {
     }
 
     const classification: { authorId: string; action: 'create' | 'update' }[] = [];
+    const brandIds = new Set<number>();
 
     for (const [authorId, { row: r, rowNo }] of byUid) {
       const type = (r.accountType ?? '').toString().trim().toUpperCase();
@@ -4334,11 +4337,14 @@ export class KoxService {
       const accountTag = clean(r.accountTag);
       const fansNum = Number(r.fans);
 
-      // 仅写入 Excel 提供的非空字段（重叠账号不覆盖系统已有昵称/状态）
+      const rowBrandId = Number(r.brandId);
+      const hasBrand = Number.isInteger(rowBrandId) && rowBrandId > 0;
+      if (hasBrand) brandIds.add(rowBrandId);
+
+      // 底表同步语义：清单给了值的字段一律以清单为准覆盖；留空字段保留库内现值不清空
       const data: Record<string, unknown> = {};
       // 品牌归属随前端当前工作区走；重叠账号一并改判，否则导入后客户视图按品牌过滤仍不可见
-      const rowBrandId = Number(r.brandId);
-      if (Number.isInteger(rowBrandId) && rowBrandId > 0) data.brandId = rowBrandId;
+      if (hasBrand) data.brandId = rowBrandId;
       if (type) data.accountType = type;
       if (regionName) data.regionName = regionName;
       if (saleArea) data.saleArea = saleArea;
@@ -4355,8 +4361,9 @@ export class KoxService {
         where: { authorId },
       });
       if (existing) {
-        // 重叠：昵称仅在原为空时补
-        if (!existing.nickname && nickname) data.nickname = nickname;
+        if (nickname) data.nickname = nickname;
+        // 曾被剔除/停用的账号重新出现在清单中 → 恢复生效
+        if (existing.status !== 'enabled') data.status = 'enabled';
         classification.push({ authorId, action: 'update' });
         if (!dryRun) await this.prisma.kosAccount.update({ where: { authorId }, data });
         updated += 1;
@@ -4372,7 +4379,28 @@ export class KoxService {
       }
     }
 
-    return { total: rows.length, added, updated, errors, classification };
+    // 底表同步语义：清单涉及的品牌内，enabled 且不在本清单中的账号 → 停用（剔除，可逆：
+    // 重新出现在后续清单即恢复）。brandId 只取清单行携带值，绝不上溯其他品牌。
+    if (brandIds.size) {
+      const stale = await this.prisma.kosAccount.findMany({
+        where: {
+          brandId: { in: [...brandIds] },
+          status: 'enabled',
+          authorId: { notIn: [...byUid.keys()] },
+        },
+        select: { authorId: true, nickname: true },
+      });
+      if (!dryRun && stale.length) {
+        await this.prisma.kosAccount.updateMany({
+          where: { authorId: { in: stale.map((s) => s.authorId) } },
+          data: { status: 'disabled' },
+        });
+      }
+      removed = stale.length;
+      removedList.push(...stale.map((s) => ({ authorId: s.authorId, nickname: s.nickname })));
+    }
+
+    return { total: rows.length, added, updated, removed, removedList, errors, classification };
   }
 
   /**
