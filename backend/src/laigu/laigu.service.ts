@@ -576,6 +576,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
           id: true,
           sessionId: true,
           clientName: true,
+          clientAvatar: true,
           phone: true,
           isResource: true,
           source: true,
