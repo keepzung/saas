@@ -1438,7 +1438,12 @@ export class ContentproService {
       }
     }
     const finished = doneAccounts.size + boundDoneUserIds.length + userDoneSet.size;
-    const accountTotal = accountIds.length + userIds.length;
+    // 人员去重：user 目标中绑定账号已属于账号目标的，不重复计入总人数
+    const effectiveUserIds = userIds.filter((uid) => {
+      const kosId = boundMap.get(uid);
+      return !(kosId && accountIds.includes(kosId));
+    });
+    const accountTotal = accountIds.length + effectiveUserIds.length;
     return {
       account_total: accountTotal,
       account_finished: finished,
@@ -1476,19 +1481,8 @@ export class ContentproService {
 
     // 指定员工（姓名/手机号挑选的登录账号）：需属于当前工作区
     const targetUserIds = [...new Set((dto.userIds ?? []).map(Number).filter(Boolean))];
-    let validUsers: { id: number }[] = [];
-    if (targetUserIds.length) {
-      validUsers = await this.prisma.user.findMany({
-        where: { id: { in: targetUserIds }, brandMembers: { some: { brandId } } },
-        select: { id: true },
-      });
-    }
-
     const scopeType = dto.scopeType ?? 'all';
     const accountWhere: Prisma.KosAccountWhereInput = { brandId, status: 'enabled' };
-    if (scopeType === 'accounts' || scopeType === 'all') {
-      // 按矩阵号圈选（all = 全部启用账号）
-    }
     const types = (dto.accountTypes ?? []).filter((x) => x && x !== '不限');
     if (types.length) accountWhere.accountType = { in: types };
     if (scopeType === 'regions') {
@@ -1502,6 +1496,23 @@ export class ContentproService {
           where: accountWhere,
           select: { id: true },
         });
+    // 全量派发语义（全部大区）：矩阵号之外，自动覆盖品牌全体 KOS 员工成员（含未绑矩阵号者，按 userId 挂目标）
+    if (scopeType === 'all') {
+      const members = await this.prisma.brandMember.findMany({
+        where: { brandId, roleKey: 'kos_operator' },
+        select: { userId: true },
+      });
+      for (const m of members) {
+        if (!targetUserIds.includes(m.userId)) targetUserIds.push(m.userId);
+      }
+    }
+    let validUsers: { id: number }[] = [];
+    if (targetUserIds.length) {
+      validUsers = await this.prisma.user.findMany({
+        where: { id: { in: targetUserIds }, brandMembers: { some: { brandId } } },
+        select: { id: true },
+      });
+    }
     if (!accounts.length && !validUsers.length) {
       throw new BadRequestException('请至少选择一个派发对象（矩阵号或员工）');
     }
@@ -1641,6 +1652,7 @@ export class ContentproService {
         .filter((x) => x.accountId && x.account)
         .map((x) => ({
           account_id: x.account!.id,
+          uid: x.account!.authorId,
           nickname: x.account!.nickname,
           account_type: x.account!.accountType,
           region: x.account!.regionName,

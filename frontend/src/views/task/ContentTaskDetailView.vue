@@ -114,6 +114,7 @@ const exportRows = () => {
   const rows = (task.value?.accounts ?? []).map((a, i) => ({
     序号: i + 1,
     账号昵称: a.nickname,
+    账号UID: a.uid ?? '',
     账号类型: a.account_type,
     大区: a.region ?? '',
     门店: a.store ?? '',
