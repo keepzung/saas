@@ -158,6 +158,7 @@ export class SparkController {
       start?: string;
       end?: string;
       keyword?: string;
+      regionName?: string;
       page?: string;
       page_size?: string;
       brandId?: string;

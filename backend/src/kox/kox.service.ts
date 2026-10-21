@@ -2446,7 +2446,7 @@ export class KoxService {
 
     const accountInclude = {
       account: {
-        select: { nickname: true, accountType: true, storeName: true },
+        select: { nickname: true, accountType: true, storeName: true, authorId: true },
       },
     };
     // brand6：剔除官号（特斯拉）笔记
@@ -2512,6 +2512,7 @@ export class KoxService {
         cover_url: n.coverUrl,
         note_url: n.noteUrl,        publish_time: n.publishTime,
         author_name: n.account?.nickname ?? n.authorName ?? '-',
+        author_uid: n.account?.authorId ?? null,
         account_type: n.account?.accountType ?? n.accountType ?? 'KOS',
         store_name: n.account?.storeName ?? null,
         is_rtb_adver: n.isRtbAdver === true,

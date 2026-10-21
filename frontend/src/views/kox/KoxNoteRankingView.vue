@@ -45,6 +45,13 @@
           allow-clear
           @search="onFilterChange"
         />
+        <a-select
+          v-model:value="regionFilter"
+          size="small"
+          style="width: 130px"
+          :options="regionOptions"
+          @change="onFilterChange"
+        />
       </FilterTopbar>
     </template>
 
@@ -388,6 +395,24 @@ const typeFilter = ref('全部');
 const modelFilter = ref('全部车型');
 const keyword = ref('');
 const authorKw = ref('');
+const regionFilter = ref('全部大区');
+const regionFacets = ref([]);
+const regionOptions = computed(() => [
+  { value: '全部大区', label: '全部大区' },
+  ...regionFacets.value.map((r) => ({ value: r, label: r })),
+]);
+
+async function loadRegionFacets() {
+  try {
+    const res = await getKoxAccounts({
+      brandId: auth.currentBrandId ?? undefined,
+      page_size: 1,
+    });
+    regionFacets.value = res.region_facets ?? [];
+  } catch {
+    regionFacets.value = [];
+  }
+}
 const metric = ref('views');
 const mode = ref('loading'); // 'loading' | 'real' | 'demo'
 const realTotal = ref(0);
@@ -771,6 +796,7 @@ function realParams(extra = {}) {
     ...(modelFilter.value !== '全部车型' ? { modelTag: modelFilter.value } : {}),
     ...(keyword.value ? { keyword: keyword.value } : {}),
     ...(authorKw.value ? { author: authorKw.value } : {}),
+    ...(regionFilter.value !== '全部大区' ? { regionName: regionFilter.value } : {}),
     ...extra,
   };
 }
@@ -782,6 +808,7 @@ function mapRealRow(n) {
     title: n.title,
     body: n.content || '',
     author: n.author_name || '-',
+    uid: n.author_uid || '',
     accountType: n.account_type || 'KOS',
     type: n.category || '未分类',
     model: rawModel || (isTesla.value ? '特斯拉' : '未提及'),
@@ -904,10 +931,10 @@ async function exportCsv() {
   exporting.value = true;
   try {
     const head = isTesla.value
-      ? ['标题', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
+      ? ['标题', '笔记链接', 'UID', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
       : isMdd.value
-        ? ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
-        : ['标题', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
+        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
+        : ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
       const raw = await fetchAllRealRows();
@@ -915,6 +942,8 @@ async function exportCsv() {
         isTesla.value
           ? [
               n.title,
+              n.note_url ?? '',
+              n.author_uid ?? '',
               n.author_name,
               n.model_tag && n.model_tag !== '未提及' ? n.model_tag : '特斯拉',
               n.account_type ?? '',
@@ -928,6 +957,8 @@ async function exportCsv() {
             ]
           : [
               n.title,
+              n.note_url ?? '',
+              n.author_uid ?? '',
               n.author_name,
               n.category ?? '',
               n.model_tag ?? '',
@@ -945,8 +976,8 @@ async function exportCsv() {
     } else {
       rows = filtered.value.map((n) =>
         isTesla.value
-          ? [n.title, n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
-          : [n.title, n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [] : [n.formLeads]), n.publishTime],
+          ? [n.title, n.noteUrl || '', n.uid || '', n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
+          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [] : [n.formLeads]), n.publishTime],
       );
     }
     const csv = [head, ...rows]
@@ -1083,6 +1114,7 @@ async function loadCompliance() {
 onMounted(async () => {
   const qAuthor = route.query?.author;
   if (qAuthor) authorKw.value = String(qAuthor);
+  loadRegionFacets();
   loadCompliance();
   loading.value = true;
   try {

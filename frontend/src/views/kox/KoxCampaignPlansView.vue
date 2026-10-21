@@ -236,6 +236,14 @@
 
       <div v-if="detailTab === 'note'" class="note-filter-row">
         <a-select
+          v-if="isTesla"
+          v-model:value="noteRegionFilter"
+          size="small"
+          style="width: 130px"
+          :options="noteRegionOptions"
+          @change="loadNoteTab"
+        />
+        <a-select
           v-if="!isTesla"
           v-model:value="noteRtbFilter"
           size="small"
@@ -397,7 +405,7 @@ import * as echarts from 'echarts';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import { getSparkCampaignSummary, getSparkCampaignAccounts, getSparkCampaignNotes, getSparkCampaignRegion } from '../../api/spark';
-import { getKoxNotes } from '../../api/kox';
+import { getKoxAccounts, getKoxNotes } from '../../api/kox';
 import { exportExcel } from '../../utils/excel';
 import { useAuthStore } from '../../stores/auth';
 
@@ -895,6 +903,24 @@ const notePage = ref(1);
 const noteLoading = ref(false);
 const noteRtbFilter = ref('all');
 const noteKeyword = ref('');
+const noteRegionFilter = ref('全部大区');
+const noteRegionFacets = ref([]);
+const noteRegionOptions = computed(() => [
+  { value: '全部大区', label: '全部大区' },
+  ...noteRegionFacets.value.map((r) => ({ value: r, label: r })),
+]);
+
+async function loadNoteRegionFacets() {
+  try {
+    const res = await getKoxAccounts({
+      brandId: auth.currentBrandId ?? undefined,
+      page_size: 1,
+    });
+    noteRegionFacets.value = res.region_facets ?? [];
+  } catch {
+    noteRegionFacets.value = [];
+  }
+}
 
 const maxRegionFee = computed(() =>
   regionRows.value.reduce((mx, r) => Math.max(mx, Number(r.fee ?? 0)), 1),
@@ -939,6 +965,7 @@ function noteParams(extra = {}) {
     end: hasRange ? range.value[1].format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
     ...(noteRtbFilter.value !== 'all' ? { isRtbAdver: noteRtbFilter.value } : {}),
     ...(noteKeyword.value ? { keyword: noteKeyword.value.trim() } : {}),
+    ...(isTesla.value && noteRegionFilter.value !== '全部大区' ? { regionName: noteRegionFilter.value } : {}),
     metric: 'views',
     page: notePage.value,
     page_size: PAGE_SIZE,
@@ -1116,6 +1143,7 @@ const accountColumns = [
 ];
 
 onMounted(() => {
+  loadNoteRegionFacets();
   probeAndLoad();
   window.addEventListener('resize', onResize);
 });

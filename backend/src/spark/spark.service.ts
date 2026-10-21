@@ -2360,6 +2360,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     start?: string;
     end?: string;
     keyword?: string;
+    regionName?: string;
     page?: string;
     page_size?: string;
     brandId?: string;
@@ -2476,7 +2477,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       where: { brandId: 6 },
       select: {
         noteId: true, title: true, coverUrl: true, noteUrl: true, publishTime: true,
-        authorName: true, exposure: true, views: true, likes: true, comments: true,
+        authorName: true, accountId: true, exposure: true, views: true, likes: true, comments: true,
         collects: true, shares: true, followCount: true,
       },
     });
@@ -2530,6 +2531,20 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       };
     });
     if (keyword) list = list.filter((x) => x.title.toLowerCase().includes(keyword));
+    // 大区筛选：笔记→基线账号（accountId 优先，回退作者昵称）→regionName
+    if (query.regionName) {
+      const kos = await this.prisma.kosAccount.findMany({
+        where: { brandId: 6, status: 'enabled', regionName: query.regionName },
+        select: { id: true, nickname: true },
+      });
+      const regionAccIds = new Set(kos.map((k) => k.id));
+      const regionNicks = new Set(kos.map((k) => k.nickname));
+      list = list.filter((x) => {
+        const m = metaByNoteId.get(x.note_id);
+        if (!m) return false;
+        return (m.accountId != null && regionAccIds.has(m.accountId)) || regionNicks.has(m.authorName ?? '');
+      });
+    }
     list.sort((a, b) => b.fee - a.fee);
 
     const total = list.length;
