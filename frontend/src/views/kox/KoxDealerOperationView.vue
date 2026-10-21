@@ -122,7 +122,7 @@
           <div v-if="record.accounts?.length" class="store-accounts">
             <div v-for="acc in record.accounts" :key="acc.nickname" class="store-account-row">
               <component
-                :is="acc.author_url ? 'a' : 'span'"
+                :is="!isMdd && acc.author_url ? 'a' : 'span'"
                 :href="acc.author_url"
                 target="_blank"
                 rel="noopener"
@@ -347,7 +347,7 @@ async function reload() {
         exposure: Number(r.exposure_sum ?? 0),
         pm_leads: Number(r.pm_leads ?? 0),
         ces: Number(r.ces ?? 0),
-        region: r.region_name || '未分配',
+        region: r.province_name || '未分配',
       }));
       const groups = new Map();
       for (const a of accs) {
