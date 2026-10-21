@@ -1771,6 +1771,26 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const totalImpression = sum((r) => r.impression);
     const totalClick = sum((r) => r.click);
 
+    // Morgandada(5)：私信三数统一口径 = MCC 笔记分析（员工笔记）私信咨询/开口/留资快照合计（2026-10-20 客户确认）
+    let pmOverride: { inquiries: number; openings: number; leads: number } | null = null;
+    let pmByDay: Map<string, { i: number; o: number; l: number }> | null = null;
+    if (brandId === 5) {
+      const agg = await this.prisma.koxNote.aggregate({ where: { brandId: 5 }, _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true } });
+      pmOverride = { inquiries: agg._sum.pmInquiries ?? 0, openings: agg._sum.pmOpenings ?? 0, leads: agg._sum.pmLeads ?? 0 };
+      pmByDay = new Map(
+        (
+          await this.prisma.koxNoteDailyStat.groupBy({
+            by: ['day'],
+            where: { brandId: 5 },
+            _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true },
+          })
+        ).map((g) => [dayKey08(g.day), { i: g._sum.pmInquiries ?? 0, o: g._sum.pmOpenings ?? 0, l: g._sum.pmLeads ?? 0 }]),
+      );
+    }
+    const effConsult = pmOverride ? pmOverride.inquiries : totalConsult;
+    const effOpen = pmOverride ? pmOverride.openings : totalOpen;
+    const effLeads = pmOverride ? pmOverride.leads : totalMsgLeads;
+
     const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
       const key = dayKey08(r.statDate);
@@ -1920,12 +1940,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         cpc: totalClick ? r2v(totalFee / totalClick) : 0,
         cpm: totalImpression ? r2v((totalFee / totalImpression) * 1000) : 0,
         interaction: sum((r) => r.interaction),
-        msg_inquiries: totalConsult,
-        msg_openings: totalOpen,
-        msg_leads: totalMsgLeads,
-        msg_inquiry_cost: totalConsult ? r2v(totalFee / totalConsult) : 0,
-        msg_open_cost: totalOpen ? r2v(totalFee / totalOpen) : 0,
-        msg_lead_cost: totalMsgLeads ? r2v(totalFee / totalMsgLeads) : 0,
+        msg_inquiries: effConsult,
+        msg_openings: effOpen,
+        msg_leads: effLeads,
+        msg_inquiry_cost: effConsult ? r2v(totalFee / effConsult) : 0,
+        msg_open_cost: effOpen ? r2v(totalFee / effOpen) : 0,
+        msg_lead_cost: effLeads ? r2v(totalFee / effLeads) : 0,
       },
       trend: (() => {
         // 横轴按查询区间逐日铺满（无数据天补 0），上限 366 天防超长自定义区间
@@ -1938,14 +1958,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         for (let guard = 0; guard < 366; guard++) {
           const key = keyOf(startDay);
           const v = dayMap.get(key);
+          const pm = pmByDay?.get(key);
           out.push({
             date: key,
             fee: v ? r2v(v.fee) : 0,
             impression: v?.impression ?? 0,
             click: v?.click ?? 0,
-            msg_inquiries: v?.consult ?? 0,
-            msg_openings: v?.open ?? 0,
-            msg_leads: v?.msg_leads ?? 0,
+            msg_inquiries: pm ? pm.i : (v?.consult ?? 0),
+            msg_openings: pm ? pm.o : (v?.open ?? 0),
+            msg_leads: pm ? pm.l : (v?.msg_leads ?? 0),
             active_accounts: v?.accounts.size ?? 0,
           });
           if (key === endDay) break;
