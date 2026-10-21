@@ -173,6 +173,9 @@ const dfRegionRows = computed(() => {
         pm_inquiries: s('pm_inquiries'),
         pm_openings: s('pm_openings'),
         pm_leads: s('pm_leads'),
+        organic_leads: s('organic_leads'),
+        // Morgandada 投流花费：全国=各区域分摊值加总（此前漏算恒显 ¥0）
+        fee_alloc: s('fee_alloc'),
         ad_fee: orgFee,
       };
   const ranked = rest.map((r, i) => ({ ...r, rank: i + 1, ad_fee: null }));

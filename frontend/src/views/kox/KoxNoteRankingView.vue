@@ -435,6 +435,7 @@ const complianceColumns = [
   { title: '内容', key: 'title', width: 380 },
   { title: '检测状态', key: 'state', width: 100 },
   { title: '命中违禁词', key: 'violations', width: 220 },
+  { title: '曝光数', dataIndex: 'exposure', key: 'exposure', width: 90, align: 'right' },
   { title: '阅读数', dataIndex: 'views', key: 'views', width: 90, align: 'right' },
   { title: '互动数', dataIndex: 'interaction', key: 'interaction', width: 90, align: 'right' },
 ];
@@ -472,6 +473,15 @@ const columns = computed(() => [
   { title: '收藏', dataIndex: 'collect', width: 80 },
   { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
   { title: '曝光', dataIndex: 'exposure', width: 110 },
+  // Morgandada(5)：笔记私信三数=MCC 笔记分析私信列（全量快照累计，与顶部汇总卡同口径）；
+  // 进线/开口后端不支持按其排序，仅留资接 metric=pmLeads
+  ...(isMdd.value
+    ? [
+        { title: '进线', dataIndex: 'pmIn', width: 80 },
+        { title: '开口', dataIndex: 'pmOpen', width: 80 },
+        { title: '留资', dataIndex: 'pmLeads', width: 80, sorter: (a, b) => a.pmLeads - b.pmLeads },
+      ]
+    : []),
   // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
   ...(isTesla.value || isMdd.value
     ? []
@@ -898,7 +908,7 @@ function onFilterChange() {
   else nextTick(renderCharts);
 }
 
-const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads' };
+const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads', pmLeads: 'pmLeads' };
 
 function onTableChange(pag, _filters, sorter) {
   page.value = pag.current ?? 1;
@@ -933,7 +943,7 @@ async function exportCsv() {
     const head = isTesla.value
       ? ['标题', '笔记链接', 'UID', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
       : isMdd.value
-        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
+        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '进线', '开口', '留资', '发布时间']
         : ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
@@ -969,7 +979,7 @@ async function exportCsv() {
               n.collects,
               n.views,
               n.exposure,
-              ...(isMdd.value ? [] : [n.form_leads]),
+              ...(isMdd.value ? [n.pm_inquiries, n.pm_openings, n.pm_leads] : [n.form_leads]),
               n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
             ],
       );
@@ -977,7 +987,7 @@ async function exportCsv() {
       rows = filtered.value.map((n) =>
         isTesla.value
           ? [n.title, n.noteUrl || '', n.uid || '', n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
-          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [] : [n.formLeads]), n.publishTime],
+          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [n.pmIn, n.pmOpen, n.pmLeads] : [n.formLeads]), n.publishTime],
       );
     }
     const csv = [head, ...rows]

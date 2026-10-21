@@ -218,6 +218,11 @@ let tierChart = null;
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 
+// 大区分组兜底：底表再导入可能把 areaName 冲空（曾致 2 个上海账号落「未分配」），
+// 账号昵称前缀均为「MorganDaDa<城市><商场>」，按城市关键词推断
+const MDD_CITY_KEYWORDS = ['北京', '上海', '深圳', '南京', '成都', '西安', '杭州', '武汉'];
+const cityOfNickname = (nick) => MDD_CITY_KEYWORDS.find((c) => (nick || '').includes(c)) ?? null;
+
 function rangeParams() {
   if (customRange.value?.[0] && customRange.value?.[1]) {
     return {
@@ -347,7 +352,7 @@ async function reload() {
         exposure: Number(r.exposure_sum ?? 0),
         pm_leads: Number(r.pm_leads ?? 0),
         ces: Number(r.ces ?? 0),
-        region: r.province_name || '未分配',
+        region: r.province_name || cityOfNickname(r.nickname) || '未分配',
       }));
       const groups = new Map();
       for (const a of accs) {

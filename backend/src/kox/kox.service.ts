@@ -3149,7 +3149,7 @@ export class KoxService {
       select: {
         noteId: true, title: true, content: true, coverUrl: true, noteUrl: true,
         noteType: true, publishTime: true, authorName: true, accountType: true,
-        views: true, likes: true, collects: true, comments: true, shares: true,
+        exposure: true, views: true, likes: true, collects: true, comments: true, shares: true,
       },
       orderBy: { publishTime: 'desc' },
     });
@@ -3179,6 +3179,7 @@ export class KoxService {
         publish_time: x.publishTime,
         author_name: x.authorName,
         account_type: x.accountType,
+        exposure: x.exposure,
         views: x.views,
         interaction: x.likes + x.collects + x.comments + x.shares,
         violations,
