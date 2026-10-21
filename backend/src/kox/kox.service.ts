@@ -2694,6 +2694,63 @@ export class KoxService {
   }
 
   /** ─── Morgandada(5) 基线账号集合（笔记归属过滤用，缓存 5 分钟） ─── */
+  /** ─── Morgandada(5) MCC 笔记分析「汇总分析」卡片实时客户端（纯 fetch）。
+   *  员工笔记 + 笔记发布日期窗口，与平台页面完全一致；10min 缓存，失败返回 null。 ─── */
+  private mccNoteCardCache = new Map<string, { at: number; data: Record<string, number> }>();
+  private async mccNoteCardLive(brandId: number, start: string, end: string): Promise<Record<string, number> | null> {
+    const key = `${brandId}|${start}|${end}`;
+    const hit = this.mccNoteCardCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.data;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const cfg = await this.prisma.sparkOrgConfig.findUnique({ where: { brandId }, select: { cookie: true } });
+        if (!cfg?.cookie) return null;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        type CardResp = { code?: number; data?: { cardListVo?: { cardVos?: { targetVos?: { targetCode: string; targetValue?: string }[] }[] } } };
+        let j: CardResp | null = null;
+        try {
+          const res = await fetch('https://mcc.xiaohongshu.com/api/vision/mcc_dashboard/target_card', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Cookie: cfg.cookie,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              Origin: 'https://mcc.xiaohongshu.com',
+              Referer: 'https://mcc.xiaohongshu.com/micro/note-data',
+            },
+            body: JSON.stringify({
+              chartAlias: 'mcc_assets_creativityContent_noteAnalysisView-statisticCard',
+              frontFilterList: [
+                { filterField: 'time_dim', filterFieldName: '时间维度', filterType: 20, selectFilter: { selectType: 10, selectShowType: 0, valueSource: 0, selectLabels: [{ selected: 1, labelValue: 'all_key', labelName: '合计' }] } },
+                { filterField: 'note_publish_date', filterFieldName: '笔记发布日期', filterType: 10, timeFilter: { pattern: 10, timeShowType: 11, disableRange: 1, limitMax: 366, quickDates: [6, 16, 21, 36, 41, 46, 51], values: [start, end] } },
+                { filterField: 'content_type', filterFieldName: '笔记来源', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [{ selected: 1, labelValue: '员工笔记', labelName: '员工笔记' }] } },
+              ],
+            }),
+            signal: ctrl.signal,
+          });
+          j = (await res.json().catch(() => null)) as CardResp | null;
+        } finally {
+          clearTimeout(timer);
+        }
+        if (j?.code !== 0) continue;
+        const card = j?.data?.cardListVo?.cardVos?.[0];
+        const vos = card?.targetVos ?? [];
+        if (!vos.length) continue;
+        const data: Record<string, number> = {};
+        for (const v of vos) {
+          const n = Number(v.targetValue);
+          if (Number.isFinite(n)) data[v.targetCode] = n;
+        }
+        this.mccNoteCardCache.set(key, { at: Date.now(), data });
+        return data;
+      } catch {
+        /* retry */
+      }
+    }
+    return null;
+  }
+
   /** ─── Morgandada(5) 专业号线索「区间直查」实时客户端（2026-10-20 探针验证纯 fetch 可用）。
    *  与平台「用户列表」页同接口：进线/开口/留资 = 各事件类型的区间客户总数（与平台页面一致），
    *  卡片 11/12 = 进线的广告/自然流量拆分。结果内存缓存 10 分钟；任何失败返回 null（调用方回退日表聚合）。 ─── */
@@ -2877,21 +2934,36 @@ export class KoxService {
           select: { sysTagId: true, opened: true, leads: true },
         }),
       ]);
-      const itemCnt = notes.length;
+      const itemCnt0 = notes.length;
       // 内容指标：日维度权威口径；日表空窗时回退笔记快照求和（notes_daily 回填完成前的兜底）
       const useDaily = dailyRows.length > 0;
-      const viewSum = useDaily
+      let viewSum = useDaily
         ? sum(dailyRows.map((x) => x.views))
         : sum(notes.map((x) => x.views));
-      const exposureSum = useDaily
+      let exposureSum = useDaily
         ? sum(dailyRows.map((x) => x.exposure))
         : sum(notes.map((x) => x.exposure));
-      const interactionSum = useDaily
+      let interactionSum = useDaily
         ? sum(dailyRows.map((x) => x.likes + x.collects + x.comments + x.shares))
         : sum(notes.map((x) => x.likes + x.collects + x.comments + x.shares));
       const followSum = useDaily
         ? sum(dailyRows.map((x) => x.followCount))
         : sum(notes.map((x) => x.followCount));
+      // 总数类指标实时取 MCC「汇总分析」（员工笔记 + 笔记发布日期窗口，与平台页面一致）
+      let cardVals: Record<string, number> | null = null;
+      let itemCnt = itemCnt0;
+      if (caliber === 'total') {
+        cardVals = await this.mccNoteCardLive(brandId, dayKey08(wStart), dayKey08(wEnd));
+        if (cardVals) {
+          if (cardVals.note_cnt != null) itemCnt = cardVals.note_cnt;
+          if (cardVals.imp_num != null) exposureSum = cardVals.imp_num;
+          if (cardVals.read_feed_num != null) viewSum = cardVals.read_feed_num;
+          if (cardVals.engage_num != null) interactionSum = cardVals.engage_num;
+        }
+      }
+      const campImpression = sum(camps.map((x) => n(x.impression)));
+      const campClick = sum(camps.map((x) => n(x.click)));
+      const campInteraction = sum(camps.map((x) => n(x.interaction)));
 
       // 线索经营：汇总口径 = 平台全量；自然/聚光口径 = 流量标签拆分（客户明细 sysTagId）
       const enterAll = sum(clues.map((c) => c.enterAll));
@@ -2974,13 +3046,13 @@ export class KoxService {
           interaction: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.interaction))),
           msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
         },
-        // 自然三数（媒体级拆分，客户公式）：总(日表) − 投放(聚光日报)；仅汇总口径有意义，负值归 0
+        // 自然三数（媒体级拆分，客户公式）：总(平台汇总卡) − 投放(聚光日报)；仅汇总口径有意义，负值归 0
         organic:
           caliber === 'total'
             ? {
-                exposure: Math.max(0, exposureSum - sum(camps.map((x) => n(x.impression)))),
-                view: Math.max(0, viewSum - sum(camps.map((x) => n(x.click)))),
-                interaction: Math.max(0, interactionSum - sum(camps.map((x) => n(x.interaction)))),
+                exposure: Math.max(0, exposureSum - campImpression),
+                view: Math.max(0, viewSum - campClick),
+                interaction: Math.max(0, interactionSum - campInteraction),
               }
             : null,
       };

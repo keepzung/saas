@@ -1,7 +1,7 @@
 <template>
   <PageWrapper title="员工矩阵分析" subtitle="星火 MCC 主账户 / 员工号日明细（T+1）">
     <template #extra>
-      <a-radio-group v-model:value="dim" size="small" @change="reloadTable">
+      <a-radio-group v-if="!isMdd" v-model:value="dim" size="small" @change="reloadTable">
         <a-radio-button value="brand">主账户维度</a-radio-button>
         <a-radio-button value="staff">员工号维度</a-radio-button>
       </a-radio-group>
@@ -131,7 +131,9 @@ import { getStaffMatrixSummary, getStaffMatrixBrands, getStaffMatrixUsers } from
 
 const auth = useAuthStore();
 
-const dim = ref('brand');
+// MDD：官号/主账号数据不进看板，隐藏主账户维度，默认员工号维度
+const isMdd = computed(() => Number(auth.currentBrandId ?? 0) === 5);
+const dim = ref(isMdd.value ? 'staff' : 'brand');
 const range = ref([dayjs().subtract(6, 'day'), dayjs().subtract(1, 'day')]);
 const keyword = ref('');
 const permFilter = ref('');

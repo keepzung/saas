@@ -707,8 +707,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           publishEnd: today,
           promotedOnly: !!opts?.promoted,
           // 荣威(2)：底表只收录「专业号笔记 + 员工笔记」，达人笔记暂不收录（客户确认 2026-10）
+          // Morgandada(5)：只收录「员工笔记」（2026-10-20 客户确认：官号/博主合作等非员工笔记一律不进看板）
           noteSources:
-            org.brandId === 2 ? ['专业号笔记', '员工笔记'] : undefined,
+            org.brandId === 2 ? ['专业号笔记', '员工笔记'] : org.brandId === 5 ? ['员工笔记'] : undefined,
           pageNo,
           pageSize: NOTE_PAGE_SIZE,
         },
@@ -841,8 +842,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         byNickname.set(authorName, accountId);
       }
 
-      // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）
-      if (org.brandId === 5 && !accountId) continue;
+      // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）；
+      // 官号（主账号 MorganDaDa）的任何数据不进看板（2026-10-20 客户确认）
+      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) continue;
 
       const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
       const rtbRaw = String(pick('is_rtb_adver') ?? '').trim();
@@ -948,7 +950,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const maxPages = 200;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList(
-        { timeStart, timeEnd: statDate, timeDim: 'date_key', pageNo, pageSize: 500 },
+        {
+          timeStart,
+          timeEnd: statDate,
+          timeDim: 'date_key',
+          // Morgandada(5)：只收「员工笔记」（官号/博主合作不进看板）
+          noteSources: org.brandId === 5 ? ['员工笔记'] : undefined,
+          pageNo,
+          pageSize: 500,
+        },
         org,
       );
       total = data.total;
@@ -964,7 +974,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       if (!noteId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
       const authorName = str(m.get('author_name')) || null;
       const accountId = authorName ? (byNickname.get(authorName) ?? null) : null;
-      if (org.brandId === 5 && !accountId) continue;
+      // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
+      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) continue;
       const data = {
         title: str(m.get('note_title')) || null,
         authorName,
