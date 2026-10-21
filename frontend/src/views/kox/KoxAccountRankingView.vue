@@ -191,7 +191,6 @@ const columns = computed(() => {
       ncol('私信进线数', 'pm_inquiries', 104),
       ncol('私信开口数', 'pm_openings', 104),
       ncol('私信留资数', 'pm_leads', 104),
-      ncol('粉丝数', 'fans', 90),
       ncol('内容发布数', 'item_cnt', 104),
       ncol('内容互动数', 'interaction_sum', 104),
       ncol('内容曝光数', 'exposure_sum', 110),
@@ -227,7 +226,6 @@ const columns = computed(() => {
     { title: '排名', key: 'rank', width: 64, fixed: 'left' },
     { title: '账号', key: 'nickname', dataIndex: 'nickname', width: 200, fixed: 'left' },
     { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 92, fixed: 'left' },
-    ncol('粉丝数', 'fans', 90),
     { title: '账号标签', key: 'account_tag', dataIndex: 'account_tag', width: 100 },
     { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
     ncol('私信进线', 'pm_inquiries'),
@@ -344,7 +342,6 @@ async function exportUnlinked() {
       账号类型: a.accountType,
       大区: a.regionName ?? '',
       销售区域: a.saleArea ?? '',
-      粉丝数: a.fans ?? 0,
       状态: a.status,
       当前门店: a.storeName ?? '',
     })),
@@ -375,7 +372,7 @@ async function exportDetail() {
     ...(isMdd.value ? { CES综合得分: r.ces, 新粉率: r.fans_rate } : { 分层: r.tier_label }),
     ...(isTesla.value
       ? {}
-      : { 粉丝数: r.fans, 账号标签: r.account_tag ?? '', 账号类型: r.account_type }),
+      : { 账号标签: r.account_tag ?? '', 账号类型: r.account_type }),
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
     私信留资: r.pm_leads,

@@ -35,7 +35,6 @@
             <div class="ov3">
               <div class="ov3-item"><span>KOS账号数</span><b class="c-primary">{{ fmt(ov.global?.kos_num) }}</b></div>
               <div class="ov3-item"><span>门店中心数</span><b>{{ fmt(ov.global?.store_num) }}</b></div>
-              <div class="ov3-item"><span>粉丝覆盖人次</span><b class="c-green">{{ fmt(ov.global?.fans_sum) }}</b></div>
             </div>
             <div ref="regionBarEl" class="chart-fill" />
           </a-card>
@@ -62,7 +61,6 @@
         <div class="strip">
           <div class="strip-item"><span>KOS账号数</span><b>{{ fmt(ov.summary?.kos_num) }}</b></div>
           <div class="strip-item"><span>门店中心数</span><b>{{ fmt(ov.summary?.store_num) }}</b></div>
-          <div class="strip-item"><span>粉丝覆盖人次</span><b>{{ fmt(ov.summary?.fans_sum) }}</b></div>
           <div class="strip-item"><span>内容发布数</span><b class="c-primary">{{ fmt(ov.summary?.item_cnt) }}</b></div>
           <div class="strip-item"><span>内容曝光数</span><b>{{ fmt(ov.summary?.exposure_sum) }}</b></div>
           <div class="strip-item"><span>内容总阅读量</span><b>{{ fmt(ov.summary?.view_sum) }}</b></div>
@@ -100,7 +98,6 @@
           <div class="hero-item">
             <div class="hero-label">全部线索/留资数</div>
             <div class="hero-value green">{{ fmt(ov.lead_funnel?.total_leads ?? ov.lead_funnel?.pm_leads) }}</div>
-            <div class="hero-sub">粉丝覆盖: {{ fmt(ov.summary?.fans_sum) }}</div>
           </div>
         </div>
       </a-card>

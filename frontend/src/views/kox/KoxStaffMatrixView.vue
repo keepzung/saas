@@ -50,7 +50,7 @@
           <div class="hero-value">¥{{ fmt(summary.rtb_income_amt) }}</div>
         </div>
       </div>
-      <div class="hero-tip">口径：流量型指标=窗口内逐日求和；粉丝/累计曝光=窗口末最新值。数据更新至 {{ summary.date || '—' }}</div>
+      <div class="hero-tip">口径：流量型指标=窗口内逐日求和。数据更新至 {{ summary.date || '—' }}</div>
     </a-card>
 
     <a-card size="small" title="组织趋势" style="margin-top: 12px">
@@ -164,7 +164,6 @@ const brandColumns = [
   { title: '绑定员工数', key: 'kosAccountNum', dataIndex: 'kosAccountNum', width: 96 },
   { title: '笔记数', key: 'createNoteNum', dataIndex: 'createNoteNum', width: 84 },
   { title: '笔记曝光', key: 'socReadCnt', dataIndex: 'socReadCnt', width: 100 },
-  { title: '粉丝数', key: 'fansNum', dataIndex: 'fansNum', width: 90 },
   { title: '私信进线', key: 'messageOpenCnt', dataIndex: 'messageOpenCnt', width: 88 },
   { title: '私信开口', key: 'messageDrivingOpenCnt', dataIndex: 'messageDrivingOpenCnt', width: 88 },
   { title: '私信留资', key: 'msgLeadsNum', dataIndex: 'msgLeadsNum', width: 88 },
@@ -181,7 +180,6 @@ const staffColumns = [
   { title: '阅读', key: 'socClickCnt', dataIndex: 'socClickCnt', width: 92 },
   { title: '互动', key: 'socEnageCnt', dataIndex: 'socEnageCnt', width: 92 },
   { title: 'CTR', key: 'ctr', width: 80 },
-  { title: '粉丝数', key: 'fansNum', dataIndex: 'fansNum', width: 90 },
   { title: '新增粉丝', key: 'addFansNum', dataIndex: 'addFansNum', width: 88 },
   { title: '私信进线', key: 'messageOpenCnt', dataIndex: 'messageOpenCnt', width: 88 },
   { title: '私信开口', key: 'messageDrivingOpenCnt', dataIndex: 'messageDrivingOpenCnt', width: 88 },
@@ -297,7 +295,6 @@ function doExport() {
           绑定员工数: r.kosAccountNum ?? 0,
           笔记数: r.createNoteNum ?? 0,
           笔记曝光: r.socReadCnt ?? 0,
-          粉丝数: r.fansNum ?? 0,
           私信进线: r.messageOpenCnt ?? 0,
           私信开口: r.messageDrivingOpenCnt ?? 0,
           私信留资: r.msgLeadsNum ?? 0,
@@ -314,7 +311,6 @@ function doExport() {
           阅读: r.socClickCnt ?? 0,
           互动: r.socEnageCnt ?? 0,
           CTR: r.socImpCnt ? `${((r.socClickCnt / r.socImpCnt) * 100).toFixed(2)}%` : '0.00%',
-          粉丝数: r.fansNum ?? 0,
           新增粉丝: r.addFansNum ?? 0,
           私信进线: r.messageOpenCnt ?? 0,
           私信开口: r.messageDrivingOpenCnt ?? 0,

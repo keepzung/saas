@@ -116,9 +116,6 @@
               {{ record.platform === 'douyin' ? '抖音' : '小红书' }}
             </a-tag>
           </template>
-          <template v-else-if="column.key === 'fans'">
-            {{ record.fans.toLocaleString() }}
-          </template>
           <template v-else-if="column.key === 'operation'">
             <a-switch
               :checked="record.status === 'enabled'"
@@ -176,10 +173,6 @@
           </div>
           <div class="mc-meta">
             <div class="mc-meta-item">
-              <span class="muted mini">粉丝数</span>
-              <b>{{ record.fans.toLocaleString() }}</b>
-            </div>
-            <div class="mc-meta-item">
               <span class="muted mini">大区</span>
               <b>{{ record.region_name || '-' }}</b>
             </div>
@@ -236,9 +229,6 @@
             <a-radio value="KOC">KOC（达人）</a-radio>
           </a-radio-group>
         </a-form-item>
-        <a-form-item label="粉丝数">
-          <a-input-number v-model:value="addForm.fans" :min="0" style="width: 100%" />
-        </a-form-item>
         <a-form-item label="所属大区">
           <a-input v-model:value="addForm.regionName" placeholder="如：华东" />
         </a-form-item>
@@ -266,7 +256,6 @@
     >
       <a-descriptions size="small" :column="2" class="mg-sec" bordered>
         <a-descriptions-item label="账号">{{ manageRow?.nickname }}</a-descriptions-item>
-        <a-descriptions-item label="粉丝数">{{ manageRow?.fans?.toLocaleString() }}</a-descriptions-item>
         <a-descriptions-item label="大区">{{ manageRow?.region_name || manageRow?.area_name || '-' }}</a-descriptions-item>
         <a-descriptions-item label="销售区域">{{ manageRow?.sale_area || '-' }}</a-descriptions-item>
         <a-descriptions-item label="主页">
@@ -490,7 +479,6 @@ const columns = [
   { key: 'platform', title: '平台', width: 90 },
   { key: 'account_type', title: '账号类型', dataIndex: 'account_type', width: 100 },
   { key: 'account_tag', title: '账号标签', dataIndex: 'account_tag', width: 110, ellipsis: true },
-  { key: 'fans', title: '粉丝数', dataIndex: 'fans', width: 100, sorter: true },
   { key: 'region_name', title: '大区', dataIndex: 'region_name', width: 100, ellipsis: true },
   { key: 'area_name', title: '地域', dataIndex: 'area_name', width: 130, ellipsis: true },
   { key: 'store_name', title: '代理商/门店', dataIndex: 'store_name', width: 180, ellipsis: true },

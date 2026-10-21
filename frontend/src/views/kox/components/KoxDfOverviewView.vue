@@ -81,7 +81,6 @@
               <div class="asset-item"><span>经销商门店数</span><b>{{ fmt(ov.summary?.store_num) }}</b></div>
               <div class="asset-item"><span>KOS账号数</span><b class="c-primary">{{ fmt(ov.summary?.kos_num) }}</b></div>
               <div class="asset-item"><span>优质账号</span><b class="c-green">{{ fmt(ov.global?.quality_num) }}</b></div>
-              <div class="asset-item"><span>矩阵总粉丝数</span><b class="c-violet">{{ fmt(ov.summary?.fans_sum) }}</b></div>
             </div>
           </a-tab-pane>
           <a-tab-pane key="publish" tab="内容发布&互动">
