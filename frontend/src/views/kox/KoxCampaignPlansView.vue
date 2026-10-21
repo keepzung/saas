@@ -57,7 +57,7 @@
             { label: '聚光投放', value: 'juguang' },
             { label: '汇总', value: 'total' },
           ]"
-          @change="renderCharts"
+          @change="() => nextTick(renderCharts)"
         />
       </div>
 
@@ -200,7 +200,7 @@
           <template #title>
             <div class="chart-title-wrap">
               <div class="chart-title"><span class="bar"></span>私信留资数趋势</div>
-              <a-radio-group v-model:value="leadTab" size="small" @change="renderCharts">
+              <a-radio-group v-model:value="leadTab" size="small" @change="() => nextTick(renderCharts)">
                 <a-radio-button value="inquiries">私信进线数</a-radio-button>
                 <a-radio-button value="openings">私信开口数</a-radio-button>
                 <a-radio-button value="leads">私信留资数</a-radio-button>
@@ -626,11 +626,20 @@ function renderCharts() {
     renderOrganicTrend();
     return;
   }
+  // caliber 切换会经 v-if 销毁/重建图表容器：实例还挂在旧 div 上时必须重新 init，否则画到脱离 DOM 的节点上（图表空白）
   if (consumeEl.value) {
+    if (consumeChart && consumeChart.getDom() !== consumeEl.value) {
+      consumeChart.dispose();
+      consumeChart = null;
+    }
     if (!consumeChart) consumeChart = echarts.init(consumeEl.value);
     consumeChart.setOption(areaOption(dates, trend.value.map((t) => t.fee), '总消费', '元'), { notMerge: true });
   }
   if (leadsEl.value) {
+    if (leadsChart && leadsChart.getDom() !== leadsEl.value) {
+      leadsChart.dispose();
+      leadsChart = null;
+    }
     if (!leadsChart) leadsChart = echarts.init(leadsEl.value);
     const key = leadTab.value === 'inquiries' ? 'msg_inquiries' : leadTab.value === 'openings' ? 'msg_openings' : 'msg_leads';
     const name = leadTab.value === 'inquiries' ? '私信进线数' : leadTab.value === 'openings' ? '私信开口数' : '私信留资数';
