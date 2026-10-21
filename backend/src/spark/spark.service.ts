@@ -697,6 +697,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 
     const rows: Record<string, unknown>[] = [];
+    // brand5：基线外作者跳过统计（作者→行数），写入同步日志便于发现账号改名导致的匹配失效
+    const skipped = new Map<string, number>();
     let total = 0;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList(
@@ -843,8 +845,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）；
-      // 官号（主账号 MorganDaDa）的任何数据不进看板（2026-10-20 客户确认）
-      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) continue;
+      // 官号（主账号 MorganDaDa）的任何数据不进看板（2026-10-20 客户确认）。
+      // 基线外作者（典型：平台改昵称致昵称匹配失效）计数进日志，不再静默丢弃
+      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
+        skipped.set(authorName, (skipped.get(authorName) ?? 0) + 1);
+        continue;
+      }
 
       const noteUrlRaw = String(pickLink('note_link') ?? pick('note_link') ?? '').trim();
       const rtbRaw = String(pick('is_rtb_adver') ?? '').trim();
@@ -899,7 +905,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded,
       accountsRemoved: 0,
-      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}`,
+      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
@@ -1007,6 +1013,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const rows: Record<string, unknown>[] = [];
     let total = 0;
+    // brand5：基线外作者跳过统计（同 syncNotes，写日志便于发现账号改名致匹配失效）
+    const skipped = new Map<string, number>();
     // 全创作者的笔记×日行很大（34 天 ≈ 8 万行，探针实测 30 天 69,729 行），pageSize 500 × 200 页覆盖；
     // 视图的 author_name 服务端过滤不生效（2026-10 探针），基线账号在客户端过滤
     const maxPages = 200;
@@ -1037,7 +1045,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const authorName = str(m.get('author_name')) || null;
       const accountId = authorName ? (byNickname.get(authorName) ?? null) : null;
       // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
-      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) continue;
+      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
+        const key = authorName ?? '(作者为空)';
+        skipped.set(key, (skipped.get(key) ?? 0) + 1);
+        continue;
+      }
       const data = {
         title: str(m.get('note_title')) || null,
         authorName,
@@ -1078,7 +1090,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
-      message: `total=${total}, window=${timeStart}~${statDate}`,
+      message: `total=${total}, window=${timeStart}~${statDate}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
