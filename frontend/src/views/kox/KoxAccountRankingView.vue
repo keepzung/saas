@@ -172,7 +172,6 @@ const columns = computed(() => {
       { title: '账号', key: 'nickname' },
       { title: '分层', key: 'tier', dataIndex: 'tier_label', width: 84 },
       ncol('CES综合得分', 'ces', 104),
-      ncol('新粉率', 'fans_rate', 90),
       { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
       ncol('私信进线数', 'pm_inquiries', 100),
       ncol('私信开口数', 'pm_openings', 100),

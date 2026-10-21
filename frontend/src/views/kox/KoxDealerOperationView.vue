@@ -37,7 +37,7 @@
           <div class="step-icon-wrap"><ShoppingOutlined class="step-icon" style="color: #16a34a" /></div>
           <div class="step-title-wrap">
             <span class="step-title">成交转化</span>
-            <span class="step-value">{{ fmt(salesSummary.qty) }} 台</span>
+            <span class="step-value">{{ fmt(salesSummary.qty) }} 件</span>
           </div>
         </div>
       </div>
@@ -76,7 +76,7 @@
             :show-info="false"
             :stroke-color="{ from: '#16a34a', to: '#4ade80' }"
           />
-          <div class="funnel-sub">留资 {{ fmt(total.pm_leads) }} 条 → 成交 {{ fmt(salesSummary.qty) }} 台 · ¥{{ fmt(salesSummary.amount) }}</div>
+          <div class="funnel-sub">留资 {{ fmt(total.pm_leads) }} 条 → 成交 {{ fmt(salesSummary.qty) }} 件 · ¥{{ fmt(salesSummary.amount) }}</div>
         </div>
       </div>
     </a-card>
@@ -332,23 +332,37 @@ async function reload() {
   try {
     let list = [];
     if (isMdd.value) {
-      // Morgandada：代理商 = 认证账号（23 个），复用账号表现接口（发布/曝光/留资真实口径）
+      // Morgandada：代理商按「大区」划分（区域汇总行），展开显示该区域的门店员工账号（2026-10-21 客户确认）
       const res = await getKoxAccountRanking({
         brandId: auth.currentBrandId ?? undefined,
         metric: 'pm_leads',
         ...rangeParams(),
         page_size: 100,
       });
-      list = (res.list ?? []).map((r) => ({
-        ...r,
-        // 模板 dealer_name 列渲染 record.name（与荣威门店排行同构），此处两个名都给
-        name: r.nickname,
-        dealer_name: r.nickname,
-        account_num: 1,
+      const accs = (res.list ?? []).map((r) => ({
+        nickname: r.nickname,
+        account_type: r.account_type,
+        author_url: r.author_url,
         item_cnt: Number(r.item_cnt ?? 0),
-        exposure_sum: Number(r.exposure_sum ?? 0),
+        exposure: Number(r.exposure_sum ?? 0),
         pm_leads: Number(r.pm_leads ?? 0),
+        ces: Number(r.ces ?? 0),
+        region: r.region_name || '未分配',
       }));
+      const groups = new Map();
+      for (const a of accs) {
+        const g =
+          groups.get(a.region) ??
+          { name: a.region, region: a.region, accounts: [], account_num: 0, item_cnt: 0, exposure_sum: 0, pm_leads: 0, ces: 0 };
+        g.accounts.push(a);
+        g.account_num += 1;
+        g.item_cnt += a.item_cnt;
+        g.exposure_sum += a.exposure;
+        g.pm_leads += a.pm_leads;
+        g.ces += a.ces;
+        groups.set(a.region, g);
+      }
+      list = [...groups.values()];
     } else {
       const res = await getKoxRanking({
         dimension: 'store',

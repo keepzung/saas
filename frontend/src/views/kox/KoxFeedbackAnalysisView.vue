@@ -502,7 +502,9 @@ async function loadData() {
         categories: res.categories ?? [],
         detail_total: res.detail_total ?? (res.comments ?? []).length,
       };
-      comments.value = (res.comments ?? []).map((c) => ({
+      comments.value = (res.comments ?? [])
+        .filter((c) => c.content && c.content !== '（无文字内容）')
+        .map((c) => ({
         id: c.id,
         content: c.content,
         category: c.category,

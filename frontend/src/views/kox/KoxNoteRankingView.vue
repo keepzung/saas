@@ -408,7 +408,6 @@ const complianceSummary = computed(() => ({
 }));
 const complianceColumns = [
   { title: '内容', key: 'title', width: 380 },
-  { title: '类型', dataIndex: 'note_type', key: 'note_type', width: 90 },
   { title: '检测状态', key: 'state', width: 100 },
   { title: '命中违禁词', key: 'violations', width: 220 },
   { title: '阅读数', dataIndex: 'views', key: 'views', width: 90, align: 'right' },

@@ -117,16 +117,6 @@
         </a-tabs>
       </a-card>
 
-      <a-card size="small" :bordered="false" class="ai-strip" @click="goBriefing">
-        <div class="ai-row">
-          <span class="ai-badge">AI分析</span>
-          <b class="ai-title">智能运营简报</b>
-          <span class="muted mini">{{ ov.start }} ~ {{ ov.end }}</span>
-          <span class="muted mini">本期运营亮点 / 内容建议 / 风险提示（点击查看）</span>
-          <RightOutlined class="ai-arrow" />
-        </div>
-      </a-card>
-
       <a-row :gutter="12">
         <a-col :span="12">
           <a-card size="small" :bordered="false">
@@ -223,7 +213,7 @@ import { Empty } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts';
 import { useRouter } from 'vue-router';
-import { QuestionCircleOutlined, EditOutlined, SendOutlined, FundOutlined, RightOutlined, ReloadOutlined } from '@ant-design/icons-vue';
+import { QuestionCircleOutlined, EditOutlined, SendOutlined, FundOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../../components/PageWrapper.vue';
 import {
   getKoxAccountRanking,
@@ -344,12 +334,17 @@ const adBlocks = computed(() => {
   const a = ov.value?.ad ?? {};
   const pv = ov.value?.prev?.ad ?? {};
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
+  const ctr = a.impression ? Math.round(((a.click ?? 0) / a.impression) * 10000) / 100 : 0;
+  const cpm = a.impression ? Math.round(((a.cost ?? 0) / a.impression) * 100000) / 100 : 0;
+  const cpc = a.click ? Math.round(((a.cost ?? 0) / a.click) * 100) / 100 : 0;
   return [
     d('投放消耗(元)', a.cost, pv.cost),
     d('曝光量', a.impression, pv.impression),
     d('点击量', a.click, pv.click),
     d('投流私信留资', a.msg_leads, pv.msg_leads),
-    { label: 'CTR', value: `${a.ctr ?? 0}%` },
+    { label: 'CTR', value: `${ctr}%` },
+    { label: 'CPM', value: `¥${cpm}` },
+    { label: 'CPC', value: `¥${cpc}` },
     { label: '私信留资成本', value: `¥${a.leads_cost ?? 0}` },
   ];
 });
@@ -439,6 +434,7 @@ function renderOpsChart() {
           itemStyle: { color: '#3456E6' },
           areaStyle: { color: 'rgba(52,86,230,0.10)' },
           label: { show: true, position: 'top', fontSize: 10, color: '#64748b' },
+          labelLayout: { hideOverlap: true },
           data,
         },
       ],
@@ -470,6 +466,7 @@ function renderAdChart() {
           itemStyle: { color: isCost ? '#d97706' : '#16a34a' },
           areaStyle: { color: isCost ? 'rgba(217,119,6,0.10)' : 'rgba(22,163,74,0.10)' },
           label: { show: true, position: 'top', fontSize: 10, color: '#64748b' },
+          labelLayout: { hideOverlap: true },
           data,
         },
       ],
@@ -507,9 +504,6 @@ function goHot() {
   router.push('/kox_df/operation-analysis/note-ranking');
 }
 
-function goBriefing() {
-  router.push('/kox_df/operation-analysis/ai-briefing');
-}
 
 function onResize() {
   opsChart?.resize();
@@ -720,39 +714,11 @@ onBeforeUnmount(() => {
   color: #ea580c;
 }
 
-/* AI 简报条 */
-.ai-strip {
-  cursor: pointer;
-  transition: box-shadow 0.2s;
-}
 
-.ai-strip:hover {
-  box-shadow: 0 2px 10px rgba(52, 86, 230, 0.12);
-}
 
-.ai-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 
-.ai-badge {
-  background: linear-gradient(135deg, #3456e6, #7c3aed);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: 6px;
-  padding: 2px 8px;
-}
 
-.ai-title {
-  font-size: 14px;
-}
 
-.ai-arrow {
-  margin-left: auto;
-  color: #94a3b8;
-}
 
 .rank-head {
   display: flex;
