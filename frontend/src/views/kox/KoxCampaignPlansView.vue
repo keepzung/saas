@@ -650,6 +650,10 @@ function renderCharts() {
 /** Morgandada 自然流趋势（按笔记发布日） */
 function renderOrganicTrend() {
   if (!organicEl.value) return;
+  if (organicChart && organicChart.getDom() !== organicEl.value) {
+    organicChart.dispose();
+    organicChart = null;
+  }
   if (!organicChart) organicChart = echarts.init(organicEl.value);
   const o = organicSummary.value ?? {};
   const t = o.trend ?? [];
