@@ -21,6 +21,7 @@ import { extname } from 'path';
 import { mkdirSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BrandAccessGuard } from './brand-access.guard';
 import { ContentproService } from './contentpro.service';
 import {
   BatchGenerateDto,
@@ -51,7 +52,7 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT
 const ALLOWED_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, BrandAccessGuard)
 export class ContentproController {
   constructor(private service: ContentproService) {}
 

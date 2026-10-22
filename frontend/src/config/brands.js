@@ -27,7 +27,7 @@ export function brandTheme(brandId) {
   return BRAND_THEMES[Number(brandId)] ?? null;
 }
 
-// 东风奕境(7)/格力(8) 顶部三工作区 Tab（复刻旧系统：智能内容工厂Pro | KOX运营管理中心 | 内容创作任务）
+// marketineok(1)/东风奕境(7)/格力(8) 顶部三工作区 Tab（复刻旧系统：智能内容工厂Pro | KOX运营管理中心 | 内容创作任务）
 // key 对应 DefaultLayout 的侧栏菜单切换；prefix 用于从路由推导当前 Tab
 const DF_TASK_TABS = [
   { key: 'factory', name: '智能内容工厂Pro', prefix: '/content-pro', path: '/content-pro/workbench' },
@@ -36,6 +36,7 @@ const DF_TASK_TABS = [
 ];
 
 export const BRAND_WORKSPACE_TABS = {
+  1: DF_TASK_TABS,
   7: DF_TASK_TABS,
   8: DF_TASK_TABS,
 };
@@ -46,9 +47,10 @@ export const BRAND_WORKSPACE_TABS = {
 // 线索中心（来鼓私信）仅 Morgandada(5) 可见；周期报表/监测两页/热门内容为特斯拉(6)专属；
 // 6 另隐藏 投流项目管理（客户 1008 批注「可以删除不要了」）；
 // 7/8 用 内容工厂Pro(顶部Tab) 替代 内容中心Pro，内容创作任务 替代 KOX 任务管理
+// 1（marketineok）：2026-10 与东风同款启用 内容工厂Pro+内容创作任务，隐藏旧 内容中心Pro 与旧任务管理
 // 5（Morgandada）：内容生产模块放开（4级账号体系——KOS 员工登录内容生产模块），仅保留报表/监测类隐藏
 export const BRAND_HIDDEN_MENUS = {
-  1: ['线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务', '销售看板'],
+  1: ['线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容中心Pro', '任务管理', '销售看板'],
   2: ['任务管理', '线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务', '销售看板'],
   4: ['线索中心', '周期报表', '添加监测', '添加记录', '热门内容', '内容工厂Pro', '内容创作任务', '销售看板'],
   5: ['周期报表', '添加监测', '添加记录', '热门内容', '投流项目管理'],
