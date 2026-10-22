@@ -223,6 +223,10 @@ export class SparkApiClient {
         'share_num',
         'follow_num',
         'engage_num',
+        // 媒体级自然拆分（视图 target_config_list 全集内，2026-10-22 实测 API 直接返回，无需 UI 自定义列勾选）
+        'ziran_imp_cnt',
+        'ziran_read_cnt',
+        'ads_rtb_engage_cnt',
         'message_open_cnt',
         'message_driving_open_cnt',
         'msg_leads_num',

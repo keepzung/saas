@@ -548,6 +548,10 @@ model KoxNote {
   comments      Int         @default(0)
   shares        Int         @default(0)
   followCount   Int         @default(0)
+  // 星火笔记明细分析·媒体级自然指标（自然曝光量/自然阅读量/竞价推广互动量）
+  naturalExposure Int       @default(0)
+  naturalViews    Int       @default(0)
+  rtbEngage       Int       @default(0)
   pmInquiries   Int         @default(0)
   pmOpenings    Int         @default(0)
   pmLeads       Int         @default(0)
@@ -1598,6 +1602,10 @@ model KoxNoteDailyStat {
   comments     Int      @default(0)
   shares       Int      @default(0)
   followCount  Int      @default(0)
+  // 星火笔记明细分析·媒体级自然指标（与 KoxNote 同名同义）
+  naturalExposure Int   @default(0)
+  naturalViews    Int   @default(0)
+  rtbEngage       Int   @default(0)
   pmInquiries  Int      @default(0)
   pmOpenings   Int      @default(0)
   pmLeads      Int      @default(0)

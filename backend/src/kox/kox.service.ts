@@ -2914,7 +2914,7 @@ export class KoxService {
       const [notes, camps] = await Promise.all([
         this.prisma.koxNote.findMany({
           where: noteBase(wStart, wEnd),
-          select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true, isRtbAdver: true },
+          select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, naturalExposure: true, naturalViews: true, rtbEngage: true, pmInquiries: true, pmOpenings: true, pmLeads: true, isRtbAdver: true },
         }),
         this.prisma.koxCampaignDailyStat.findMany({
           where: { brandId, statDate: { gte: wStart, lte: wEnd }, advertiserId: mddAdvertiserId },
@@ -2975,15 +2975,17 @@ export class KoxService {
           interaction: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.interaction))),
           msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
         },
-        // 自然三数（媒体级拆分）：自然曝光=未投流笔记（推广状态=未投放）曝光求和——原「总−投放」公式
-        // 因聚光投放曝光含非员工笔记（475,277 > 员工笔记总曝光）恒为负归 0，2026-10-22 改口径；
-        // 自然点击/自然互动仍=总−投放（聚光日报）；仅汇总口径有意义
+        // 自然三数（媒体级拆分，2026-10-22 客户拍板切笔记明细分析自然流量效果列）：
+        // 自然曝光=「自然曝光量」列求和、自然点击=「自然阅读量」列求和（ziran_imp_cnt/ziran_read_cnt），
+        // 自然互动=总互动量（赞+藏+评+享+涨粉）−「竞价推广互动量」列（视图无自然互动列；
+        // MDD 推广全部为竞价——tuiguang_imp_cnt==ads_rtb_imp_cnt 实测相等，故减竞价即减全部推广）。
+        // 原「总−投放(聚光日报)」公式因聚光日报含非员工笔记且窗口语义错配已弃用
         organic:
           caliber === 'total'
             ? {
-                exposure: sum(notes.filter((x) => x.isRtbAdver !== true).map((x) => x.exposure)),
-                view: Math.max(0, viewSum - campClick),
-                interaction: Math.max(0, interactionSum - campInteraction),
+                exposure: sum(notes.map((x) => x.naturalExposure)),
+                view: sum(notes.map((x) => x.naturalViews)),
+                interaction: Math.max(0, interactionSum + followSum - sum(notes.map((x) => x.rtbEngage))),
               }
             : null,
       };
@@ -3057,7 +3059,7 @@ export class KoxService {
         ? '自然流口径：内容/阅读/互动仅非投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增自然线索'
         : caliber === 'juguang'
           ? '聚光投放口径：内容/阅读/互动仅投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增广告线索；消耗=聚光账户日报（10847045）'
-          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；内容指标=笔记明细分析行求和（员工笔记，发布时间在筛选区间的累计快照）；爆文=单篇互动（赞+藏+评+享）≥500；私信咨询/开口=笔记分析私信列（员工笔记，累计口径）；线索数=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）；投放=聚光账户日报（10847045）';
+          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；内容指标=笔记明细分析行求和（员工笔记，发布时间在筛选区间的累计快照）；自然曝光/自然点击=笔记明细分析「自然曝光量/自然阅读量」列求和（媒体级拆分），自然互动=总互动量−「竞价推广互动量」列；爆文=单篇互动（赞+藏+评+享）≥500；私信咨询/开口=笔记分析私信列（员工笔记，累计口径）；线索数=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）；投放=聚光账户日报（10847045）';
 
     return {
       start: dayKey08(start),

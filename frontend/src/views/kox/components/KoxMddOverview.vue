@@ -302,9 +302,9 @@ const publishBlocks = computed(() => {
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
   const showOrganic = ov.value?.caliber ? ov.value.caliber === 'total' : caliber.value === 'total';
   const organic = [
-    { label: '自然曝光', tip: '自然曝光 = 未投流笔记（聚光推广状态=未投放）曝光求和', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
-    { label: '自然点击（阅读）', tip: '自然点击（阅读）= 总点击（阅读）− 投放点击（聚光日报）', value: s.organic_view, d: delta(s.organic_view, pvOrg.view) },
-    { label: '自然互动', tip: '自然互动 = 四项互动（赞+藏+评+享）− 投放互动（聚光日报），不含涨粉', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
+    { label: '自然曝光', tip: '自然曝光 = 星火笔记明细分析「自然曝光量」列求和（媒体级拆分，含投流笔记的自然流量部分）', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
+    { label: '自然点击（阅读）', tip: '自然点击（阅读）= 星火笔记明细分析「自然阅读量」列求和（媒体级拆分）', value: s.organic_view, d: delta(s.organic_view, pvOrg.view) },
+    { label: '自然互动', tip: '自然互动 = 总互动量（赞+藏+评+享+涨粉）− 星火笔记明细分析「竞价推广互动量」列（视图无自然互动列，MDD 推广均为竞价）', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
   ];
   return [
     { label: '门店数', value: s.store_num ?? 0 },
