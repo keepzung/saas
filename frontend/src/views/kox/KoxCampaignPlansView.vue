@@ -778,10 +778,10 @@ function renderCharts() {
     });
     // Morgandada(5)：趋势三口径（2026-10-23 客户反馈）——总数=获客工具统计/线索分析逐日，
     // 聚光投放=聚光日报逐日，自然流=总数−投放；线索页签=线索分析合计（不再是笔记口径私信留资）
-    if (isMdd.value) {
-      const cal = caliber.value;
-      const pick = (total: number, camp: number) =>
-        cal === 'juguang' ? camp : cal === 'organic' ? Math.max(0, total - camp) : total;
+      if (isMdd.value) {
+        const cal = caliber.value;
+        const pick = (total, camp) =>
+          cal === 'juguang' ? camp : cal === 'organic' ? Math.max(0, total - camp) : total;
       if (leadTab.value === 'inquiries') {
         data = trend.value.map((t) => pick(t.acq_consult ?? 0, t.camp_consult ?? 0));
       } else if (leadTab.value === 'openings') {
