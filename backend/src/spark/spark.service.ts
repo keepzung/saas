@@ -979,13 +979,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * 笔记日维度同步（MCC 笔记分析 time_dim=date_key，笔记×日行；2026-10 探针验证支持 ≥79 天回溯）。
-   * MDD 总览日维度权威口径：每次刷新 statDate 往前 34 天（30 天窗口 + 4 天重叠容忍晚到），行按自身 date_key 落库。
+   * MDD 总览日维度权威口径：每次刷新 statDate 往前 30 天，行按自身 date_key 落库。
+   * 注意：窗口必须 ≤33 天——平台对 >33 天的 date_key 窗口把自然流量效果列（ziran_*）静默置零
+   * （2026-10-22 实测 33 天正常、34 天指标码在但全零，曾致 5.1 万行自然字段落 0）。
    */
   async syncNoteDaily(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
     const org = ctx ?? (await this.orgs.forBrand());
     if (!org) throw new Error('无可用星火组织配置');
     const statDate = date ?? this.syncDate();
-    const lookback = 34;
+    const lookback = 30;
     const timeStart = new Date(
       new Date(`${statDate}T00:00:00+08:00`).getTime() - (lookback - 1) * 86400000,
     ).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
