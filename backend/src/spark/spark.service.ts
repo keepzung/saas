@@ -1540,8 +1540,46 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           rtb_income_amt: sum('rtbIncomeAmt'),
         };
       });
+    // Morgandada(5)：主账户维度视图不产私信/投广指标（恒 0），私信进线/开口/留资/投广消耗
+    // 回退员工维度（员工数据明细 SparkStaffUserDaily，与账号表现分析/区域数据分析同口径，
+    // 2026-10-23 客户报修）——按日覆盖，brand 行缺失的日期补最小行
+    let metric_note: string | undefined;
+    if (brandId === 5) {
+      const userRows = await this.prisma.sparkStaffUserDaily.findMany({
+        where: { brandId: 5, statDate: { gte: start, lte: end } },
+        select: { statDate: true, messageOpenCnt: true, messageDrivingOpenCnt: true, msgLeadsNum: true, rtbIncomeAmt: true },
+      });
+      const userByDay = new Map<string, { open: number; driving: number; leads: number; fee: number }>();
+      for (const r of userRows) {
+        const k = dayKey08(r.statDate);
+        const cur = userByDay.get(k) ?? { open: 0, driving: 0, leads: 0, fee: 0 };
+        cur.open += r.messageOpenCnt;
+        cur.driving += r.messageDrivingOpenCnt;
+        cur.leads += r.msgLeadsNum;
+        cur.fee += Number(r.rtbIncomeAmt ?? 0);
+        userByDay.set(k, cur);
+      }
+      for (const [k, v] of userByDay) {
+        let row = days.find((d) => d.date === k);
+        if (!row) {
+          row = {
+            date: k, bind_brand_num: 0, open_kos_brand_num: 0, kos_account_num: 0,
+            rtb_account_num: 0, create_note_num: 0, soc_read_cnt: 0, fans_num: 0,
+            add_fans_num: 0, message_open_cnt: 0, message_driving_open_cnt: 0,
+            msg_leads_num: 0, leads_success: 0, rtb_income_amt: 0,
+          };
+          days.push(row);
+        }
+        row.message_open_cnt = v.open;
+        row.message_driving_open_cnt = v.driving;
+        row.msg_leads_num = v.leads;
+        row.rtb_income_amt = v.fee;
+      }
+      days.sort((a, b) => a.date.localeCompare(b.date));
+      metric_note = '私信进线/开口/留资/投广消耗=员工矩阵→员工数据明细（员工维度）按日求和（Morgandada 主账户维度视图不产该组指标）';
+    }
     const latest = days[days.length - 1] ?? {};
-    return { brand_id: brandId, start, end, latest, days };
+    return { brand_id: brandId, start, end, latest, days, metric_note };
   }
 
   /** 员工矩阵 · 主账户维度窗口聚合（分页 + 关键字 + 权限/投广筛选 + 排序） */

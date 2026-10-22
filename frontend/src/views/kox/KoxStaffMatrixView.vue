@@ -36,17 +36,32 @@
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">私信进线</div>
+          <div class="hero-label">
+            私信进线
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日求和；与总览的获客工具统计总数口径不同源">
+              <span class="mdd-tip">*</span>
+            </a-tooltip>
+          </div>
           <div class="hero-value">{{ fmt(summary.message_open_cnt) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">私信留资</div>
+          <div class="hero-label">
+            私信留资
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日求和">
+              <span class="mdd-tip">*</span>
+            </a-tooltip>
+          </div>
           <div class="hero-value green">{{ fmt(summary.msg_leads_num) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">投广消耗</div>
+          <div class="hero-label">
+            投广消耗
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日投广金额求和">
+              <span class="mdd-tip">*</span>
+            </a-tooltip>
+          </div>
           <div class="hero-value">¥{{ fmt(summary.rtb_income_amt) }}</div>
         </div>
       </div>
@@ -361,6 +376,11 @@ onBeforeUnmount(() => {
 .hero-label {
   font-size: 12px;
   color: #64748b;
+}
+.mdd-tip {
+  color: #3456e6;
+  margin-left: 2px;
+  cursor: help;
 }
 .hero-value {
   font-size: 24px;
