@@ -56,7 +56,7 @@
           <div class="hero-item">
             <div class="hero-label">总阅读/播放量</div>
             <div class="hero-value primary">{{ fmt(ov.summary?.view_sum) }}</div>
-            <div class="hero-sub">总互动量: {{ fmt(ov.summary?.interaction_sum) }}</div>
+            <div class="hero-sub">总互动量: {{ fmt(engageSum) }}</div>
           </div>
           <div class="hero-divider"></div>
           <div class="hero-item">
@@ -290,6 +290,11 @@ function delta(cur, prev) {
   return { pct: Math.round(((c - p) / p) * 1000) / 10, up: c >= p };
 }
 
+// 总互动量（含涨粉口径，2026-10-22 客户确认）：= 赞+藏+评+享+涨粉，与星火笔记分析「互动量」一致
+const engageSum = computed(
+  () => Number(ov.value?.summary?.interaction_sum ?? 0) + Number(ov.value?.summary?.follow_sum ?? 0),
+);
+
 const publishBlocks = computed(() => {
   const s = ov.value?.summary ?? {};
   const pv = ov.value?.prev?.summary ?? {};
@@ -299,7 +304,7 @@ const publishBlocks = computed(() => {
   const organic = [
     { label: '自然曝光', tip: '自然曝光 = 未投流笔记（聚光推广状态=未投放）曝光求和', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
     { label: '自然点击（阅读）', tip: '自然点击（阅读）= 总点击（阅读）− 投放点击（聚光日报）', value: s.organic_view, d: delta(s.organic_view, pvOrg.view) },
-    { label: '自然互动', tip: '自然互动 = 总互动 − 投放互动（聚光日报）', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
+    { label: '自然互动', tip: '自然互动 = 四项互动（赞+藏+评+享）− 投放互动（聚光日报），不含涨粉', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
   ];
   return [
     { label: '门店数', value: s.store_num ?? 0 },
@@ -309,9 +314,14 @@ const publishBlocks = computed(() => {
     { label: '总曝光', tip: '员工笔记曝光求和（笔记明细分析快照，含投流笔记）', value: s.exposure_sum ?? 0, d: delta(s.exposure_sum, pv.exposure_sum) },
     d('新增粉丝数', s.follow_sum, pv.follow_sum),
     d('总阅读量', s.view_sum, pv.view_sum),
-    d('总互动量', s.interaction_sum, pv.interaction_sum),
+    {
+      label: '总互动量',
+      tip: '总互动量 = 赞+藏+评+享+涨粉（与星火笔记分析·互动量口径一致，2026-10-22 客户确认）',
+      value: Number(s.interaction_sum ?? 0) + Number(s.follow_sum ?? 0),
+      d: delta(Number(s.interaction_sum ?? 0) + Number(s.follow_sum ?? 0), Number(pv.interaction_sum ?? 0) + Number(pv.follow_sum ?? 0)),
+    },
     ...(showOrganic ? organic : []),
-    { label: '互动率', value: `${s.interaction_rate ?? 0}%` },
+    { label: '互动率', tip: '互动率 = 四项互动（赞+藏+评+享）÷ 总阅读量', value: `${s.interaction_rate ?? 0}%` },
   ];
 });
 
