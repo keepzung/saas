@@ -74,16 +74,16 @@
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">
-            {{ isMdd ? '线索数' : '总私信留资数' }}
-            <a-tooltip v-if="isMdd" title="与运营总览「全部线索/留资数」同源：MCC 线索管理→线索分析（按所选区间逐日求和，含广告/自然全部留资组件）；线索表空窗时回退笔记私信口径">
+            {{ isMdd ? (caliber === 'juguang' ? '广告线索' : '线索数') : '总私信留资数' }}
+            <a-tooltip v-if="isMdd" :title="caliber === 'juguang' ? '聚光投放口径=线索分析「新增广告线索」（窗口逐日求和），与下方广告线索卡一致' : '与运营总览「全部线索/留资数」同源：MCC 线索管理→线索分析（按所选区间逐日求和，含广告/自然全部留资组件）；线索表空窗时回退笔记私信口径'">
               <InfoCircleOutlined class="metric-tip" />
             </a-tooltip>
           </div>
-          <div class="hero-value hl-green">{{ fmtNum(summary.msg_leads) }}</div>
+          <div class="hero-value hl-green">{{ fmtNum(leadCaliberValue) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">{{ isMdd ? '留资成本（元）' : '私信留资成本（元）' }}</div>
+          <div class="hero-label">{{ isMdd ? (caliber === 'juguang' ? '广告线索成本（元）' : '留资成本（元）') : '私信留资成本（元）' }}</div>
           <div class="hero-value hl-violet">{{ heroLeadCost }}</div>
         </div>
       </div>
@@ -284,11 +284,11 @@
         <a-card :bordered="false" size="small" class="chart-card" v-if="caliber !== 'organic'">
           <template #title>
             <div class="chart-title-wrap">
-              <div class="chart-title"><span class="bar"></span>私信留资数趋势</div>
+              <div class="chart-title"><span class="bar"></span>{{ isMdd ? '私信线索趋势' : '私信留资数趋势' }}</div>
               <a-radio-group v-model:value="leadTab" size="small" @change="() => nextTick(renderCharts)">
                 <a-radio-button value="inquiries">私信进线数</a-radio-button>
                 <a-radio-button value="openings">私信开口数</a-radio-button>
-                <a-radio-button value="leads">私信留资数</a-radio-button>
+                <a-radio-button value="leads">{{ isMdd ? '线索数' : '私信留资数' }}</a-radio-button>
               </a-radio-group>
             </div>
           </template>
@@ -576,6 +576,12 @@ const storeKeyword = ref('');
 const heroFee = computed(() => summary.value.fee ?? 0);
 const heroFeeScopeNote = computed(() => '');
 const heroLeadCost = computed(() => {
+  // Morgandada(5)：留资成本随口径分母走（聚光投放=广告线索、汇总=线索合计）
+  if (isMdd.value) {
+    const leads = Number(leadCaliberValue.value ?? 0);
+    if (!leads) return '—';
+    return fmtNum(Math.round((Number(summary.value.fee ?? 0) / leads) * 100) / 100);
+  }
   if (!summary.value.msg_leads) return '—';
   return fmtNum(summary.value.msg_lead_cost);
 });
@@ -765,9 +771,27 @@ function renderCharts() {
       leadsChart = null;
     }
     if (!leadsChart) leadsChart = echarts.init(leadsEl.value);
-    const key = leadTab.value === 'inquiries' ? 'msg_inquiries' : leadTab.value === 'openings' ? 'msg_openings' : 'msg_leads';
-    const name = leadTab.value === 'inquiries' ? '私信进线数' : leadTab.value === 'openings' ? '私信开口数' : '私信留资数';
-    leadsChart.setOption(areaOption(dates, trend.value.map((t) => t[key] ?? 0), name, '条'), { notMerge: true });
+    let name = leadTab.value === 'inquiries' ? '私信进线数' : leadTab.value === 'openings' ? '私信开口数' : '私信留资数';
+    let data = trend.value.map((t) => {
+      const key = leadTab.value === 'inquiries' ? 'msg_inquiries' : leadTab.value === 'openings' ? 'msg_openings' : 'msg_leads';
+      return t[key] ?? 0;
+    });
+    // Morgandada(5)：趋势三口径（2026-10-23 客户反馈）——总数=获客工具统计/线索分析逐日，
+    // 聚光投放=聚光日报逐日，自然流=总数−投放；线索页签=线索分析合计（不再是笔记口径私信留资）
+    if (isMdd.value) {
+      const cal = caliber.value;
+      const pick = (total: number, camp: number) =>
+        cal === 'juguang' ? camp : cal === 'organic' ? Math.max(0, total - camp) : total;
+      if (leadTab.value === 'inquiries') {
+        data = trend.value.map((t) => pick(t.acq_consult ?? 0, t.camp_consult ?? 0));
+      } else if (leadTab.value === 'openings') {
+        data = trend.value.map((t) => pick(t.acq_open ?? 0, t.camp_open ?? 0));
+      } else {
+        name = '线索数';
+        data = trend.value.map((t) => (cal === 'juguang' ? t.clue_ad ?? 0 : cal === 'organic' ? t.clue_nature ?? 0 : t.clue_total ?? 0));
+      }
+    }
+    leadsChart.setOption(areaOption(dates, data, name, '条'), { notMerge: true });
   }
 }
 

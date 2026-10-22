@@ -1976,17 +1976,27 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     // 与运营总览漏斗一致）；线索数=线索分析合计（clue 块），leads 仅作早于回填起点窗口的回退值（笔记私信快照）
     let pmOverride: { inquiries: number; openings: number; leads: number } | null = null;
     let pmByDay: Map<string, { i: number; o: number; l: number }> | null = null;
+    // 逐日口径（趋势图三口径用）：获客工具统计进线/开口（总数）+ 线索分析线索（总数/广告/自然）
+    const acqByDay = new Map<string, { consult: number; open: number }>();
+    let clueByDay: Map<string, { total: number; ad: number; nature: number }> | null = null;
     if (brandId === 5) {
-      const [acqAgg, noteAgg] = await Promise.all([
-        this.prisma.clueAcqToolDaily.aggregate({
+      const [acqRows, noteAgg] = await Promise.all([
+        this.prisma.clueAcqToolDaily.findMany({
           where: { brandId: 5, day: { gte: start, lte: end } },
-          _sum: { consultCnt: true, chatCnt: true },
+          select: { day: true, consultCnt: true, chatCnt: true },
         }),
         this.prisma.koxNote.aggregate({ where: { brandId: 5 }, _sum: { pmLeads: true } }),
       ]);
+      for (const r of acqRows) {
+        const k = dayKey08(r.day);
+        const cur = acqByDay.get(k) ?? { consult: 0, open: 0 };
+        cur.consult += r.consultCnt;
+        cur.open += r.chatCnt;
+        acqByDay.set(k, cur);
+      }
       pmOverride = {
-        inquiries: acqAgg._sum.consultCnt ?? 0,
-        openings: acqAgg._sum.chatCnt ?? 0,
+        inquiries: [...acqByDay.values()].reduce((a, x) => a + x.consult, 0),
+        openings: [...acqByDay.values()].reduce((a, x) => a + x.open, 0),
         leads: noteAgg._sum.pmLeads ?? 0,
       };
       pmByDay = new Map(
@@ -2027,6 +2037,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         cAd += r.adsClueCnt;
         cNature += r.natureClueCnt;
       }
+      clueByDay = byDayC;
       const padC = (n: number) => String(n).padStart(2, '0');
       const trendC: { date: string; total: number; ad: number; nature: number }[] = [];
       const startDayC = new Date(start.getFullYear(), start.getMonth(), start.getDate());
@@ -2283,11 +2294,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
         const endDay = keyOf(end);
-        const out: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number }[] = [];
+        const out: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number; acq_consult?: number; acq_open?: number; camp_consult?: number; camp_open?: number; clue_total?: number; clue_ad?: number; clue_nature?: number }[] = [];
         for (let guard = 0; guard < 366; guard++) {
           const key = keyOf(startDay);
           const v = dayMap.get(key);
           const pm = pmByDay?.get(key);
+          const acq = acqByDay.get(key);
+          const cb = clueByDay?.get(key);
           out.push({
             date: key,
             fee: v ? r2v(v.fee) : 0,
@@ -2297,9 +2310,24 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             msg_openings: pm ? pm.o : (v?.open ?? 0),
             msg_leads: pm ? pm.l : (v?.msg_leads ?? 0),
             active_accounts: v?.accounts.size ?? 0,
+            // Morgandada(5)：趋势三口径字段（总数=获客工具统计/线索分析，投放=聚光日报，自然=总−投放）
+            acq_consult: acq?.consult ?? 0,
+            acq_open: acq?.open ?? 0,
+            camp_consult: v?.consult ?? 0,
+            camp_open: v?.open ?? 0,
+            clue_total: cb?.total ?? 0,
+            clue_ad: cb?.ad ?? 0,
+            clue_nature: cb?.nature ?? 0,
           });
           if (key === endDay) break;
           startDay.setDate(startDay.getDate() + 1);
+        }
+        // Morgandada(5)：聚光/线索/获客数据均 T+1 出数——末点为"今天"且全天无数据时裁掉，
+        // 避免趋势图尾端断崖式归零（2026-10-23 客户反馈）
+        const todayKey = keyOf(new Date(Date.now() + 8 * 3600000));
+        const last = out[out.length - 1];
+        if (brandId === 5 && last && last.date === todayKey && !last.fee && !last.acq_consult && !last.clue_total) {
+          out.pop();
         }
         return out;
       })(),
