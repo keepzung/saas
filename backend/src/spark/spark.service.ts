@@ -1141,6 +1141,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         naturalExposure: num(m.get('ziran_imp_cnt')),
         naturalViews: num(m.get('ziran_read_cnt')),
         rtbEngage: num(m.get('ads_rtb_engage_cnt')),
+        rtbImp: num(m.get('ads_rtb_imp_cnt')),
+        rtbClick: num(m.get('ads_rtb_click_cnt')),
         pmInquiries: num(m.get('message_open_cnt')),
         pmOpenings: num(m.get('message_driving_open_cnt')),
         pmLeads: num(m.get('msg_leads_num')),
@@ -1923,12 +1925,23 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const totalImpression = sum((r) => r.impression);
     const totalClick = sum((r) => r.click);
 
-    // Morgandada(5)：私信三数统一口径 = MCC 笔记分析（员工笔记）私信咨询/开口/留资快照合计（2026-10-20 客户确认）
+    // Morgandada(5)：私信进线/开口 = 线索分析·获客工具统计窗口求和（总数含商流+自然流，2026-10-23 客户口径，
+    // 与运营总览漏斗一致）；线索数=线索分析合计（clue 块），leads 仅作早于回填起点窗口的回退值（笔记私信快照）
     let pmOverride: { inquiries: number; openings: number; leads: number } | null = null;
     let pmByDay: Map<string, { i: number; o: number; l: number }> | null = null;
     if (brandId === 5) {
-      const agg = await this.prisma.koxNote.aggregate({ where: { brandId: 5 }, _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true } });
-      pmOverride = { inquiries: agg._sum.pmInquiries ?? 0, openings: agg._sum.pmOpenings ?? 0, leads: agg._sum.pmLeads ?? 0 };
+      const [acqAgg, noteAgg] = await Promise.all([
+        this.prisma.clueAcqToolDaily.aggregate({
+          where: { brandId: 5, day: { gte: start, lte: end } },
+          _sum: { consultCnt: true, chatCnt: true },
+        }),
+        this.prisma.koxNote.aggregate({ where: { brandId: 5 }, _sum: { pmLeads: true } }),
+      ]);
+      pmOverride = {
+        inquiries: acqAgg._sum.consultCnt ?? 0,
+        openings: acqAgg._sum.chatCnt ?? 0,
+        leads: noteAgg._sum.pmLeads ?? 0,
+      };
       pmByDay = new Map(
         (
           await this.prisma.koxNoteDailyStat.groupBy({
@@ -2112,6 +2125,70 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    // Morgandada(5)：汇总口径块（2026-10-23 客户要求：与运营总览·汇总完全一致）——
+    // 内容=笔记明细分析行求和（发布窗口终身值），进线/开口=获客工具统计窗口求和（总数含商流+自然流）
+    let overview: {
+      item_cnt: number;
+      exposure_sum: number;
+      view_sum: number;
+      interaction_total: number;
+      pm_inquiries: number;
+      pm_openings: number;
+    } | null = null;
+    // Morgandada(5)：聚光投放口径块（2026-10-23 客户口径：聚光→标准投→基础报表→笔记报表，
+    // 只统计投放笔记不统计未投放——明细分析日维度竞价推广列窗口求和，未投放笔记天然为 0；
+    // 员工笔记范围（官号/非员工内容不进看板）；日表滚动 30 天，更长窗口不保证）
+    let campNote: {
+      note_cnt: number;
+      impression: number;
+      click: number;
+      interaction: number;
+    } | null = null;
+    if (brandId === 5) {
+      const accs5 = await this.prisma.kosAccount.findMany({
+        where: { brandId: 5, status: 'enabled' },
+        select: { id: true, nickname: true },
+      });
+      const ids5 = accs5.map((a) => a.id);
+      const nicks5 = accs5.map((a) => a.nickname).filter(Boolean) as string[];
+      const noteRows = await this.prisma.koxNote.findMany({
+        where: {
+          brandId: 5,
+          publishTime: { gte: start, lte: end },
+          OR: [{ accountId: { in: ids5 } }, { authorName: { in: nicks5 } }],
+        },
+        select: {
+          exposure: true, views: true, likes: true, collects: true,
+          comments: true, shares: true, followCount: true,
+        },
+      });
+      const acqAgg2 = await this.prisma.clueAcqToolDaily.aggregate({
+        where: { brandId: 5, day: { gte: start, lte: end } },
+        _sum: { consultCnt: true, chatCnt: true },
+      });
+      overview = {
+        item_cnt: noteRows.length,
+        exposure_sum: noteRows.reduce((a, x) => a + x.exposure, 0),
+        view_sum: noteRows.reduce((a, x) => a + x.views, 0),
+        interaction_total: noteRows.reduce(
+          (a, x) => a + x.likes + x.collects + x.comments + x.shares + x.followCount,
+          0,
+        ),
+        pm_inquiries: acqAgg2._sum.consultCnt ?? 0,
+        pm_openings: acqAgg2._sum.chatCnt ?? 0,
+      };
+      const campRows = await this.prisma.koxNoteDailyStat.findMany({
+        where: { brandId: 5, day: { gte: start, lte: end }, rtbImp: { gt: 0 } },
+        select: { noteId: true, rtbImp: true, rtbClick: true, rtbEngage: true },
+      });
+      campNote = {
+        note_cnt: new Set(campRows.map((x) => x.noteId)).size,
+        impression: campRows.reduce((a, x) => a + x.rtbImp, 0),
+        click: campRows.reduce((a, x) => a + x.rtbClick, 0),
+        interaction: campRows.reduce((a, x) => a + x.rtbEngage, 0),
+      };
+    }
+
     return {
       start: dayKey08(start),
       end: dayKey08(end),
@@ -2119,6 +2196,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       promo_note_cnt,
       platform,
       coverage,
+      // Morgandada(5)：汇总口径块（与运营总览·汇总一致，2026-10-23）
+      overview,
+      // Morgandada(5)：聚光投放口径块（笔记报表口径，仅投放笔记，2026-10-23）
+      camp_note: campNote,
       // Morgandada(5)：自然流口径块（媒体级自然拆分，与运营总览同值），供三口径切换
       organic,
       // Morgandada(5)：线索分析块（全部/广告/自然 + 逐日），供线索数三口径拆分
@@ -2138,6 +2219,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         msg_openings: effOpen,
         // Morgandada(5)：线索数=线索分析合计（与运营总览一致）；空窗回退笔记私信快照
         msg_leads: brandId === 5 && clue && clue.total ? clue.total : effLeads,
+        // Morgandada(5)：聚光投放页签的私信咨询/开口（聚光投放日报口径，区别于 msg_inquiries 的总数口径）
+        camp_consult: totalConsult,
+        camp_open: totalOpen,
         msg_inquiry_cost: effConsult ? r2v(totalFee / effConsult) : 0,
         msg_open_cost: effOpen ? r2v(totalFee / effOpen) : 0,
         msg_lead_cost:

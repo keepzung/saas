@@ -227,6 +227,9 @@ export class SparkApiClient {
         'ziran_imp_cnt',
         'ziran_read_cnt',
         'ads_rtb_engage_cnt',
+        // 竞价推广逐日投放（聚光笔记报表口径，仅投放笔记有值）
+        'ads_rtb_imp_cnt',
+        'ads_rtb_click_cnt',
         'message_open_cnt',
         'message_driving_open_cnt',
         'msg_leads_num',

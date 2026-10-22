@@ -1630,6 +1630,9 @@ model KoxNoteDailyStat {
   naturalExposure Int   @default(0)
   naturalViews    Int   @default(0)
   rtbEngage       Int   @default(0)
+  // 竞价推广逐日投放数据（聚光笔记报表口径：仅投放笔记有值）
+  rtbImp          Int   @default(0)
+  rtbClick        Int   @default(0)
   pmInquiries  Int      @default(0)
   pmOpenings   Int      @default(0)
   pmLeads      Int      @default(0)

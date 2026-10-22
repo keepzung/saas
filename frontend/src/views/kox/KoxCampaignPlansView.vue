@@ -124,11 +124,11 @@
         <div class="metric-card">
           <div class="metric-label">
             投流内容数
-            <a-tooltip :title="isTesla ? '所选周期内被投流的笔记数（聚光笔记报表按笔记去重，剔官号，T+1）' : '全部历史被投流推广的笔记数（数据来源：聚光笔记推广状态，T+1）'">
+            <a-tooltip :title="isMdd ? '窗口内有投放曝光的员工笔记数（聚光笔记报表口径，仅投放笔记不统计未投放，T+1/30 天窗口）' : isTesla ? '所选周期内被投流的笔记数（聚光笔记报表按笔记去重，剔官号，T+1）' : '全部历史被投流推广的笔记数（数据来源：聚光笔记推广状态，T+1）'">
               <InfoCircleOutlined class="metric-tip" />
             </a-tooltip>
           </div>
-          <div class="metric-value">{{ mode === 'real' ? fmtNum(summary.promo_note_cnt ?? 0) : '—' }}</div>
+          <div class="metric-value">{{ mode === 'real' ? fmtNum(isMdd ? (campNoteMetrics?.note_cnt ?? 0) : (summary.promo_note_cnt ?? 0)) : '—' }}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">
@@ -140,24 +140,49 @@
           <div class="metric-value">{{ fmtNum(summary.account_num) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">{{ caliber === 'total' ? '总曝光（投+自）' : '总曝光' }}</div>
+          <div class="metric-label">
+            {{ isMdd ? (caliber === 'total' ? '总曝光' : '投放曝光') : caliber === 'total' ? '总曝光（投+自）' : '总曝光' }}
+            <a-tooltip v-if="isMdd" :title="caliber === 'total' ? '与运营总览·汇总一致：笔记明细分析行求和（发布窗口终身值）' : '聚光→标准投→基础报表→笔记报表口径：仅投放笔记（员工笔记）日维度竞价曝光窗口求和，不含未投放/官号内容'">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtWan(displayMetrics.impression) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">{{ caliber === 'total' ? '自然阅读' : '总点击' }}</div>
+          <div class="metric-label">
+            {{ isMdd ? (caliber === 'total' ? '总阅读' : '投放点击') : caliber === 'total' ? '自然阅读' : '总点击' }}
+            <a-tooltip v-if="isMdd" :title="caliber === 'total' ? '与运营总览·总阅读一致：笔记明细分析行求和' : '笔记报表口径：仅投放笔记日维度竞价点击窗口求和'">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtWan(displayMetrics.views) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">{{ caliber === 'total' ? '总互动（投+自）' : '总点击率' }}</div>
-          <div class="metric-value">{{ caliber === 'total' ? fmtWan(displayMetrics.interaction) : summary.ctr + '%' }}</div>
+          <div class="metric-label">
+            {{ isMdd ? (caliber === 'total' ? '总互动' : '投放点击率') : caliber === 'total' ? '总互动（投+自）' : '总点击率' }}
+            <a-tooltip v-if="isMdd && caliber === 'total'" title="与运营总览·总互动一致：赞+藏+评+享+涨粉（笔记明细分析行求和）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="metric-value">{{ caliber === 'total' ? fmtWan(displayMetrics.interaction) : (isMdd ? displayMetrics.ctr + '%' : summary.ctr + '%') }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">私信进线数</div>
-          <div class="metric-value">{{ fmtNum(summary.msg_inquiries) }}</div>
+          <div class="metric-label">
+            私信进线数
+            <a-tooltip v-if="isMdd" :title="caliber === 'juguang' ? '聚光投放日报私信咨询（种草账户 10847045）' : '线索分析·获客工具统计「私信进线人数」窗口求和（总数含商流+自然流，与运营总览一致）'">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="metric-value">{{ fmtNum(isMdd && caliber === 'juguang' ? summary.camp_consult : summary.msg_inquiries) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">私信开口数</div>
-          <div class="metric-value">{{ fmtNum(summary.msg_openings) }}</div>
+          <div class="metric-label">
+            私信开口数
+            <a-tooltip v-if="isMdd" :title="caliber === 'juguang' ? '聚光投放日报私信开口人数（种草账户 10847045）' : '线索分析·获客工具统计「私信开口人数」窗口求和（总数含商流+自然流，与运营总览一致）'">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="metric-value">{{ fmtNum(isMdd && caliber === 'juguang' ? summary.camp_open : summary.msg_openings) }}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">
@@ -276,7 +301,8 @@
       </div>
     </a-card>
 
-    <a-card :bordered="false" size="small" class="detail-card">
+    <!-- Morgandada(5)：计划详情隐藏（按账号汇总唯一行=主账号 MorganDaDa，客户 2026-10-23 要求不在投放页显示） -->
+    <a-card v-if="!isMdd" :bordered="false" size="small" class="detail-card">
       <template #title>
         <div class="chart-title-wrap">
           <div class="chart-title"><span class="bar"></span>计划详情</div>
@@ -500,17 +526,35 @@ const trend = ref([]);
 const platform = ref(null);
 const coverage = ref(null);
 const organicSummary = ref(null);
+// Morgandada(5)：汇总口径块（与运营总览一致）+ 聚光投放口径块（笔记报表，仅投放笔记）
+const overviewSummary = ref(null);
+const campNoteMetrics = ref(null);
 // Morgandada 线索分析块（全部/广告/自然线索，随所选区间）
 const clueSummary = ref(null);
 const organicEl = ref(null);
 let organicChart = null;
 
 // 三口径展示值：聚光=报表原值；自然流=自然块；汇总=投+自相加（消耗仅聚光有）
+// Morgandada(5) 2026-10-23 起口径切换：汇总=运营总览同源（overview 块：明细分析行求和+获客工具统计）；
+// 聚光投放=笔记报表口径（camp_note 块：明细分析日维度竞价列窗口求和，仅投放笔记）
 const displayMetrics = computed(() => {
   const s = summary.value ?? {};
   const o = organicSummary.value ?? {};
+  const ov = overviewSummary.value ?? {};
+  const cn = campNoteMetrics.value ?? {};
   if (caliber.value === 'organic') {
     return { impression: o.exposure ?? 0, views: o.views ?? 0, interaction: o.interaction ?? 0 };
+  }
+  if (isMdd.value) {
+    if (caliber.value === 'total') {
+      return {
+        impression: ov.exposure_sum ?? 0,
+        views: ov.view_sum ?? 0,
+        interaction: ov.interaction_total ?? 0,
+      };
+    }
+    const ctr = cn.impression ? Math.round((cn.click / cn.impression) * 10000) / 100 : 0;
+    return { impression: cn.impression ?? 0, views: cn.click ?? 0, interaction: cn.interaction ?? 0, ctr };
   }
   if (caliber.value === 'total') {
     return {
@@ -607,6 +651,8 @@ function applyData(sumRes, listRes) {
   platform.value = sumRes.platform ?? null;
   coverage.value = sumRes.coverage ?? null;
   organicSummary.value = sumRes.organic ?? null;
+  overviewSummary.value = sumRes.overview ?? null;
+  campNoteMetrics.value = sumRes.camp_note ?? null;
   clueSummary.value = sumRes.clue ?? null;
   accountTotal.value = listRes.total ?? 0;
   accountRows.value = listRes.list ?? [];
@@ -836,31 +882,36 @@ async function exportAll() {
           { 指标: '互动量', 数值: s.interaction ?? 0 },
           { 指标: '私信进线数', 数值: s.msg_inquiries ?? 0 },
           { 指标: '私信开口数', 数值: s.msg_openings ?? 0 },
-          { 指标: '私信留资数', 数值: s.msg_leads ?? 0 },
+          { 指标: isMdd.value ? '线索数' : '私信留资数', 数值: s.msg_leads ?? 0 },
           { 指标: '私信进线成本(元)', 数值: s.msg_inquiry_cost ?? 0 },
           { 指标: '私信开口成本(元)', 数值: s.msg_open_cost ?? 0 },
           { 指标: '私信留资成本(元)', 数值: s.msg_lead_cost ?? 0 },
         ],
       },
-      {
-        name: '账号投放明细',
-        rows: rows.map((a) => ({
-          账户名称: a.name,
-          账户类型: a.account_kind === 'agent_sub' ? '代理商子账户' : '品牌主账户',
-          代理商: a.agent_name ?? '',
-          投放ID: a.advertiser_id ?? '',
-          消耗天数: a.consume_days,
-          消耗: a.fee,
-          曝光量: a.impression,
-          点击量: a.click,
-          点击率: `${a.ctr}%`,
-          互动量: a.interaction,
-          私信进线数: a.msg_inquiries ?? 0,
-          私信开口数: a.msg_openings ?? 0,
-          私信留资数: a.msg_leads,
-          留资成本: a.msg_leads ? a.msg_lead_cost : '-',
-        })),
-      },
+      // Morgandada(5)：账号明细行=主账号 MorganDaDa，客户要求不在投放页/导出中显示
+      ...(isMdd.value
+        ? []
+        : [
+            {
+              name: '账号投放明细',
+              rows: rows.map((a) => ({
+                账户名称: a.name,
+                账户类型: a.account_kind === 'agent_sub' ? '代理商子账户' : '品牌主账户',
+                代理商: a.agent_name ?? '',
+                投放ID: a.advertiser_id ?? '',
+                消耗天数: a.consume_days,
+                消耗: a.fee,
+                曝光量: a.impression,
+                点击量: a.click,
+                点击率: `${a.ctr}%`,
+                互动量: a.interaction,
+                私信进线数: a.msg_inquiries ?? 0,
+                私信开口数: a.msg_openings ?? 0,
+                私信留资数: a.msg_leads,
+                留资成本: a.msg_leads ? a.msg_lead_cost : '-',
+              })),
+            },
+          ]),
     ];
 
     if (mode.value === 'real' && detailTab.value === 'note') {
