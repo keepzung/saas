@@ -89,7 +89,12 @@
       </div>
       <div class="hero-row" v-else>
         <div class="hero-item">
-          <div class="hero-label">自然笔记数</div>
+          <div class="hero-label">
+            笔记数
+            <a-tooltip title="窗口内发布的全部员工笔记数（媒体级自然拆分视角，与运营总览·内容发布数同口径）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="hero-value hl-blue">{{ fmtNum(organicSummary?.note_cnt ?? 0) }}</div>
         </div>
         <div class="hero-divider"></div>
@@ -165,26 +170,51 @@
           <div class="metric-value">{{ fmtNum(leadCaliberValue) }}</div>
         </div>
       </div>
-      <!-- 自然流口径：自然内容指标卡 -->
+      <!-- 自然流口径：自然内容指标卡（媒体级自然拆分，与运营总览·自然三数同值） -->
       <div class="metric-grid" v-else>
         <div class="metric-card">
-          <div class="metric-label">自然笔记数</div>
+          <div class="metric-label">
+            笔记数
+            <a-tooltip title="窗口内发布的全部员工笔记数（媒体级自然拆分视角，与运营总览·内容发布数同口径）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtNum(organicSummary?.note_cnt ?? 0) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">自然曝光</div>
+          <div class="metric-label">
+            自然曝光
+            <a-tooltip title="星火笔记明细分析「自然曝光量」列求和（媒体级拆分，与运营总览·自然曝光同值）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtWan(organicSummary?.exposure ?? 0) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">自然阅读</div>
+          <div class="metric-label">
+            自然阅读
+            <a-tooltip title="星火笔记明细分析「自然阅读量」列求和（媒体级拆分，与运营总览·自然点击同值）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtWan(organicSummary?.views ?? 0) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">自然互动</div>
+          <div class="metric-label">
+            自然互动
+            <a-tooltip title="总互动量（赞+藏+评+享+涨粉）− 星火笔记明细分析「竞价推广互动量」列（与运营总览·自然互动同值）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtWan(organicSummary?.interaction ?? 0) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">自然涨粉</div>
+          <div class="metric-label">
+            涨粉数
+            <a-tooltip title="平台无自然/投流涨粉拆分，取窗口内笔记涨粉合计（与运营总览·新增粉丝数同值）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="metric-value">{{ fmtNum(organicSummary?.follow ?? 0) }}</div>
         </div>
         <div class="metric-card">

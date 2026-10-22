@@ -1970,7 +1970,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           }
         : null;
 
-    // Morgandada(5)：自然流口径（笔记报表 is_rtb_adver=false，发布窗口内按发布日归组），供三口径切换
+    // Morgandada(5)：自然流口径（2026-10-22 切媒体级自然拆分，与运营总览·内容发布&互动 自然三数同值）：
+    // 曝光/阅读 = 笔记明细分析「自然曝光量/自然阅读量」列求和；互动 = 总互动量(四项+涨粉) − 「竞价推广互动量」列；
+    // 平台无自然涨粉拆分，涨粉取窗口合计；笔记数 = 窗口内全部员工笔记（媒体级自然视角，不再限定未投流笔记），
+    // 全部按发布日归组
     let organic: {
       note_cnt: number;
       exposure: number;
@@ -1983,13 +1986,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const organicRows = await this.prisma.koxNote.findMany({
         where: {
           brandId: 5,
-          isRtbAdver: false,
           publishTime: { gte: start, lte: end },
         },
         select: {
           publishTime: true,
-          exposure: true,
-          views: true,
+          naturalExposure: true,
+          naturalViews: true,
+          rtbEngage: true,
           likes: true,
           comments: true,
           shares: true,
@@ -2006,13 +2009,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         const key = n.publishTime ? dayKey08(n.publishTime) : '未知';
         const cur = dayMapO.get(key) ?? { note_cnt: 0, exposure: 0, views: 0, interaction: 0 };
         cur.note_cnt += 1;
-        cur.exposure += n.exposure;
-        cur.views += n.views;
-        cur.interaction += n.likes + n.comments + n.shares + n.collects;
+        cur.exposure += n.naturalExposure;
+        cur.views += n.naturalViews;
+        cur.interaction += Math.max(0, n.likes + n.comments + n.shares + n.collects + n.followCount - n.rtbEngage);
         dayMapO.set(key, cur);
-        oExposure += n.exposure;
-        oViews += n.views;
-        oInteraction += n.likes + n.comments + n.shares + n.collects;
+        oExposure += n.naturalExposure;
+        oViews += n.naturalViews;
+        oInteraction += Math.max(0, n.likes + n.comments + n.shares + n.collects + n.followCount - n.rtbEngage);
       }
       const trendO: { date: string; note_cnt: number; exposure: number; views: number; interaction: number }[] = [];
       const startDayO = new Date(start.getFullYear(), start.getMonth(), start.getDate());
@@ -2046,7 +2049,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       promo_note_cnt,
       platform,
       coverage,
-      // Morgandada(5)：自然流口径块（笔记 is_rtb_adver=false，按发布窗口），供三口径切换
+      // Morgandada(5)：自然流口径块（媒体级自然拆分，与运营总览同值），供三口径切换
       organic,
       // Morgandada(5)：线索分析块（全部/广告/自然 + 逐日），供线索数三口径拆分
       clue,

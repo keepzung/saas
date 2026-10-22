@@ -2855,6 +2855,8 @@ export class KoxService {
   async mddOverview(query: { start?: string; end?: string; accountTag?: string; caliber?: string }) {
     const brandId = 5;
     const caliber = query.caliber === 'natural' || query.caliber === 'juguang' ? query.caliber : 'total';
+    // 10847045 = 子账户「Morgan DaDa-种草」（代理商：上海卓薯数字科技，平台标签「KOS投放账户」）
+    // —— MDD 唯一 KOS 投放账户（2026-10-22 客户确认：投放数据仅出自此账户，聚光端口笔记报表核对消耗/线索）
     const mddAdvertiserId = (process.env.SPARK_MDD_ADVERTISER_ID ?? '10847045').trim();
     /** 爆文阈值：单篇互动量（赞+藏+评+享）≥ 500 */
     const NOTE_HIT_INTERACTION = 500;
