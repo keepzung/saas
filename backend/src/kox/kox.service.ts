@@ -2914,7 +2914,7 @@ export class KoxService {
       const [notes, camps] = await Promise.all([
         this.prisma.koxNote.findMany({
           where: noteBase(wStart, wEnd),
-          select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true },
+          select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, pmInquiries: true, pmOpenings: true, pmLeads: true, isRtbAdver: true },
         }),
         this.prisma.koxCampaignDailyStat.findMany({
           where: { brandId, statDate: { gte: wStart, lte: wEnd }, advertiserId: mddAdvertiserId },
@@ -2975,11 +2975,13 @@ export class KoxService {
           interaction: caliber === 'natural' ? 0 : sum(camps.map((x) => n(x.interaction))),
           msg_leads: sum(camps.map((x) => n(x.msgLeadsNum))),
         },
-        // 自然三数（媒体级拆分，客户公式）：总(平台汇总卡) − 投放(聚光日报)；仅汇总口径有意义，负值归 0
+        // 自然三数（媒体级拆分）：自然曝光=未投流笔记（推广状态=未投放）曝光求和——原「总−投放」公式
+        // 因聚光投放曝光含非员工笔记（475,277 > 员工笔记总曝光）恒为负归 0，2026-10-22 改口径；
+        // 自然点击/自然互动仍=总−投放（聚光日报）；仅汇总口径有意义
         organic:
           caliber === 'total'
             ? {
-                exposure: Math.max(0, exposureSum - campImpression),
+                exposure: sum(notes.filter((x) => x.isRtbAdver !== true).map((x) => x.exposure)),
                 view: Math.max(0, viewSum - campClick),
                 interaction: Math.max(0, interactionSum - campInteraction),
               }

@@ -102,6 +102,16 @@
           <div class="hero-label">自然阅读</div>
           <div class="hero-value hl-violet">{{ fmtNum(organicSummary?.views ?? 0) }}</div>
         </div>
+        <div class="hero-divider"></div>
+        <div class="hero-item">
+          <div class="hero-label">
+            自然线索
+            <a-tooltip title="MCC 线索管理→线索分析「新增自然线索」（所选区间逐日求和，账号维度同源）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="hero-value hl-blue">{{ fmtNum(clueSummary?.nature ?? 0) }}</div>
+        </div>
       </div>
 
       <!-- 聚光口径 / 汇总：聚光投放指标卡 -->

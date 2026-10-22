@@ -297,7 +297,7 @@ const publishBlocks = computed(() => {
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
   const showOrganic = ov.value?.caliber ? ov.value.caliber === 'total' : caliber.value === 'total';
   const organic = [
-    { label: '自然曝光', tip: '自然曝光 = 总曝光 − 投放曝光（聚光日报）', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
+    { label: '自然曝光', tip: '自然曝光 = 未投流笔记（聚光推广状态=未投放）曝光求和', value: s.organic_exposure, d: delta(s.organic_exposure, pvOrg.exposure) },
     { label: '自然点击（阅读）', tip: '自然点击（阅读）= 总点击（阅读）− 投放点击（聚光日报）', value: s.organic_view, d: delta(s.organic_view, pvOrg.view) },
     { label: '自然互动', tip: '自然互动 = 总互动 − 投放互动（聚光日报）', value: s.organic_interaction, d: delta(s.organic_interaction, pvOrg.interaction) },
   ];
@@ -305,8 +305,8 @@ const publishBlocks = computed(() => {
     { label: '门店数', value: s.store_num ?? 0 },
     { label: 'KOS 账号数', value: s.kos_num ?? 0 },
     d('内容发布数', s.item_cnt, pv.item_cnt),
-    d('爆文数', s.hit_notes, pv.hit_notes),
     { label: '账均发布', value: s.avg_publish ?? 0, d: delta(s.avg_publish, pv.avg_publish) },
+    { label: '总曝光', tip: '员工笔记曝光求和（笔记明细分析快照，含投流笔记）', value: s.exposure_sum ?? 0, d: delta(s.exposure_sum, pv.exposure_sum) },
     d('新增粉丝数', s.follow_sum, pv.follow_sum),
     d('总阅读量', s.view_sum, pv.view_sum),
     d('总互动量', s.interaction_sum, pv.interaction_sum),
