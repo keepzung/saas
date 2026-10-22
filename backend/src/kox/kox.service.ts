@@ -3284,6 +3284,7 @@ export class KoxService {
       pm_openings: number;
       pm_leads: number;
       organic_leads: number;
+      ads_leads: number;
       fee_alloc: number;
     }
     const newAgg = (): Agg => ({
@@ -3298,6 +3299,7 @@ export class KoxService {
       pm_openings: 0,
       pm_leads: 0,
       organic_leads: 0,
+      ads_leads: 0,
       fee_alloc: 0,
     });
     const groups = new Map<string, Agg>();
@@ -3493,6 +3495,32 @@ export class KoxService {
           b.fee_alloc += Number(r.rtbIncomeAmt ?? 0);
         }
       }
+      // 广告/自然线索（账号维度）= MCC 线索管理→线索分析 按归属账户（2026-10-22 客户拍板：
+      // 自然流数据来源=线索分析；取代原「未投流笔记留资」推导口径——上方 notes 循环写入的
+      // organic_leads 为笔记推导值，先清零再用线索分析值覆盖）
+      for (const b of [...groups.values(), ...tagGroups.values()]) {
+        b.organic_leads = 0;
+      }
+      const clueRowsR = await this.prisma.clueAnalysisDaily.findMany({
+        where: { brandId: 5, day: { gte: start, lte: end } },
+        select: { subUserId: true, subUserName: true, adsClueCnt: true, natureClueCnt: true },
+      });
+      const authorIdToAccC = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a]));
+      const nickToAccC = new Map(accounts.map((a) => [a.nickname, a]));
+      const storeToAccC = new Map(accounts.filter((a) => a.storeName).map((a) => [a.storeName as string, a]));
+      for (const r of clueRowsR) {
+        const acc =
+          (r.subUserId ? authorIdToAccC.get(r.subUserId) : undefined) ??
+          (r.subUserName ? nickToAccC.get(r.subUserName) : undefined) ??
+          (r.subUserName ? storeToAccC.get(r.subUserName) : undefined);
+        if (!acc) continue;
+        const g = bucketOf(groups, regionOf(acc));
+        const tg = bucketOf(tagGroups, tagOf(acc));
+        for (const b of [g, tg]) {
+          b.organic_leads += r.natureClueCnt;
+          b.ads_leads += r.adsClueCnt;
+        }
+      }
     }
 
     const mapRow = ([name, g]: [string, Agg]) => {
@@ -3513,6 +3541,7 @@ export class KoxService {
         pm_inquiries: g.pm_inquiries,
         pm_openings: g.pm_openings,
         organic_leads: g.organic_leads,
+        ads_leads: g.ads_leads,
         pm_leads: g.pm_leads,
         fee_alloc: g.fee_alloc,
       };
@@ -3533,7 +3562,7 @@ export class KoxService {
       metric_note:
         brandId === 6
           ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
-          : '私信进线/开口/留资=笔记私信口径（含投流笔记）；自然留资=未投流笔记留资；CES=赞1+藏1+评4+享4+关注8',
+          : '私信进线/开口/留资=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；广告/自然线索=线索管理→线索分析按归属账户（2026-10-22 口径）；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
       tier_meta: KOS_TIERS.map((t) => ({

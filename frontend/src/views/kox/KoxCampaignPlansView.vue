@@ -73,12 +73,17 @@
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">总私信留资数</div>
+          <div class="hero-label">
+            {{ isMdd ? '线索数' : '总私信留资数' }}
+            <a-tooltip v-if="isMdd" title="与运营总览「全部线索/留资数」同源：MCC 线索管理→线索分析（按所选区间逐日求和，含广告/自然全部留资组件）；线索表空窗时回退笔记私信口径">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
           <div class="hero-value hl-green">{{ fmtNum(summary.msg_leads) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
-          <div class="hero-label">私信留资成本（元）</div>
+          <div class="hero-label">{{ isMdd ? '留资成本（元）' : '私信留资成本（元）' }}</div>
           <div class="hero-value hl-violet">{{ heroLeadCost }}</div>
         </div>
       </div>
@@ -140,8 +145,14 @@
           <div class="metric-value">{{ fmtNum(summary.msg_openings) }}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">私信留资数</div>
-          <div class="metric-value">{{ fmtNum(summary.msg_leads) }}</div>
+          <div class="metric-label">
+            <template v-if="isMdd">{{ caliber === 'juguang' ? '广告线索' : '线索数' }}</template>
+            <template v-else>私信留资数</template>
+            <a-tooltip v-if="isMdd" :title="caliber === 'juguang' ? '聚光投放口径=线索分析「新增广告线索」（所选区间逐日求和）' : '汇总口径=线索分析「新增线索」合计（与运营总览一致）'">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="metric-value">{{ fmtNum(leadCaliberValue) }}</div>
         </div>
       </div>
       <!-- 自然流口径：自然内容指标卡 -->
@@ -165,6 +176,15 @@
         <div class="metric-card">
           <div class="metric-label">自然涨粉</div>
           <div class="metric-value">{{ fmtNum(organicSummary?.follow ?? 0) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">
+            自然线索
+            <a-tooltip title="线索分析「新增自然线索」（所选区间逐日求和，2026-10-22 口径）">
+              <InfoCircleOutlined class="metric-tip" />
+            </a-tooltip>
+          </div>
+          <div class="metric-value">{{ fmtNum(clueSummary?.nature ?? 0) }}</div>
         </div>
       </div>
 
@@ -440,6 +460,8 @@ const trend = ref([]);
 const platform = ref(null);
 const coverage = ref(null);
 const organicSummary = ref(null);
+// Morgandada 线索分析块（全部/广告/自然线索，随所选区间）
+const clueSummary = ref(null);
 const organicEl = ref(null);
 let organicChart = null;
 
@@ -545,10 +567,18 @@ function applyData(sumRes, listRes) {
   platform.value = sumRes.platform ?? null;
   coverage.value = sumRes.coverage ?? null;
   organicSummary.value = sumRes.organic ?? null;
+  clueSummary.value = sumRes.clue ?? null;
   accountTotal.value = listRes.total ?? 0;
   accountRows.value = listRes.list ?? [];
   nextTick(renderCharts);
 }
+
+// 留资卡三口径值（MDD）：聚光投放=广告线索，汇总=线索合计（自然流页签单独展示自然线索卡）
+const leadCaliberValue = computed(() => {
+  if (!isMdd.value) return summary.value.msg_leads ?? 0;
+  if (caliber.value === 'juguang') return clueSummary.value?.ad ?? 0;
+  return clueSummary.value?.total ?? summary.value.msg_leads ?? 0;
+});
 
 async function probeAndLoad() {
   loading.value = true;

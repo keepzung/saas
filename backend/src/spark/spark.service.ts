@@ -1865,6 +1865,43 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const effOpen = pmOverride ? pmOverride.openings : totalOpen;
     const effLeads = pmOverride ? pmOverride.leads : totalMsgLeads;
 
+    // Morgandada(5)：线索数口径 = MCC 线索管理→线索分析（ClueAnalysisDaily 窗口求和，
+    // 2026-10-22 客户拍板：与运营总览「全部线索/留资数」一致，自然流/聚光投放=自然/广告线索拆分同源）；
+    // 空窗（早于 2026-08-20 的区间）回退笔记私信快照值
+    let clue: { total: number; ad: number; nature: number; trend: { date: string; total: number; ad: number; nature: number }[] } | null = null;
+    if (brandId === 5) {
+      const clueRows = await this.prisma.clueAnalysisDaily.findMany({
+        where: { brandId: 5, day: { gte: start, lte: end } },
+        select: { day: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
+      });
+      const byDayC = new Map<string, { total: number; ad: number; nature: number }>();
+      let cTotal = 0;
+      let cAd = 0;
+      let cNature = 0;
+      for (const r of clueRows) {
+        const key = dayKey08(r.day);
+        const cur = byDayC.get(key) ?? { total: 0, ad: 0, nature: 0 };
+        cur.total += r.clueCnt;
+        cur.ad += r.adsClueCnt;
+        cur.nature += r.natureClueCnt;
+        byDayC.set(key, cur);
+        cTotal += r.clueCnt;
+        cAd += r.adsClueCnt;
+        cNature += r.natureClueCnt;
+      }
+      const padC = (n: number) => String(n).padStart(2, '0');
+      const trendC: { date: string; total: number; ad: number; nature: number }[] = [];
+      const startDayC = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      for (let guard = 0; guard < 366; guard++) {
+        const key = `${startDayC.getFullYear()}-${padC(startDayC.getMonth() + 1)}-${padC(startDayC.getDate())}`;
+        const v = byDayC.get(key);
+        trendC.push({ date: key, total: v?.total ?? 0, ad: v?.ad ?? 0, nature: v?.nature ?? 0 });
+        if (key >= dayKey08(end)) break;
+        startDayC.setDate(startDayC.getDate() + 1);
+      }
+      clue = { total: cTotal, ad: cAd, nature: cNature, trend: trendC };
+    }
+
     const dayMap = new Map<string, { fee: number; impression: number; click: number; msg_leads: number; consult: number; open: number; accounts: Set<string> }>();
     for (const r of rows) {
       const key = dayKey08(r.statDate);
@@ -2003,6 +2040,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       coverage,
       // Morgandada(5)：自然流口径块（笔记 is_rtb_adver=false，按发布窗口），供三口径切换
       organic,
+      // Morgandada(5)：线索分析块（全部/广告/自然 + 逐日），供线索数三口径拆分
+      clue,
       summary: {
         promo_note_cnt,
         consume_days: dayMap.size,
@@ -2016,10 +2055,14 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         interaction: sum((r) => r.interaction),
         msg_inquiries: effConsult,
         msg_openings: effOpen,
-        msg_leads: effLeads,
+        // Morgandada(5)：线索数=线索分析合计（与运营总览一致）；空窗回退笔记私信快照
+        msg_leads: brandId === 5 && clue && clue.total ? clue.total : effLeads,
         msg_inquiry_cost: effConsult ? r2v(totalFee / effConsult) : 0,
         msg_open_cost: effOpen ? r2v(totalFee / effOpen) : 0,
-        msg_lead_cost: effLeads ? r2v(totalFee / effLeads) : 0,
+        msg_lead_cost:
+          (brandId === 5 && clue && clue.total ? clue.total : effLeads)
+            ? r2v(totalFee / (brandId === 5 && clue && clue.total ? clue.total : effLeads))
+            : 0,
       },
       trend: (() => {
         // 横轴按查询区间逐日铺满（无数据天补 0），上限 366 天防超长自定义区间

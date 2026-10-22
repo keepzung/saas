@@ -32,7 +32,7 @@
         :data-source="dfRegionRows"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: isDf ? 1900 : 1720 }"
+        :scroll="{ x: isDf ? 1900 : 1900 }"
         size="small"
         row-key="name"
       >
@@ -174,6 +174,7 @@ const dfRegionRows = computed(() => {
         pm_openings: s('pm_openings'),
         pm_leads: s('pm_leads'),
         organic_leads: s('organic_leads'),
+        ads_leads: s('ads_leads'),
         // Morgandada 投流花费：全国=各区域分摊值加总（此前漏算恒显 ¥0）
         fee_alloc: s('fee_alloc'),
         ad_fee: orgFee,
@@ -246,7 +247,7 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   // 特斯拉：CES/自然留资无专业号平台口径（KoxNote 存量弃用），不展示
   ...(isTesla
     ? []
-    : [col('CES', 'ces_sum', 96), col('自然留资', 'organic_leads', 96)]),
+    : [col('CES', 'ces_sum', 96), col('广告线索', 'ads_leads', 96), col('自然线索', 'organic_leads', 96)]),
   col('账号平均笔记', 'avg_notes', 116),
   col('笔记平均曝光', 'avg_exposure', 120),
   ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
@@ -275,6 +276,7 @@ const tagColumns = computed(() => [
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
   col('私信留资', 'pm_leads', 96),
+  ...(isTesla ? [] : [col('广告线索', 'ads_leads', 96), col('自然线索', 'organic_leads', 96)]),
 ]);
 
 function dateParams() {
@@ -333,6 +335,7 @@ const toRows = (list, nameKey) =>
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
     私信留资: r.pm_leads,
+    ...(isTesla ? {} : { 广告线索: r.ads_leads ?? 0, 自然线索: r.organic_leads ?? 0 }),
     ...(isMdd ? { 投流花费: r.fee_alloc } : {}),
   }));
 
