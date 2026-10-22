@@ -38,31 +38,31 @@
         <div class="hero-item">
           <div class="hero-label">
             私信进线
-            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日求和；与总览的获客工具统计总数口径不同源">
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）窗口逐日求和；与总览的获客工具统计总数口径不同源">
               <span class="mdd-tip">*</span>
             </a-tooltip>
           </div>
-          <div class="hero-value">{{ fmt(summary.message_open_cnt) }}</div>
+          <div class="hero-value">{{ fmt(isMdd ? mddStaffWindow.message_open_cnt : summary.message_open_cnt) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">
             私信留资
-            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日求和">
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）窗口逐日求和">
               <span class="mdd-tip">*</span>
             </a-tooltip>
           </div>
-          <div class="hero-value green">{{ fmt(summary.msg_leads_num) }}</div>
+          <div class="hero-value green">{{ fmt(isMdd ? mddStaffWindow.msg_leads_num : summary.msg_leads_num) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">
             投广消耗
-            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）当日投广金额求和">
+            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）窗口投广金额逐日求和">
               <span class="mdd-tip">*</span>
             </a-tooltip>
           </div>
-          <div class="hero-value">¥{{ fmt(summary.rtb_income_amt) }}</div>
+          <div class="hero-value">¥{{ fmt(isMdd ? mddStaffWindow.rtb_income_amt : summary.rtb_income_amt) }}</div>
         </div>
       </div>
       <div class="hero-tip">口径：流量型指标=窗口内逐日求和。数据更新至 {{ summary.date || '—' }}</div>
@@ -208,6 +208,16 @@ const columns = computed(() => (dim.value === 'brand' ? brandColumns : staffColu
 // MDD：绑定员工号对齐运营账号数、员工笔记数对齐运营总览「产出内容数」（同窗口同源）
 const mddAccountTotal = ref(0);
 const mddNoteCnt = ref(0);
+// Morgandada(5)：私信进线/留资/投广消耗按页面口径注脚（窗口内逐日求和）展示，
+// 取员工维度修复后的 days 求和（latest 为单日值，直接用会显得仍是坏数据）
+const mddStaffWindow = computed(() => {
+  const s = (k) => (summaryDays.value ?? []).reduce((a, d) => a + Number(d[k] ?? 0), 0);
+  return {
+    message_open_cnt: s('message_open_cnt'),
+    msg_leads_num: s('msg_leads_num'),
+    rtb_income_amt: s('rtb_income_amt'),
+  };
+});
 async function reloadMddHero() {
   if (!isMdd.value) return;
   try {
