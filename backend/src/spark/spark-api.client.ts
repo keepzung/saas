@@ -362,7 +362,8 @@ export class SparkApiClient {
       '/api/vision/mcc_dashboard/target_detail_list',
       {
         viewAlias: 'mcc_assets_clueManage_customerAcquisitionView',
-        dynamicTargets: ['pro_user_id', 'pro_user_name', 'is_consult', 'is_chat', 'is_msg_leads', 'is_service_card_leads', 'is_qw_add_leads', 'is_book_comp_leads', 'is_landing_page_leads', 'is_wechat_leads', 'is_app_card_leads'],
+        // date_key 必传：日维度行的行键，缺了整行落不了库（2026-10-22 实测 upserted=0 教训）
+        dynamicTargets: ['date_key', 'pro_user_id', 'pro_user_name', 'is_consult', 'is_chat', 'is_msg_leads', 'is_service_card_leads', 'is_qw_add_leads', 'is_book_comp_leads', 'is_landing_page_leads', 'is_wechat_leads', 'is_app_card_leads'],
         sorts: [],
         page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 100 },
         frontFilterList: [
