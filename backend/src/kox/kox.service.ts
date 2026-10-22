@@ -3301,6 +3301,7 @@ export class KoxService {
         accountType: true,
         accountTag: true,
         regionName: true,
+        areaName: true,
         storeName: true,
         operatorName: true,
         authorUrl: true,
@@ -3353,6 +3354,7 @@ export class KoxService {
       pm_leads: number;
       organic_leads: number;
       ads_leads: number;
+      clue_total: number;
       fee_alloc: number;
     }
     const newAgg = (): Agg => ({
@@ -3368,6 +3370,7 @@ export class KoxService {
       pm_leads: 0,
       organic_leads: 0,
       ads_leads: 0,
+      clue_total: 0,
       fee_alloc: 0,
     });
     const groups = new Map<string, Agg>();
@@ -3381,8 +3384,12 @@ export class KoxService {
       return g;
     };
     // 账号先入桶（未发布账号也计入 KOS 数）；区域/标签两套分桶
+    // Morgandada(5)：大区桶=账号归属城市（areaName，客户底表 UID↔城市；2026-10-23 客户口径），
+    // 其余品牌维持 regionName→storeName
     const regionOf = (a: (typeof accounts)[number]) =>
-      a.regionName ?? a.storeName ?? '未知区域';
+      brandId === 5
+        ? a.areaName ?? '未分配'
+        : a.regionName ?? a.storeName ?? '未知区域';
     const tagOf = (a: (typeof accounts)[number]) => a.accountTag ?? '未标签';
     for (const a of accounts) {
       bucketOf(groups, regionOf(a)).kos.add(a.id);
@@ -3505,9 +3512,13 @@ export class KoxService {
             n.shares,
             n.followCount,
           );
-          bucket.pm_inquiries += n.pmInquiries;
-          bucket.pm_openings += n.pmOpenings;
-          bucket.pm_leads += n.pmLeads;
+          // Morgandada(5)：私信三数由下方员工矩阵叠加层单独累计（此处再加会双计——历史 bug，
+          // metric_note 只声明员工矩阵口径）；私信线索=线索分析（叠加层）
+          if (brandId !== 5) {
+            bucket.pm_inquiries += n.pmInquiries;
+            bucket.pm_openings += n.pmOpenings;
+            bucket.pm_leads += n.pmLeads;
+          }
           if (n.isRtbAdver !== true) bucket.organic_leads += n.pmLeads;
         }
       }
@@ -3587,6 +3598,9 @@ export class KoxService {
         for (const b of [g, tg]) {
           b.organic_leads += r.natureClueCnt;
           b.ads_leads += r.adsClueCnt;
+          // 私信线索=线索分析「新增线索」合计（广告+自然，按归属账户；2026-10-23 客户拍板，
+          // 取代原「私信留资」（笔记私信快照/员工矩阵口径）列）
+          b.clue_total += r.adsClueCnt + r.natureClueCnt;
         }
       }
     }
@@ -3610,17 +3624,18 @@ export class KoxService {
         pm_openings: g.pm_openings,
         organic_leads: g.organic_leads,
         ads_leads: g.ads_leads,
+        clue_total: g.clue_total,
         pm_leads: g.pm_leads,
         fee_alloc: g.fee_alloc,
       };
     };
     type RegionRow = ReturnType<typeof mapRow>;
-    // 排序（客户指定 2026-10）：默认留资数从多到少；「全国」行恒置底
+    // 排序（客户指定 2026-10）：默认线索数从多到少（2026-10-23 起按私信线索=线索分析合计）；「全国」行恒置底
     const sortRows = (rows: RegionRow[]) =>
       rows.sort((a, b) => {
         if (a.name === '全国') return 1;
         if (b.name === '全国') return -1;
-        return b.pm_leads - a.pm_leads || b.kos_cnt - a.kos_cnt;
+        return b.clue_total - a.clue_total || b.kos_cnt - a.kos_cnt;
       });
 
     return {
@@ -3630,7 +3645,7 @@ export class KoxService {
       metric_note:
         brandId === 6
           ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
-          : '私信进线/开口/留资=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；广告/自然线索=线索管理→线索分析按归属账户（2026-10-22 口径）；CES=赞1+藏1+评4+享4+关注8',
+          : '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
       tier_meta: KOS_TIERS.map((t) => ({
