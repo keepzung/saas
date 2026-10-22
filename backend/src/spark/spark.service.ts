@@ -419,6 +419,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       ];
       for (const s of snapshots) {
         const day = new Date(`${s.statDate}T00:00:00.000Z`);
+        const feeVal = this.partnerNum(r[s.cost]);
+        if (feeVal === 0) {
+          // 午夜后平台尚未结算昨日值(接口返回0), 跳过以免把已有日内值覆盖为 0
+          const existing = await this.prisma.koxCampaignDailyStat.findUnique({
+            where: { statDate_virtualSellerId: { statDate: day, virtualSellerId: sellerId } },
+            select: { fee: true },
+          });
+          if (existing && Number(existing.fee) > 0) continue;
+        }
         await this.prisma.koxCampaignDailyStat.upsert({
           where: { statDate_virtualSellerId: { statDate: day, virtualSellerId: sellerId } },
           create: {
@@ -426,7 +435,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             virtualSellerId: sellerId,
             brandUserName: name,
             accountKind: 'partner_vseller',
-            fee: new Prisma.Decimal(this.partnerNum(r[s.cost])),
+            fee: new Prisma.Decimal(feeVal),
             impression: this.partnerNum(r[s.imp]),
             click: this.partnerNum(r[s.click]),
             messageConsult: this.partnerNum(r[s.enter]),
@@ -436,7 +445,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
             rawJson: r as Prisma.InputJsonValue,
           },
           update: {
-            fee: new Prisma.Decimal(this.partnerNum(r[s.cost])),
+            fee: new Prisma.Decimal(feeVal),
             impression: this.partnerNum(r[s.imp]),
             click: this.partnerNum(r[s.click]),
             messageConsult: this.partnerNum(r[s.enter]),
