@@ -1583,6 +1583,30 @@ model ClueAnalysisDaily {
   @@index([brandId, day])
 }
 
+// MCC 线索管理→线索分析·获客工具统计（viewAlias=mcc_assets_clueManage_customerAcquisitionView）：
+// 归属账户×日 私信进线/开口（总，含商流+自然流）+ 留资组件拆分；MDD 漏斗进线/开口权威口径，
+// 自然进线/开口 = 总数 − 聚光投放日报私信咨询/开口（客户口径 2026-10-22）
+model ClueAcqToolDaily {
+  id               Int      @id @default(autoincrement())
+  brandId          Int      @default(5)
+  day              DateTime
+  subUserId        String
+  subUserName      String?
+  consultCnt       Int      @default(0)
+  chatCnt          Int      @default(0)
+  msgLeads         Int      @default(0)
+  serviceCardLeads Int      @default(0)
+  wecomCardLeads   Int      @default(0)
+  bookingLeads     Int      @default(0)
+  landingPageLeads Int      @default(0)
+  wechatCopyLeads  Int      @default(0)
+  tradeCardLeads   Int      @default(0)
+  fetchedAt        DateTime @default(now()) @updatedAt
+
+  @@unique([brandId, day, subUserId])
+  @@index([brandId, day])
+}
+
 // MCC 笔记分析「日维度」笔记×日指标（MDD 总览日维度权威口径；数据源 viewAlias=mcc_assets_creativityContent_noteAnalysisView
 // + time_dim=date_key，支持长回溯）。自然/聚光口径按 isRtbAdver 拆分。
 model KoxNoteDailyStat {

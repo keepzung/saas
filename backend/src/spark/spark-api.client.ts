@@ -355,6 +355,30 @@ export class SparkApiClient {
     return { total: vo.total ?? rows.length, rows };
   }
 
+  /** 线索分析·获客工具统计行（归属账户×日：私信进线/开口总数（含商流+自然流）+ 留资组件拆分；
+   *  MDD 漏斗进线/开口权威口径，2026-10-22 客户确认。同一视图族：不带 chart、date_key 筛选在前 */
+  async clueAcqToolList(params: { start: string; end: string; timeDim?: 'all_key' | 'date_key'; pageNo: number; pageSize?: number }, ctx?: SparkOrgCtx): Promise<{ total: number; rows: Record<string, unknown>[] }> {
+    const data = (await this.request<{ detailListVo?: { total?: number; detailVoList?: Record<string, unknown>[]; detailDataList?: Record<string, unknown>[] } }>(
+      '/api/vision/mcc_dashboard/target_detail_list',
+      {
+        viewAlias: 'mcc_assets_clueManage_customerAcquisitionView',
+        dynamicTargets: ['pro_user_id', 'pro_user_name', 'is_consult', 'is_chat', 'is_msg_leads', 'is_service_card_leads', 'is_qw_add_leads', 'is_book_comp_leads', 'is_landing_page_leads', 'is_wechat_leads', 'is_app_card_leads'],
+        sorts: [],
+        page: { pageNo: params.pageNo, pageSize: params.pageSize ?? 100 },
+        frontFilterList: [
+          { hide: 0, foldType: 0, require: 1, filterField: 'date_key', filterFieldName: '线索生成时间', filterType: 10, timeFilter: { disableRange: 0, limitMax: 366, quickDates: [6, 11, 16, 21, 36, 41, 46, 51], values: [params.start, params.end], pattern: 10, timeShowType: 11 } },
+          { filterType: 20, selectFilter: { selectType: 10, selectShowType: 0, valueSource: 0, selectLabels: [{ labelValue: 'all_key', labelName: '合计', selected: params.timeDim !== 'date_key' ? 1 : 0 }, { selected: params.timeDim === 'date_key' ? 1 : 0, labelValue: 'date_key', labelName: '按天' }, { selected: 0, labelValue: 'week_key', labelName: '按周' }, { selected: 0, labelValue: 'month_key', labelName: '按月' }] }, hide: 0, foldType: 0, require: 1, filterField: 'time_dim', filterFieldName: '时间维度' },
+        ],
+      },
+      `${MCC_BASE}/micro/clues-data`,
+      'POST',
+      ctx,
+    )) as { detailListVo?: { total?: number; detailVoList?: Record<string, unknown>[]; detailDataList?: Record<string, unknown>[] } };
+    const vo = data?.detailListVo ?? {};
+    const rows = vo.detailVoList ?? vo.detailDataList ?? [];
+    return { total: vo.total ?? rows.length, rows };
+  }
+
   /** 线索分析视图指标码全集（含维度码） */
   async clueAnalysisTargetCodes(ctx?: SparkOrgCtx): Promise<string[]> {
     const cfg = (await this.request<Record<string, unknown>>(

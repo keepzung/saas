@@ -76,6 +76,9 @@ export class SparkController {
       } else if (type === 'clue_analysis') {
         // 线索分析日维度（MDD 线索权威口径，含广告/自然拆分）；需显式传 type
         results.push(await this.sparkService.syncClueAnalysis(dto?.date, ctx));
+      } else if (type === 'clue_acq_tool') {
+        // 线索分析·获客工具统计日维度（MDD 漏斗进线/开口口径，总进线/开口=商流+自然流）；需显式传 type
+        results.push(await this.sparkService.syncClueAcqTool(dto?.date, ctx));
       } else if (type === 'staff_matrix' || type === 'staff') {
         results.push(await this.sparkService.syncStaffMatrix(dto?.date, ctx));
       } else {

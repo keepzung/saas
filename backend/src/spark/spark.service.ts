@@ -978,6 +978,76 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * 线索分析·获客工具统计日维度同步（MCC 线索管理→线索分析→获客工具统计，
+   * viewAlias=mcc_assets_clueManage_customerAcquisitionView）：
+   * 归属账户×日 私信进线/开口人数（总，含商流+自然流）+ 留资组件拆分 —— MDD 漏斗进线/开口权威口径。
+   * 自然进线/开口 = 总数 − 聚光投放日报私信咨询/开口（2026-10-22 客户口径）。
+   * 每次刷新 statDate 往前 7 天（容忍晚到数据），行按自身 date_key 落库。
+   */
+  async syncClueAcqTool(date?: string, ctx?: SparkOrgCtx): Promise<SyncResult> {
+    const org = ctx ?? (await this.orgs.forBrand());
+    if (!org) throw new Error('无可用星火组织配置');
+    const statDate = date ?? this.syncDate();
+    const lookbackDays = 7;
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
+      const s = String(v ?? '').replace(/,/g, '').trim();
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.round(n) : 0;
+    };
+    const str = (v: unknown): string => String(v ?? '').trim();
+    const winStart = new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - (lookbackDays - 1) * 86400000)
+      .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const rows: Record<string, unknown>[] = [];
+    let total = 0;
+    for (let pageNo = 1; pageNo <= 40; pageNo++) {
+      const data = await this.api.clueAcqToolList({ start: winStart, end: statDate, timeDim: 'date_key', pageNo, pageSize: 200 }, org);
+      total = data.total;
+      rows.push(...data.rows);
+      if (rows.length >= total || !data.rows.length) break;
+    }
+    let upserted = 0;
+    for (const r of rows) {
+      const m = this.staffRowMap(r);
+      const subUserId = str(m.get('pro_user_id'));
+      const dayStr = str(m.get('date_key'));
+      if (!subUserId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
+      const day = new Date(`${dayStr}T00:00:00.000Z`);
+      const data = {
+        subUserName: str(m.get('pro_user_name')) || null,
+        consultCnt: num(m.get('is_consult')),
+        chatCnt: num(m.get('is_chat')),
+        msgLeads: num(m.get('is_msg_leads')),
+        serviceCardLeads: num(m.get('is_service_card_leads')),
+        wecomCardLeads: num(m.get('is_qw_add_leads')),
+        bookingLeads: num(m.get('is_book_comp_leads')),
+        landingPageLeads: num(m.get('is_landing_page_leads')),
+        wechatCopyLeads: num(m.get('is_wechat_leads')),
+        tradeCardLeads: num(m.get('is_app_card_leads')),
+      };
+      await this.prisma.clueAcqToolDaily.upsert({
+        where: { brandId_day_subUserId: { brandId: org.brandId, day, subUserId } },
+        create: { brandId: org.brandId, day, subUserId, ...data },
+        update: data,
+      });
+      upserted += 1;
+    }
+    const result: SyncResult = {
+      syncType: 'clue_acq_tool',
+      statDate,
+      status: 'success',
+      fetched: rows.length,
+      upserted,
+      accountsAdded: 0,
+      accountsRemoved: 0,
+      message: `total=${total}, window=${winStart}~${statDate}`,
+      brandId: org.brandId,
+    };
+    await this.prisma.sparkSyncLog.create({ data: result });
+    return result;
+  }
+
+  /**
    * 笔记日维度同步（MCC 笔记分析 time_dim=date_key，笔记×日行；2026-10 探针验证支持 ≥79 天回溯）。
    * MDD 总览日维度权威口径：每次刷新 statDate 往前 30 天，行按自身 date_key 落库。
    * 注意：窗口必须 ≤33 天——平台对 >33 天的 date_key 窗口把自然流量效果列（ziran_*）静默置零

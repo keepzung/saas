@@ -2848,9 +2848,10 @@ export class KoxService {
   }
 
   /** ─── Morgandada(5) 运营总览（客户看板版，2026-10 口径改造）：
-   *      内容/阅读/互动 = MCC 笔记分析日维度（KoxNoteDailyStat，仅员工/门店笔记，isRtbAdver 拆自然/投流）
-   *      进线/开口/留资 = 专业号-线索经营（ProClueDaily；MCC 数据→经营分析→进入专业号），不再从来鼓取数
-   *      消耗/曝光/点击 = 聚光账户日报（仅 advertiserId=10847045）
+   *      内容/阅读/互动 = 笔记明细分析行求和（KoxNote 快照，仅员工笔记；自然三数=明细分析自然流量效果列，媒体级）
+   *      进线/开口 = 线索管理→线索分析·获客工具统计（ClueAcqToolDaily 窗口逐日求和；自然=总数−聚光日报私信咨询/开口）
+   *      留资 = 线索管理→线索分析（ClueAnalysisDaily，含广告/自然拆分）
+   *      消耗/曝光/点击 = 聚光账户日报（仅 advertiserId=10847045，子账户「Morgan DaDa-种草」）
    *      caliber: total=汇总 | natural=自然流 | juguang=聚光投放；爆文数 + 账号标签 facets；环比=上一等长周期 ─── */
   async mddOverview(query: { start?: string; end?: string; accountTag?: string; caliber?: string }) {
     const brandId = 5;
@@ -2912,15 +2913,18 @@ export class KoxService {
 
     // 单窗口聚合（cur/prev 复用）。专业号流量标签：sysTagId 11=广告流量 12=自然流量
     const aggWindow = async (wStart: Date, wEnd: Date) => {
-      // 实时区间直查专业号线索（与平台页面一致）；失败回退下方日表聚合
-      const [notes, camps] = await Promise.all([
+      const [notes, camps, acq] = await Promise.all([
         this.prisma.koxNote.findMany({
           where: noteBase(wStart, wEnd),
           select: { exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true, naturalExposure: true, naturalViews: true, rtbEngage: true, pmInquiries: true, pmOpenings: true, pmLeads: true, isRtbAdver: true },
         }),
         this.prisma.koxCampaignDailyStat.findMany({
           where: { brandId, statDate: { gte: wStart, lte: wEnd }, advertiserId: mddAdvertiserId },
-          select: { fee: true, impression: true, click: true, interaction: true, msgLeadsNum: true },
+          select: { fee: true, impression: true, click: true, interaction: true, msgLeadsNum: true, messageConsult: true, msgChatUserCnt: true },
+        }),
+        this.prisma.clueAcqToolDaily.aggregate({
+          where: { brandId, day: { gte: wStart, lte: wEnd } },
+          _sum: { consultCnt: true, chatCnt: true },
         }),
       ]);
       const itemCnt = notes.length;
@@ -2933,12 +2937,17 @@ export class KoxService {
       const campClick = sum(camps.map((x) => n(x.click)));
       const campInteraction = sum(camps.map((x) => n(x.interaction)));
 
-      // ── 私信咨询/开口 = MCC 笔记分析私信列（员工笔记），全量快照累计（2026-10-20 客户拍板）；
-      //    线索数（留资）= MCC 线索管理→线索分析（按线索生成时间窗口，含广告/自然拆分，2026-10-21 客户拍板）。
+      // ── 进线/开口 = MCC 线索管理→线索分析·获客工具统计（窗口逐日求和，总数含商流+自然流，2026-10-22 客户口径）；
+      //    自然进线/开口 = 总数 − 聚光投放日报私信咨询/开口（账户 10847045）；聚光口径 = 聚光日报值。
+      //    线索数（留资）= 线索管理→线索分析（按线索生成时间窗口，含广告/自然拆分，2026-10-21 客户拍板）。
       //    线索表空窗时回退笔记私信留资快照值。
+      const campConsult = sum(camps.map((x) => n(x.messageConsult)));
+      const campChat = sum(camps.map((x) => n(x.msgChatUserCnt)));
+      const acqConsult = acq._sum.consultCnt ?? 0;
+      const acqChat = acq._sum.chatCnt ?? 0;
       const notePmAgg = await this.prisma.koxNote.aggregate({
         where: { brandId },
-        _sum: { pmInquiries: true, pmOpenings: true, pmLeads: true },
+        _sum: { pmLeads: true },
       });
       const clueAgg = await this.prisma.clueAnalysisDaily.aggregate({
         where: { brandId, day: { gte: wStart, lte: wEnd } },
@@ -2947,8 +2956,18 @@ export class KoxService {
       const clueTotal = clueAgg._sum.clueCnt ?? 0;
       const leadsFallback = notePmAgg._sum.pmLeads ?? 0;
       const lead = {
-        pm_inquiries: notePmAgg._sum.pmInquiries ?? 0,
-        pm_openings: notePmAgg._sum.pmOpenings ?? 0,
+        pm_inquiries:
+          caliber === 'natural'
+            ? Math.max(0, acqConsult - campConsult)
+            : caliber === 'juguang'
+              ? campConsult
+              : acqConsult,
+        pm_openings:
+          caliber === 'natural'
+            ? Math.max(0, acqChat - campChat)
+            : caliber === 'juguang'
+              ? campChat
+              : acqChat,
         pm_leads:
           caliber === 'natural'
             ? (clueAgg._sum.natureClueCnt ?? 0) || leadsFallback
@@ -3000,11 +3019,11 @@ export class KoxService {
     const storeNames = [...new Set(kosAccounts.map((a) => (a.storeName ?? '').trim()).filter(Boolean))];
     const fansSum = sum(kosAccounts.map((a) => a.fans ?? 0));
 
-    // 趋势（东八区日键；内容指标与私信线走笔记日维度表，线索线走线索分析日表）
-    const [trendDaily, trendNotes, trendCamps, trendClues] = await Promise.all([
+    // 趋势（东八区日键；内容指标走笔记日维度表，进线/开口走获客工具统计日表，线索线走线索分析日表）
+    const [trendDaily, trendNotes, trendCamps, trendClues, trendAcq] = await Promise.all([
       this.prisma.koxNoteDailyStat.findMany({
         where: dailyBase(start, end),
-        select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true, pmInquiries: true, pmOpenings: true, pmLeads: true },
+        select: { day: true, views: true, exposure: true, likes: true, collects: true, comments: true, shares: true },
       }),
       this.prisma.koxNote.findMany({
         where: noteBase(start, end),
@@ -3012,11 +3031,15 @@ export class KoxService {
       }),
       this.prisma.koxCampaignDailyStat.findMany({
         where: { brandId, statDate: { gte: start, lte: end }, advertiserId: mddAdvertiserId },
-        select: { statDate: true, fee: true },
+        select: { statDate: true, fee: true, messageConsult: true, msgChatUserCnt: true },
       }),
       this.prisma.clueAnalysisDaily.findMany({
         where: { brandId, day: { gte: start, lte: end } },
         select: { day: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
+      }),
+      this.prisma.clueAcqToolDaily.findMany({
+        where: { brandId, day: { gte: start, lte: end } },
+        select: { day: true, consultCnt: true, chatCnt: true },
       }),
     ]);
     const days: string[] = [];
@@ -3035,8 +3058,6 @@ export class KoxService {
         row.view_sum += x.views;
         row.exposure_sum += x.exposure;
         row.interaction_sum += x.likes + x.collects + x.comments + x.shares;
-        row.lead_enter += x.pmInquiries;
-        row.lead_open += x.pmOpenings;
       }
     }
     // 线索线 = 线索分析日表（新增线索数；自然/聚光口径取自然/广告线索）
@@ -3055,13 +3076,40 @@ export class KoxService {
       const row = trendMap.get(dayKey08(x.statDate));
       if (row && caliber !== 'natural') row.ad_cost += n(x.fee);
     }
+    // 进线/开口线 = 获客工具统计日表（总数，含商流+自然流）；聚光/自然口径按聚光日报私信咨询/开口拆分
+    const campByDay = new Map(
+      trendCamps.map((x) => [dayKey08(x.statDate), { consult: n(x.messageConsult), chat: n(x.msgChatUserCnt) }]),
+    );
+    for (const x of trendAcq) {
+      const row = trendMap.get(dayKey08(x.day));
+      if (!row) continue;
+      row.lead_enter = x.consultCnt;
+      row.lead_open = x.chatCnt;
+    }
+    if (caliber === 'juguang') {
+      for (const [d, c] of campByDay) {
+        const row = trendMap.get(d);
+        if (row) {
+          row.lead_enter = c.consult;
+          row.lead_open = c.chat;
+        }
+      }
+    } else if (caliber === 'natural') {
+      for (const row of trendMap.values()) {
+        const c = campByDay.get(row.date);
+        if (c) {
+          row.lead_enter = Math.max(0, row.lead_enter - c.consult);
+          row.lead_open = Math.max(0, row.lead_open - c.chat);
+        }
+      }
+    }
 
     const caliberScopeNote =
       caliber === 'natural'
-        ? '自然流口径：内容/阅读/互动仅非投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增自然线索'
+        ? '自然流口径：内容/阅读/互动仅非投流笔记（笔记明细分析·员工笔记）；进线/开口=获客工具统计总数−聚光日报私信咨询/开口；线索数=线索分析·新增自然线索'
         : caliber === 'juguang'
-          ? '聚光投放口径：内容/阅读/互动仅投流笔记（笔记明细分析·员工笔记）；线索数=线索分析·新增广告线索；消耗=聚光账户日报（10847045）'
-          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；内容指标=笔记明细分析行求和（员工笔记，发布时间在筛选区间的累计快照）；自然曝光/自然点击=笔记明细分析「自然曝光量/自然阅读量」列求和（媒体级拆分），自然互动=总互动量−「竞价推广互动量」列；爆文=单篇互动（赞+藏+评+享）≥500；私信咨询/开口=笔记分析私信列（员工笔记，累计口径）；线索数=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）；投放=聚光账户日报（10847045）';
+          ? '聚光投放口径：内容/阅读/互动仅投流笔记（笔记明细分析·员工笔记）；进线/开口=聚光投放日报私信咨询/开口（10847045）；线索数=线索分析·新增广告线索；消耗=聚光账户日报（10847045）'
+          : '汇总口径：账号=小红书 KOS 员工/门店账号（官号不进看板）；内容指标=笔记明细分析行求和（员工笔记，发布时间在筛选区间的累计快照）；自然曝光/自然点击=笔记明细分析「自然曝光量/自然阅读量」列求和（媒体级拆分），自然互动=总互动量−「竞价推广互动量」列；爆文=单篇互动（赞+藏+评+享）≥500；进线/开口=线索管理→线索分析·获客工具统计（窗口逐日求和，含商流+自然流），自然进线/开口=总数−聚光日报私信咨询/开口；线索数=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）；投放=聚光账户日报（10847045）';
 
     return {
       start: dayKey08(start),
@@ -3095,7 +3143,8 @@ export class KoxService {
         open_rate: cur.lead.pm_inquiries && cur.lead.pm_openings != null ? r2((cur.lead.pm_openings / cur.lead.pm_inquiries) * 100) : null,
         lead_rate: cur.lead.pm_inquiries ? r2((cur.lead.pm_leads / cur.lead.pm_inquiries) * 100) : 0,
         total_leads: cur.lead.total_leads,
-        scope_note: '私信咨询/私信开口=笔记分析·私信列（员工笔记，累计口径）；线索数（留资）=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）',
+        scope_note:
+          '进线/开口=线索管理→线索分析·获客工具统计（窗口逐日求和，含商流+自然流）；自然进线/开口=总数−聚光投放日报私信咨询/开口（10847045）；线索数（留资）=线索管理→线索分析（按线索生成时间，含广告/自然线索拆分）',
       },
       ad: {
         cost: cur.ad.cost,
@@ -3116,8 +3165,13 @@ export class KoxService {
           hit_notes: prev.hit_notes,
           avg_publish: prev.avg_publish,
         },
-        // 私信三数为快照累计口径，无历史时点，环比不提供
-        lead_funnel: { pm_inquiries: null, pm_openings: null, pm_leads: null, total_leads: null },
+        // 进线/开口/留资均已窗口化，环比=上一等长周期
+        lead_funnel: {
+          pm_inquiries: prev.lead.pm_inquiries,
+          pm_openings: prev.lead.pm_openings,
+          pm_leads: prev.lead.pm_leads,
+          total_leads: prev.lead.total_leads,
+        },
         ad: prev.ad,
         organic: prev.organic,
       },

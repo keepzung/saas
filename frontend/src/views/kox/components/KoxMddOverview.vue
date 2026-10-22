@@ -94,7 +94,10 @@
             <template #tab><span class="tab-ic"><SendOutlined /></span>线索转化</template>
             <div class="metric-blocks">
               <div v-for="m in leadBlocks" :key="m.label" class="mblock">
-                <div class="mb-label">{{ m.label }}</div>
+                <div class="mb-label">
+                  <a-tooltip v-if="m.tip" :title="m.tip"><span class="mb-label-tip">{{ m.label }}</span></a-tooltip>
+                  <template v-else>{{ m.label }}</template>
+                </div>
                 <div class="mb-value">{{ typeof m.value === 'number' ? fmt(m.value) : m.value }}</div>
                 <div v-if="m.d" class="mb-delta" :class="m.d.up ? 'up' : 'down'">
                   {{ m.d.up ? '↑' : '↓' }}{{ Math.abs(m.d.pct) }}%
@@ -328,13 +331,11 @@ const publishBlocks = computed(() => {
 const leadBlocks = computed(() => {
   const f = ov.value?.lead_funnel ?? {};
   const pv = ov.value?.prev?.lead_funnel ?? {};
-  const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
-  const dOrDash = (label, cur, prev) => ({ label, value: cur ?? '—', d: cur == null ? null : delta(cur, prev) });
   return [
-    d('私信进线', f.pm_inquiries, pv.pm_inquiries),
-    dOrDash('私信开口', f.pm_openings, pv.pm_openings),
-    d('私信留资', f.pm_leads, pv.pm_leads),
-    d('总留资（留资∪电话）', f.total_leads, pv.total_leads),
+    { label: '私信进线', tip: '线索管理→线索分析·获客工具统计「私信进线人数」窗口逐日求和（总口径，含商流+自然流）', value: f.pm_inquiries ?? 0, d: delta(f.pm_inquiries, pv.pm_inquiries) },
+    { label: '私信开口', tip: '获客工具统计「私信开口人数」窗口逐日求和（总口径）；自然流口径=总数−聚光日报私信开口', value: f.pm_openings ?? 0, d: delta(f.pm_openings, pv.pm_openings) },
+    { label: '私信留资', tip: '线索管理→线索分析「新增线索」窗口求和（自然/聚光口径分别取自然/广告线索）', value: f.pm_leads ?? 0, d: delta(f.pm_leads, pv.pm_leads) },
+    { label: '总留资（留资∪电话）', tip: '与私信留资同口径（线索分析新增线索合计）', value: f.total_leads ?? 0, d: delta(f.total_leads, pv.total_leads) },
     { label: '开口率', value: f.open_rate != null ? `${f.open_rate}%` : '—' },
     { label: '留资率', value: `${f.lead_rate ?? 0}%` },
   ];

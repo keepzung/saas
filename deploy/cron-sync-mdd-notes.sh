@@ -8,12 +8,12 @@ LOCK=/tmp/mdd-notes-sync.lock
 LOG=/opt/saas/logs/mdd-notes-sync.log
 mkdir -p /opt/saas/logs
 echo "===== $(date '+%F %T') mdd notes sync start =====" >> "$LOG"
-flock -xn "$LOCK" -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs notes 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs notes_daily 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_analysis 5 >> $LOG 2>&1"
+flock -xn "$LOCK" -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs notes 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs notes_daily 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_analysis 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_acq_tool 5 >> $LOG 2>&1"
 RC=$?
 if [ "$RC" -ne 0 ]; then
   echo "===== $(date '+%F %T') mdd notes sync failed rc=$RC, retry after 180s =====" >> "$LOG"
   sleep 180
-  flock -xn "$LOCK" -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs notes 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs notes_daily 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_analysis 5 >> $LOG 2>&1"
+  flock -xn "$LOCK" -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs notes 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs notes_daily 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_analysis 5 >> $LOG 2>&1 && /usr/local/bin/node trigger-sync.cjs clue_acq_tool 5 >> $LOG 2>&1"
   RC=$?
 fi
 echo "===== $(date '+%F %T') mdd notes sync done rc=$RC =====" >> "$LOG"
