@@ -2559,6 +2559,8 @@ export class KoxService {
   }) {
     const { where, start, end } = await this.noteFilters(query);
     const brandId6 = (query.brandId ? Number(query.brandId) : 0) === 6;
+    // Morgandada(5)：互动量=四项（赞+藏+评+享）+涨粉，与星火笔记分析·互动量、运营总览·总互动量一致（2026-10-22 客户拍板）
+    const brandId5 = (query.brandId ? Number(query.brandId) : 0) === 5;
     const rowsQ = await this.prisma.koxNote.findMany({
       where,
       select: {
@@ -2566,6 +2568,8 @@ export class KoxService {
         title: true,
         likes: true,
         comments: true,
+        collects: true,
+        shares: true,
         formLeads: true,
         followCount: true,
         views: true,
@@ -2606,7 +2610,11 @@ export class KoxService {
     const totals = rows.reduce(
       (acc, n) => ({
         note_cnt: acc.note_cnt + 1,
-        interaction_sum: acc.interaction_sum + n.likes + n.comments,
+        interaction_sum:
+          acc.interaction_sum +
+          n.likes +
+          n.comments +
+          (brandId5 ? n.collects + n.shares + n.followCount : 0),
         follow_sum: acc.follow_sum + n.followCount,
         view_sum: acc.view_sum + n.views,
         exposure_sum: acc.exposure_sum + n.exposure,
@@ -3209,7 +3217,7 @@ export class KoxService {
       select: {
         noteId: true, title: true, content: true, coverUrl: true, noteUrl: true,
         noteType: true, publishTime: true, authorName: true, accountType: true,
-        exposure: true, views: true, likes: true, collects: true, comments: true, shares: true,
+        exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, followCount: true,
       },
       orderBy: { publishTime: 'desc' },
     });
@@ -3241,7 +3249,7 @@ export class KoxService {
         account_type: x.accountType,
         exposure: x.exposure,
         views: x.views,
-        interaction: x.likes + x.collects + x.comments + x.shares,
+        interaction: x.likes + x.collects + x.comments + x.shares + x.followCount,
         violations,
         violation_cnt: violations.length,
         state: violations.length ? 'violation' : 'ok',

@@ -519,9 +519,14 @@ const blocks = computed(() => {
   }
   const list = filtered.value;
   const sum = (k) => list.reduce((s, n) => s + Number(n[k] ?? 0), 0);
+  // Morgandada(5)：互动量=四项+涨粉（与运营总览、星火互动量一致，2026-10-22 客户拍板）；其他品牌维持赞+评
+  const interact = () =>
+    isMdd.value
+      ? sum('digg') + sum('collect') + sum('comment') + sum('share') + sum('follow')
+      : sum('digg') + sum('comment');
   return [
     { label: '内容数', value: fmt(list.length) },
-    { label: '互动量', value: fmt(sum('digg') + sum('comment')) },
+    { label: '互动量', value: fmt(interact()) },
     { label: '获得关注数', value: fmt(sum('follow')) },
     { label: '阅读数', value: fmt(sum('view')) },
     { label: '曝光量', value: fmt(sum('exposure')) },
