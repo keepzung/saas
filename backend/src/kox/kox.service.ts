@@ -3630,12 +3630,14 @@ export class KoxService {
       };
     };
     type RegionRow = ReturnType<typeof mapRow>;
-    // 排序（客户指定 2026-10）：默认线索数从多到少（2026-10-23 起按私信线索=线索分析合计）；「全国」行恒置底
+    // 排序（客户指定 2026-10）：MDD 按私信线索（线索分析合计，2026-10-23）；
+    // 其余品牌按私信留资（线索分析管道仅 brand5 有数据，clue_total 恒 0 不可作排序键）；「全国」行恒置底
+    const leadKey = (r: RegionRow) => (brandId === 5 ? r.clue_total : r.pm_leads);
     const sortRows = (rows: RegionRow[]) =>
       rows.sort((a, b) => {
         if (a.name === '全国') return 1;
         if (b.name === '全国') return -1;
-        return b.clue_total - a.clue_total || b.kos_cnt - a.kos_cnt;
+        return leadKey(b) - leadKey(a) || b.kos_cnt - a.kos_cnt;
       });
 
     return {
@@ -3645,7 +3647,9 @@ export class KoxService {
       metric_note:
         brandId === 6
           ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
-          : '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合；CES=赞1+藏1+评4+享4+关注8',
+          : brandId === 5
+            ? '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合；CES=赞1+藏1+评4+享4+关注8'
+            : '私信进线/开口/留资=聚光笔记报表私信字段按窗口求和；自然线索=未投流笔记私信留资推导（广告线索无独立管道）；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
       tier_meta: KOS_TIERS.map((t) => ({

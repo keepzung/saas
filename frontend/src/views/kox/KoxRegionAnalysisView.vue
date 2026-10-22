@@ -254,8 +254,9 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
-  // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板，取代原「私信留资」）
-  col('私信线索', 'clue_total', 96),
+  // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板）；
+  // 其余品牌维持私信留资（获客工具统计口径，与账号表现分析一致）——线索分析管道仅 brand5 有数据
+  ...(isMdd ? [col('私信线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
   // Morgandada：投流花费（星火品牌级消耗按门店曝光占比分摊）
   ...(isMdd ? [col('投流花费', 'fee_alloc', 110)] : []),
 ]));
@@ -277,8 +278,9 @@ const tagColumns = computed(() => [
   ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
-  // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板，取代原「私信留资」）
-  col('私信线索', 'clue_total', 96),
+  // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板）；
+  // 其余品牌维持私信留资（获客工具统计口径）——线索分析管道仅 brand5 有数据
+  ...(isMdd ? [col('私信线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
   ...(isTesla ? [] : [col('广告线索', 'ads_leads', 96), col('自然线索', 'organic_leads', 96)]),
 ]);
 
