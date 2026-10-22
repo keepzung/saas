@@ -42,11 +42,11 @@ async function cloneTagTree(rows) {
   const roots = rows.filter(isRoot);
   const children = rows.filter((r) => !isRoot(r));
   for (const r of roots) {
-    const exist = await prisma.materialTypeTag.findFirst({ where: { brandId: TO, parentId: null, name: r.name } });
+    const exist = await prisma.materialTypeTag.findFirst({ where: { brandId: TO, parentId: 0, name: r.name } });
     if (exist) { idMap.set(r.id, exist.id); continue; }
     if (DRY_RUN) { idMap.set(r.id, -idMap.size - 1); continue; }
     const created = await prisma.materialTypeTag.create({
-      data: { brandId: TO, name: r.name, perSetting: r.perSetting ?? undefined },
+      data: { brandId: TO, name: r.name, perSetting: r.perSetting ?? undefined, status: r.status ?? undefined },
     });
     idMap.set(r.id, created.id);
   }
