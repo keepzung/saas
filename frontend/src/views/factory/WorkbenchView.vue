@@ -1,10 +1,6 @@
 <template>
   <PageWrapper title="工作台" subtitle="智能内容工厂Pro · 内容生产驾驶舱">
     <div class="wb-container">
-      <NoticeBar>
-        当前 AI 引擎：{{ health.llm ? `大模型直连（${health.model}）` : '内置模板引擎（LLM_API_KEY 配置后自动切换大模型）' }}
-      </NoticeBar>
-
       <div class="stat-grid">
         <div class="stat-card">
           <div class="stat-num">{{ stats.products }}</div>
@@ -73,30 +69,26 @@ import {
   RightOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
-import NoticeBar from '../../components/NoticeBar.vue';
 import { useAuthStore } from '../../stores/auth';
-import { aiHealth, getStrategies, getXhsHistory, getMaterialImages } from '../../api/contentpro';
+import { getStrategies, getXhsHistory, getMaterialImages } from '../../api/contentpro';
 import { getProducts } from '../../api/content';
 
 const router = useRouter();
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
 
-const health = ref({ llm: false, model: 'glm-4-flash' });
 const stats = ref({ products: 0, images: 0, strategies: 0, history: 0 });
 
 const go = (path) => router.push(path);
 
 onMounted(async () => {
   try {
-    const [h, products, images, strategies, history] = await Promise.all([
-      aiHealth(),
+    const [products, images, strategies, history] = await Promise.all([
       getProducts({ brandId: brandId.value }),
       getMaterialImages({ brandId: brandId.value, page: 1, pageSize: 1 }),
       getStrategies({ brandId: brandId.value }),
       getXhsHistory({ brandId: brandId.value, page: 1, pageSize: 1 }),
     ]);
-    health.value = h ?? health.value;
     const countProducts = (nodes) => {
       let n = 0;
       for (const x of nodes ?? []) {
