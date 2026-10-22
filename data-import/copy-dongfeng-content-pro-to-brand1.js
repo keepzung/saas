@@ -36,8 +36,11 @@ const prisma = new PrismaClient();
 /** 子节点按 (mappedParentId, name) 幂等创建，返回 oldId→newId 映射 */
 async function cloneTagTree(rows) {
   const idMap = new Map();
-  const roots = rows.filter((r) => r.parentId == null);
-  const children = rows.filter((r) => r.parentId != null);
+  // 旧数据根节点的 parentId 可能是 null、0 或指向本集之外的 id，一律视为根
+  const ids = new Set(rows.map((r) => r.id));
+  const isRoot = (r) => r.parentId == null || r.parentId === 0 || !ids.has(r.parentId);
+  const roots = rows.filter(isRoot);
+  const children = rows.filter((r) => !isRoot(r));
   for (const r of roots) {
     const exist = await prisma.materialTypeTag.findFirst({ where: { brandId: TO, parentId: null, name: r.name } });
     if (exist) { idMap.set(r.id, exist.id); continue; }
