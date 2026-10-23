@@ -234,7 +234,8 @@ async function reloadMddHero() {
     const rank = await request.get('/kox/account-ranking', { params: { brandId: auth.currentBrandId ?? 5, page_size: 100, metric: 'pm_leads_total' } });
     const d = rank?.data ?? rank ?? {};
     mddAccountTotal.value = d.total ?? 0;
-    mddClueTotal.value = (d.list ?? []).reduce((s, r) => s + Number(r.pm_leads_total ?? 0), 0);
+    mddClueTotal.value =
+      (d.list ?? []).reduce((s, r) => s + Number(r.pm_leads_total ?? 0), 0) + Number(d.official_pm_leads_total ?? 0);
   } catch { /* ignore */ }
   try {
     const ov = await getMddOverview({ brandId: auth.currentBrandId ?? 5, start: dateParams().start, end: dateParams().end });

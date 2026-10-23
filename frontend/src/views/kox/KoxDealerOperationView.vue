@@ -369,6 +369,12 @@ async function reload() {
         groups.set(a.region, g);
       }
       list = [...groups.values()];
+      // MorganDaDa 官号（主账户）单列一行：其私信线索在平台线索分析里不归属任何经销商，
+      // 之前被丢弃导致漏斗合计比平台少一条（2026-10-23 客户要求官号单独成行）
+      const officialLeads = Number(res.official_pm_leads_total ?? 0);
+      if (officialLeads > 0) {
+        list.push({ name: 'MorganDaDa官号', region: '官方账号', accounts: [], account_num: 0, item_cnt: 0, exposure_sum: 0, pm_leads: officialLeads, ces: 0 });
+      }
     } else {
       const res = await getKoxRanking({
         dimension: 'store',

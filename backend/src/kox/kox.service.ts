@@ -3595,14 +3595,22 @@ export class KoxService {
       const authorIdToAccC = new Map(accounts.filter((a) => a.authorId).map((a) => [a.authorId as string, a]));
       const nickToAccC = new Map(accounts.map((a) => [a.nickname, a]));
       const storeToAccC = new Map(accounts.filter((a) => a.storeName).map((a) => [a.storeName as string, a]));
+      // MorganDaDa 官号（主账户）单列一行：线索分析的账号维度含主账户行、不归属任何城市/经销商，
+      // 此前被丢弃导致页面合计比平台少（2026-10-23 客户要求官号单独成行）；官号 UID 存在停用的主账号上
+      const officialUidR = (
+        await this.prisma.kosAccount.findFirst({
+          where: { brandId: 5, nickname: 'MorganDaDa' },
+          select: { authorId: true },
+        })
+      )?.authorId;
       for (const r of clueRowsR) {
         const acc =
           (r.subUserId ? authorIdToAccC.get(r.subUserId) : undefined) ??
           (r.subUserName ? nickToAccC.get(r.subUserName) : undefined) ??
           (r.subUserName ? storeToAccC.get(r.subUserName) : undefined);
-        if (!acc) continue;
-        const g = bucketOf(groups, regionOf(acc));
-        const tg = bucketOf(tagGroups, tagOf(acc));
+        if (!acc && !(officialUidR && r.subUserId === officialUidR)) continue;
+        const g = bucketOf(groups, acc ? regionOf(acc) : 'MorganDaDa官号');
+        const tg = bucketOf(tagGroups, acc ? tagOf(acc) : '官号');
         for (const b of [g, tg]) {
           b.organic_leads += r.natureClueCnt;
           b.ads_leads += r.adsClueCnt;
@@ -3656,7 +3664,7 @@ export class KoxService {
         brandId === 6
           ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
           : brandId === 5
-            ? '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合；CES=赞1+藏1+评4+享4+关注8'
+            ? '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合，MorganDaDa 官号主账户行单独成行；CES=赞1+藏1+评4+享4+关注8'
             : '私信进线/开口/留资=聚光笔记报表私信字段按窗口求和；自然线索=未投流笔记私信留资推导（广告线索无独立管道）；CES=赞1+藏1+评4+享4+关注8',
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
@@ -4035,6 +4043,15 @@ export class KoxService {
         accounts.filter((a) => a.storeName).map((a) => [a.storeName as string, a.id]),
       );
       let clueHit = 0;
+      // MorganDaDa 官号（主账户）行：线索分析的账号维度含主账户行、不归属任何 KOS 账号，
+      // 单独计数供代理商总览/员工矩阵补「官号」行（2026-10-23 客户要求）；官号 UID 存在停用的主账号上
+      const officialUid = (
+        await this.prisma.kosAccount.findFirst({
+          where: { brandId: 5, nickname: 'MorganDaDa' },
+          select: { authorId: true },
+        })
+      )?.authorId;
+      let officialClue = 0;
       const clueByAcc = new Map<number, { c: number; ad: number; nature: number }>();
       for (const r of clueRows) {
         const accId =
@@ -4042,7 +4059,10 @@ export class KoxService {
           (r.subUserName ? nickToIdC.get(r.subUserName) : undefined) ??
           (r.subUserName ? storeToIdC.get(r.subUserName) : undefined) ??
           null;
-        if (accId == null || !idSet.has(accId)) continue;
+        if (accId == null || !idSet.has(accId)) {
+          if (officialUid && r.subUserId === officialUid) officialClue += r.clueCnt;
+          continue;
+        }
         const cur = clueByAcc.get(accId) ?? { c: 0, ad: 0, nature: 0 };
         cur.c += r.clueCnt;
         cur.ad += r.adsClueCnt;
@@ -4173,6 +4193,7 @@ export class KoxService {
       page,
       page_size: pageSize,
       tier_stat: tierStat,
+      official_pm_leads_total: officialClue,
       region_facets: [
         ...new Set(
           accounts.map((a) => a.regionName).filter((r): r is string => !!r),
