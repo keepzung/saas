@@ -3619,6 +3619,22 @@ export class KoxService {
           b.clue_total += r.adsClueCnt + r.natureClueCnt;
         }
       }
+      // 官号进线/开口：员工数据明细无主账户行，取线索分析·获客工具统计（与运营总览漏斗进线同源）
+      if (officialUidR) {
+        const acqOff = await this.prisma.clueAcqToolDaily.aggregate({
+          where: { brandId: 5, subUserId: officialUidR, day: { gte: start, lte: end } },
+          _sum: { consultCnt: true, chatCnt: true, msgLeads: true },
+        });
+        if ((acqOff._sum.consultCnt ?? 0) || (acqOff._sum.chatCnt ?? 0) || (acqOff._sum.msgLeads ?? 0)) {
+          const g = bucketOf(groups, 'MorganDaDa官号');
+          const tg = bucketOf(tagGroups, '官号');
+          for (const b of [g, tg]) {
+            b.pm_inquiries += acqOff._sum.consultCnt ?? 0;
+            b.pm_openings += acqOff._sum.chatCnt ?? 0;
+            b.pm_leads += acqOff._sum.msgLeads ?? 0;
+          }
+        }
+      }
     }
 
     const mapRow = ([name, g]: [string, Agg]) => {
