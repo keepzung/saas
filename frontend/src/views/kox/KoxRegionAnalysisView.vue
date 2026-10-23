@@ -259,7 +259,7 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板三数合一）；
   // 其余品牌维持私信留资（获客工具统计口径，与账号表现分析一致）——线索分析管道仅 brand5 有数据
   ...(isMdd ? [col('私信线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
-  // Morgandada：投流花费（星火品牌级消耗按门店曝光占比分摊）
+  // Morgandada：投流花费=员工数据明细「投流金额」按账号 UID 真实归属（非曝光占比分摊）
   ...(isMdd ? [col('投流花费', 'fee_alloc', 110)] : []),
 ]));
 

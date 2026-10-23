@@ -3739,6 +3739,8 @@ export class KoxService {
     // 账号表现分析口径（brand6）：内容指标=专业号员工矩阵窗口快照；进线/开口/留资=专业号「线索经营」按归属账号聚合（KOS-only 按客户去重）
     // KoxNote 笔记口径弃用（星火 partner 通道停更）；其他品牌维持星火笔记 + 乐允投放报表口径
     let metric_source = brandId === 6 ? 'pro_staff' : 'spark_notes';
+    // MorganDaDa 官号（主账户）行线索（brand5 专用，2026-10-23 客户要求单列官号行）
+    let officialClue = 0;
     const notes = brandId === 6
       ? []
       : await this.prisma.koxNote.findMany({
@@ -4051,7 +4053,6 @@ export class KoxService {
           select: { authorId: true },
         })
       )?.authorId;
-      let officialClue = 0;
       const clueByAcc = new Map<number, { c: number; ad: number; nature: number }>();
       for (const r of clueRows) {
         const accId =
