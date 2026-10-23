@@ -751,13 +751,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
     const accounts = await this.prisma.kosAccount.findMany({
       where: { brandId: org.brandId },
-      select: { id: true, nickname: true, storeName: true, accountType: true },
+      select: { id: true, nickname: true, storeName: true, accountType: true, authorId: true },
     });
     const byNickname = new Map<string, number>();
     const byStore = new Map<string, number>();
+    // UID 直匹（聚光报表带 author_id）：员工改名后归属不再依赖昵称；df_ 等占位 id 不参与
+    const byAuthorUid = new Map<string, number>();
     for (const a of accounts) {
       if (a.nickname) byNickname.set(a.nickname, a.id);
       if (a.storeName) byStore.set(a.storeName, a.id);
+      if (/^[0-9a-f]{24}$/.test(a.authorId)) byAuthorUid.set(a.authorId, a.id);
     }
 
     const day = new Date(`${statDate}T00:00:00.000Z`);
@@ -821,8 +824,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           .slice(0, 24)}`;
 
       const brandUserName = String(pick('brand_user_name') ?? '').trim() || null;
+      const authorUid = String(pick('author_id') ?? pickLink('author_id') ?? '').trim();
       let accountId =
-        byNickname.get(authorName) ?? (brandUserName ? byStore.get(brandUserName) ?? null : null);
+        (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
+        byNickname.get(authorName) ??
+        (brandUserName ? byStore.get(brandUserName) ?? null : null);
       // 荣威(2)：未匹配创作者自动注册为账号（账号底表每天自动长全，
       // 新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
       if (accountId == null && org.brandId === 2 && authorName) {
@@ -1089,10 +1095,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     // 账号归属（Morgandada(5) 仅基线账号，与 syncNotes 同口径）
     const accounts = await this.prisma.kosAccount.findMany({
       where: { brandId: org.brandId },
-      select: { id: true, nickname: true },
+      select: { id: true, nickname: true, authorId: true },
     });
     const byNickname = new Map(
       accounts.filter((a) => a.nickname).map((a) => [a.nickname as string, a.id]),
+    );
+    // UID 直匹（与 syncNotes 同口径，改名不影响归属）
+    const byAuthorUid = new Map(
+      accounts
+        .filter((a) => /^[0-9a-f]{24}$/.test(a.authorId))
+        .map((a) => [a.authorId, a.id]),
     );
 
     const rows: Record<string, unknown>[] = [];
@@ -1127,7 +1139,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const dayStr = str(m.get('date_key'));
       if (!noteId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
       const authorName = str(m.get('author_name')) || null;
-      const accountId = authorName ? (byNickname.get(authorName) ?? null) : null;
+      const authorUid = str(m.get('author_id')) || null;
+      const accountId =
+        (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
+        (authorName ? byNickname.get(authorName) ?? null : null);
       // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
       if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
         const key = authorName ?? '(作者为空)';
