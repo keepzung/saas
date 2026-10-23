@@ -345,15 +345,23 @@ const leadBlocks = computed(() => {
 const adBlocks = computed(() => {
   const a = ov.value?.ad ?? {};
   const pv = ov.value?.prev?.ad ?? {};
+  const f = ov.value?.lead_funnel ?? {};
+  const pf = ov.value?.prev?.lead_funnel ?? {};
   const d = (label, cur, prev) => ({ label, value: cur ?? 0, d: delta(cur, prev) });
   const ctr = a.impression ? Math.round(((a.click ?? 0) / a.impression) * 10000) / 100 : 0;
   const cpm = a.impression ? Math.round(((a.cost ?? 0) / a.impression) * 100000) / 100 : 0;
   const cpc = a.click ? Math.round(((a.cost ?? 0) / a.click) * 100) / 100 : 0;
+  // 投流广告线索=线索分析「新增广告线索」（2026-10-23 客户指正须与 hero 全部线索/转化成本同源，
+  // 不再用聚光日报 msgLeadsNum；汇总口径取广告部分 pm_leads_ad，自然流口径无投放归 0）
+  const adLeads =
+    caliber.value === 'juguang' ? f.pm_leads ?? 0 : caliber.value === 'total' ? f.pm_leads_ad ?? 0 : 0;
+  const adLeadsPrev =
+    caliber.value === 'juguang' ? pf.pm_leads ?? 0 : caliber.value === 'total' ? pf.pm_leads_ad ?? 0 : 0;
   return [
     d('投放消耗(元)', a.cost, pv.cost),
     d('曝光量', a.impression, pv.impression),
     d('点击量', a.click, pv.click),
-    d('投流广告线索', a.msg_leads, pv.msg_leads),
+    d('投流广告线索', adLeads, adLeadsPrev),
     { label: 'CTR', value: `${ctr}%` },
     { label: 'CPM', value: `¥${cpm}` },
     { label: 'CPC', value: `¥${cpc}` },
