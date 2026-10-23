@@ -1565,7 +1565,7 @@ export class ContentproService {
       where: { taskId: t.id },
       include: {
         account: {
-          select: { id: true, nickname: true, accountType: true, regionName: true, storeName: true, authorId: true },
+          select: { id: true, nickname: true, accountType: true, regionName: true, storeName: true, authorId: true, operatorName: true, user: { select: { nickname: true } } },
         },
         user: { select: { id: true, nickname: true, phone: true } },
       },
@@ -1653,6 +1653,7 @@ export class ContentproService {
         .map((x) => ({
           account_id: x.account!.id,
           uid: x.account!.authorId,
+          owner: x.account!.user?.nickname ?? x.account!.operatorName ?? '',
           nickname: x.account!.nickname,
           account_type: x.account!.accountType,
           region: x.account!.regionName,
