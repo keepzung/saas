@@ -230,8 +230,8 @@ const router = useRouter();
 
 const CROWNS = ['👑', '🥈', '🥉'];
 const RANK_METRICS = [
-  // Morgandada 2026-10-23：留资数→广告线索（=商业+自然，线索分析合计，三数合一）
-  { key: 'pm_leads_total', label: '广告线索', field: 'pm_leads_total' },
+  // Morgandada 2026-10-23：留资数→私信线索（=商业+自然，线索分析合计，三数合一）
+  { key: 'pm_leads_total', label: '私信线索', field: 'pm_leads_total' },
   { key: 'exposure_sum', label: '曝光数', field: 'exposure_sum' },
   { key: 'view_sum', label: '阅读数', field: 'view_sum' },
   { key: 'interaction_sum', label: '互动数', field: 'interaction_sum' },
@@ -240,12 +240,12 @@ const RANK_METRICS = [
 ];
 const OPS_PILLS = [
   { key: 'item_cnt', label: '内容数' },
-  { key: 'lead_leads', label: '广告线索' },
+  { key: 'lead_leads', label: '私信线索' },
   { key: 'lead_enter', label: '私信进线' },
 ];
 const AD_PILLS = [
   { key: 'ad_cost', label: '消耗' },
-  { key: 'lead_leads', label: '广告线索' },
+  { key: 'lead_leads', label: '私信线索' },
   { key: 'lead_enter', label: '进线数' },
 ];
 
@@ -335,8 +335,8 @@ const leadBlocks = computed(() => {
   return [
     { label: '私信进线', tip: '线索管理→线索分析·获客工具统计「私信进线人数」窗口逐日求和（总口径，含商流+自然流）', value: f.pm_inquiries ?? 0, d: delta(f.pm_inquiries, pv.pm_inquiries) },
     { label: '私信开口', tip: '获客工具统计「私信开口人数」窗口逐日求和（总口径）；自然流口径=总数−聚光日报私信开口', value: f.pm_openings ?? 0, d: delta(f.pm_openings, pv.pm_openings) },
-    // Morgandada 2026-10-23 三数合一：私信留资/总留资→广告线索（=商业+自然，线索分析新增线索合计）
-    { label: '广告线索', tip: '广告线索=商业线索+自然线索=线索管理→线索分析「新增线索」窗口求和（原私信留资/总留资合并，2026-10-23 客户拍板）', value: f.pm_leads ?? 0, d: delta(f.pm_leads, pv.pm_leads) },
+    // Morgandada 2026-10-23 三数合一：私信留资/总留资→私信线索（=商业+自然，线索分析新增线索合计）
+    { label: '私信线索', tip: '私信线索=商业线索+自然线索=线索管理→线索分析「新增线索」窗口求和（原私信留资/总留资合并，2026-10-23 客户拍板）', value: f.pm_leads ?? 0, d: delta(f.pm_leads, pv.pm_leads) },
     { label: '开口率', value: f.open_rate != null ? `${f.open_rate}%` : '—' },
     { label: '留资率', value: `${f.lead_rate ?? 0}%` },
   ];
@@ -351,7 +351,7 @@ const adBlocks = computed(() => {
   const ctr = a.impression ? Math.round(((a.click ?? 0) / a.impression) * 10000) / 100 : 0;
   const cpm = a.impression ? Math.round(((a.cost ?? 0) / a.impression) * 100000) / 100 : 0;
   const cpc = a.click ? Math.round(((a.cost ?? 0) / a.click) * 100) / 100 : 0;
-  // 投流广告线索=线索分析「新增广告线索」（2026-10-23 客户指正须与 hero 全部线索/转化成本同源，
+  // 投流私信线索=线索分析「新增广告线索」（2026-10-23 客户指正须与 hero 全部线索/转化成本同源，
   // 不再用聚光日报 msgLeadsNum；汇总口径取广告部分 pm_leads_ad，自然流口径无投放归 0）
   const adLeads =
     caliber.value === 'juguang' ? f.pm_leads ?? 0 : caliber.value === 'total' ? f.pm_leads_ad ?? 0 : 0;
@@ -361,11 +361,11 @@ const adBlocks = computed(() => {
     d('投放消耗(元)', a.cost, pv.cost),
     d('曝光量', a.impression, pv.impression),
     d('点击量', a.click, pv.click),
-    d('投流广告线索', adLeads, adLeadsPrev),
+    d('投流私信线索', adLeads, adLeadsPrev),
     { label: 'CTR', value: `${ctr}%` },
     { label: 'CPM', value: `¥${cpm}` },
     { label: 'CPC', value: `¥${cpc}` },
-    { label: '广告线索成本', value: `¥${a.leads_cost ?? 0}` },
+    { label: '私信线索成本', value: `¥${a.leads_cost ?? 0}` },
   ];
 });
 

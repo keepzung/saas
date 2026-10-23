@@ -29,7 +29,7 @@
         <div class="step-item">
           <div class="step-icon-wrap"><SendOutlined class="step-icon" style="color: #d97706" /></div>
           <div class="step-title-wrap">
-            <span class="step-title">{{ isMdd ? '广告线索' : '留资获取' }}</span>
+            <span class="step-title">{{ isMdd ? '私信线索' : '留资获取' }}</span>
             <span class="step-value">{{ fmt(total.pm_leads) }} 条</span>
           </div>
         </div>
@@ -76,7 +76,7 @@
             :show-info="false"
             :stroke-color="{ from: '#16a34a', to: '#4ade80' }"
           />
-          <div class="funnel-sub">{{ isMdd ? '广告线索' : '留资' }} {{ fmt(total.pm_leads) }} 条 → 成交 {{ fmt(salesSummary.qty) }} 件 · ¥{{ fmt(salesSummary.amount) }}</div>
+          <div class="funnel-sub">{{ isMdd ? '私信线索' : '留资' }} {{ fmt(total.pm_leads) }} 条 → 成交 {{ fmt(salesSummary.qty) }} 件 · ¥{{ fmt(salesSummary.amount) }}</div>
         </div>
       </div>
     </a-card>
@@ -254,7 +254,7 @@ const columns = computed(() => {
     { title: '曝光量', dataIndex: 'exposure_sum', width: 110, sorter: (a, b) => a.exposure_sum - b.exposure_sum },
   );
   // 荣威真实留资通道未接入（MCC 侧无留资数据，恒为 0），留资列隐藏；接入专业号获客工具后恢复
-  if (!isRoewe.value) cols.push({ key: 'pm_leads', title: isMdd.value ? '广告线索 / 完成度' : '留资数 / 完成度', width: 180 });
+  if (!isRoewe.value) cols.push({ key: 'pm_leads', title: isMdd.value ? '私信线索 / 完成度' : '留资数 / 完成度', width: 180 });
   cols.push({ key: 'ces', title: 'CES', width: 90, sorter: (a, b) => (a.ces ?? a.score ?? 0) - (b.ces ?? b.score ?? 0) });
   return cols;
 });
@@ -340,7 +340,7 @@ async function reload() {
       // Morgandada：代理商按「大区」划分（区域汇总行），展开显示该区域的门店员工账号（2026-10-21 客户确认）
       const res = await getKoxAccountRanking({
         brandId: auth.currentBrandId ?? undefined,
-        // 广告线索=商业+自然合计（2026-10-23 三数合一），映射进 pm_leads 字段复用既有漏斗/转化率逻辑
+        // 私信线索=全部线索（商业+自然合计，2026-10-23 客户拍板），映射进 pm_leads 字段复用既有漏斗/转化率逻辑
         metric: 'pm_leads_total',
         ...rangeParams(),
         page_size: 100,

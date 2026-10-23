@@ -47,8 +47,8 @@
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">
-            {{ isMdd ? '广告线索' : '私信留资' }}
-            <a-tooltip v-if="isMdd" title="广告线索=商业线索+自然线索（线索管理→线索分析按归属账户窗口合计，与账号表现分析同源；2026-10-23 三数合一）">
+            {{ isMdd ? '私信线索' : '私信留资' }}
+            <a-tooltip v-if="isMdd" title="私信线索=商业线索+自然线索（线索管理→线索分析按归属账户窗口合计，与账号表现分析同源；2026-10-23 三数合一）">
               <span class="mdd-tip">*</span>
             </a-tooltip>
             <a-tooltip v-else title="员工矩阵→员工数据明细（员工维度）窗口逐日求和">
@@ -215,7 +215,7 @@ const columns = computed(() => {
 // MDD：绑定员工号对齐运营账号数、员工笔记数对齐运营总览「产出内容数」（同窗口同源）
 const mddAccountTotal = ref(0);
 const mddNoteCnt = ref(0);
-// MDD：广告线索=线索分析合计（账号表现同源），趋势线按日对齐运营总览 trend.lead_leads
+// MDD：私信线索=线索分析合计（账号表现同源），趋势线按日对齐运营总览 trend.lead_leads
 const mddClueTotal = ref(0);
 const mddClueByDay = ref(new Map());
 // Morgandada(5)：私信进线/留资/投广消耗按页面口径注脚（窗口内逐日求和）展示，
@@ -304,7 +304,7 @@ function renderChart() {
   chart.setOption(
     {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['员工笔记数', '笔记曝光', '私信进线', isMdd.value ? '广告线索' : '私信留资'] },
+      legend: { data: ['员工笔记数', '笔记曝光', '私信进线', isMdd.value ? '私信线索' : '私信留资'] },
       grid: { left: 60, right: 70, top: 40, bottom: 30 },
       xAxis: { type: 'category', data: days.map((d) => d.date.slice(5)) },
       yAxis: [
@@ -315,9 +315,9 @@ function renderChart() {
         { name: '员工笔记数', type: 'line', smooth: true, data: days.map((d) => d.create_note_num ?? 0), itemStyle: { color: '#3456E6' } },
         { name: '笔记曝光', type: 'line', smooth: true, yAxisIndex: 1, data: days.map((d) => d.soc_read_cnt ?? 0), itemStyle: { color: '#16a34a' } },
         { name: '私信进线', type: 'line', smooth: true, data: days.map((d) => d.message_open_cnt ?? 0), itemStyle: { color: '#d97706' } },
-        // Morgandada：留资线切广告线索（线索分析按日，与运营总览趋势同源）；其余品牌维持员工数据明细
+        // Morgandada：留资线切私信线索（线索分析按日，与运营总览趋势同源）；其余品牌维持员工数据明细
         isMdd.value
-          ? { name: '广告线索', type: 'line', smooth: true, data: days.map((d) => mddClueByDay.value.get(String(d.date).slice(0, 10)) ?? 0), itemStyle: { color: '#7c3aed' } }
+          ? { name: '私信线索', type: 'line', smooth: true, data: days.map((d) => mddClueByDay.value.get(String(d.date).slice(0, 10)) ?? 0), itemStyle: { color: '#7c3aed' } }
           : { name: '私信留资', type: 'line', smooth: true, data: days.map((d) => d.msg_leads_num ?? 0), itemStyle: { color: '#7c3aed' } },
       ],
     },

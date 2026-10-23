@@ -256,9 +256,9 @@ const regionColumns = computed(() => (isDf ? dfRegionColumns.value : [
   ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
-  // Morgandada(5)：广告线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板三数合一，原私信留资/私信线索不再单列）；
+  // Morgandada(5)：私信线索=线索分析新增线索合计（广告+自然，2026-10-23 客户拍板三数合一）；
   // 其余品牌维持私信留资（获客工具统计口径，与账号表现分析一致）——线索分析管道仅 brand5 有数据
-  ...(isMdd ? [col('广告线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
+  ...(isMdd ? [col('私信线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
   // Morgandada：投流花费（星火品牌级消耗按门店曝光占比分摊）
   ...(isMdd ? [col('投流花费', 'fee_alloc', 110)] : []),
 ]));
@@ -280,8 +280,8 @@ const tagColumns = computed(() => [
   ...(isTesla ? [] : [col('笔记平均CES', 'avg_ces', 112)]),
   col('私信进线', 'pm_inquiries', 96),
   col('私信开口', 'pm_openings', 96),
-  // Morgandada(5)：广告线索=线索分析新增线索合计（2026-10-23 三数合一）；其余品牌维持私信留资
-  ...(isMdd ? [col('广告线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
+  // Morgandada(5)：私信线索=线索分析新增线索合计（2026-10-23 三数合一）；其余品牌维持私信留资
+  ...(isMdd ? [col('私信线索', 'clue_total', 96)] : [col('私信留资', 'pm_leads', 96)]),
   ...(isTesla || isMdd ? [] : [col('广告线索', 'ads_leads', 96), col('自然线索', 'organic_leads', 96)]),
 ]);
 
@@ -340,7 +340,7 @@ const toRows = (list, nameKey) =>
     ...(isTesla ? {} : { 笔记平均CES: r.avg_ces }),
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
-    ...(isMdd ? { 广告线索: r.clue_total } : { 私信线索: r.clue_total }),
+    私信线索: r.clue_total,
     ...(isTesla || isMdd ? {} : { 广告线索: r.ads_leads ?? 0, 自然线索: r.organic_leads ?? 0 }),
     ...(isMdd ? { 投流花费: r.fee_alloc } : {}),
   }));

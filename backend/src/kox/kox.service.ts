@@ -2671,7 +2671,7 @@ export class KoxService {
         _sum: { clueCnt: true },
       });
       clueTotalSum = clueAgg._sum.clueCnt ?? 0;
-      pmScopeNote = '来源=MCC 笔记分析·私信咨询/开口/留资数（员工笔记，全量累计口径），不随日期筛选联动；广告线索=线索分析·新增线索按查询窗口合计';
+      pmScopeNote = '来源=MCC 笔记分析·私信咨询/开口/留资数（员工笔记，全量累计口径），不随日期筛选联动；私信线索=线索分析·新增线索按查询窗口合计';
     }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
@@ -4186,7 +4186,7 @@ export class KoxService {
       metric_note: metric_source.startsWith('weekly_snapshot')
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
           : metric_source.includes('staff_matrix_belong')
-          ? '私信进线/开口=员工矩阵→员工数据明细按所选区间逐日求和（2026-10-22 客户拍板；员工号数据平台 T+1 出数，2026-10-06 起有数）；广告线索=商业线索+自然线索（线索管理→线索分析按归属账户合计，2026-10-23 客户拍板三数合一，私信留资不再单列）；内容指标=笔记周期累计口径；分层=周度留资折算'
+          ? '私信进线/开口=员工矩阵→员工数据明细按所选区间逐日求和（2026-10-22 客户拍板；员工号数据平台 T+1 出数，2026-10-06 起有数）；私信线索=商业线索+自然线索（线索管理→线索分析按归属账户合计，2026-10-23 客户拍板三数合一，私信留资不再单列）；内容指标=笔记周期累计口径；分层=周度留资折算'
           : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
             : metric_source.startsWith('pro_staff')

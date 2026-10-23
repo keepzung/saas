@@ -513,9 +513,9 @@ const blocks = computed(() => {
       { label: '曝光量', value: fmt(t.exposure_sum) },
       { label: '私信进线数', value: fmt(t.pm_inquiries_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
       { label: '私信开口数', value: fmt(t.pm_openings_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
-      // Morgandada 2026-10-23：私信留资→广告线索（=商业+自然，线索分析按查询窗口合计）；其余品牌维持快照
+      // Morgandada 2026-10-23：私信留资→私信线索（=商业+自然，线索分析按查询窗口合计）；其余品牌维持快照
       ...(isMdd.value
-        ? [{ label: '广告线索', value: fmt(summaryData.value.clue_total_sum ?? 0), tip: '广告线索=商业线索+自然线索=线索管理→线索分析「新增线索」按查询窗口合计（笔记行级无线索归属，故表格不设列）' }]
+        ? [{ label: '私信线索', value: fmt(summaryData.value.clue_total_sum ?? 0), tip: '私信线索=商业线索+自然线索=线索管理→线索分析「新增线索」按查询窗口合计（笔记行级无线索归属，故表格不设列）' }]
         : [{ label: '私信留资数', value: fmt(t.pm_leads_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' }]),
     ];
   }

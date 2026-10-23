@@ -271,8 +271,8 @@
           <div class="metric-value">{{ summary.msg_openings ? fmtNum(summary.msg_open_cost) : '—' }}</div>
         </div>
         <div class="metric-card">
-          <!-- Morgandada：值=消耗÷线索分析合计（已是广告线索口径），标签对齐 2026-10-23 三数合一 -->
-          <div class="metric-label">{{ isMdd ? '广告线索成本' : '私信留资成本' }}</div>
+          <!-- Morgandada：值=消耗÷线索分析合计（已是私信线索口径），标签对齐 2026-10-23 三数合一 -->
+          <div class="metric-label">{{ isMdd ? '私信线索成本' : '私信留资成本' }}</div>
           <div class="metric-value">{{ summary.msg_leads ? fmtNum(summary.msg_lead_cost) : '—' }}</div>
         </div>
       </div>
@@ -955,7 +955,7 @@ async function exportAll() {
           { 指标: isMdd.value ? '线索数' : '私信留资数', 数值: s.msg_leads ?? 0 },
           { 指标: '私信进线成本(元)', 数值: s.msg_inquiry_cost ?? 0 },
           { 指标: '私信开口成本(元)', 数值: s.msg_open_cost ?? 0 },
-          { 指标: isMdd.value ? '广告线索成本(元)' : '私信留资成本(元)', 数值: s.msg_lead_cost ?? 0 },
+          { 指标: isMdd.value ? '私信线索成本(元)' : '私信留资成本(元)', 数值: s.msg_lead_cost ?? 0 },
         ],
       },
       // Morgandada(5)：账号明细行=主账号 MorganDaDa，客户要求不在投放页/导出中显示
