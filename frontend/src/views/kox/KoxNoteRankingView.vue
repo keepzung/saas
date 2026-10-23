@@ -473,13 +473,12 @@ const columns = computed(() => [
   { title: '收藏', dataIndex: 'collect', width: 80 },
   { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
   { title: '曝光', dataIndex: 'exposure', width: 110 },
-  // Morgandada(5)：笔记私信三数=MCC 笔记分析私信列（全量快照累计，与顶部汇总卡同口径）；
-  // 进线/开口后端不支持按其排序，仅留资接 metric=pmLeads
+  // Morgandada(5)：笔记私信进线/开口=MCC 笔记分析私信列（全量快照累计，与顶部汇总卡同口径）；
+  // 2026-10-23 客户拍板：私信留资不再单列（笔记级无线索分析归属），广告线索仅在顶部汇总卡提供
   ...(isMdd.value
     ? [
         { title: '进线', dataIndex: 'pmIn', width: 80 },
         { title: '开口', dataIndex: 'pmOpen', width: 80 },
-        { title: '留资', dataIndex: 'pmLeads', width: 80, sorter: (a, b) => a.pmLeads - b.pmLeads },
       ]
     : []),
   // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
@@ -514,7 +513,10 @@ const blocks = computed(() => {
       { label: '曝光量', value: fmt(t.exposure_sum) },
       { label: '私信进线数', value: fmt(t.pm_inquiries_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
       { label: '私信开口数', value: fmt(t.pm_openings_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
-      { label: '私信留资数', value: fmt(t.pm_leads_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' },
+      // Morgandada 2026-10-23：私信留资→广告线索（=商业+自然，线索分析按查询窗口合计）；其余品牌维持快照
+      ...(isMdd.value
+        ? [{ label: '广告线索', value: fmt(summaryData.value.clue_total_sum ?? 0), tip: '广告线索=商业线索+自然线索=线索管理→线索分析「新增线索」按查询窗口合计（笔记行级无线索归属，故表格不设列）' }]
+        : [{ label: '私信留资数', value: fmt(t.pm_leads_sum), tip: isMddPm ? summaryData.value.pm_scope_note : '' }]),
     ];
   }
   const list = filtered.value;
@@ -532,7 +534,7 @@ const blocks = computed(() => {
     { label: '曝光量', value: fmt(sum('exposure')) },
     { label: '私信进线数', value: fmt(sum('pmIn')) },
     { label: '私信开口数', value: fmt(sum('pmOpen')) },
-    { label: '私信留资数', value: fmt(sum('pmLeads')) },
+    ...(isMdd.value ? [] : [{ label: '私信留资数', value: fmt(sum('pmLeads')) }]),
   ];
 });
 
@@ -913,7 +915,7 @@ function onFilterChange() {
   else nextTick(renderCharts);
 }
 
-const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads', pmLeads: 'pmLeads' };
+const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads' };
 
 function onTableChange(pag, _filters, sorter) {
   page.value = pag.current ?? 1;
@@ -948,7 +950,7 @@ async function exportCsv() {
     const head = isTesla.value
       ? ['标题', '笔记链接', 'UID', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
       : isMdd.value
-        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '进线', '开口', '留资', '发布时间']
+        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '进线', '开口', '发布时间']
         : ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
@@ -984,7 +986,7 @@ async function exportCsv() {
               n.collects,
               n.views,
               n.exposure,
-              ...(isMdd.value ? [n.pm_inquiries, n.pm_openings, n.pm_leads] : [n.form_leads]),
+              ...(isMdd.value ? [n.pm_inquiries, n.pm_openings] : [n.form_leads]),
               n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
             ],
       );
@@ -992,7 +994,7 @@ async function exportCsv() {
       rows = filtered.value.map((n) =>
         isTesla.value
           ? [n.title, n.noteUrl || '', n.uid || '', n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
-          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [n.pmIn, n.pmOpen, n.pmLeads] : [n.formLeads]), n.publishTime],
+          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [n.pmIn, n.pmOpen] : [n.formLeads]), n.publishTime],
       );
     }
     const csv = [head, ...rows]

@@ -175,9 +175,8 @@ const columns = computed(() => {
       { title: '账号类型', key: 'account_type', dataIndex: 'account_type', width: 90 },
       ncol('私信进线数', 'pm_inquiries', 100),
       ncol('私信开口数', 'pm_openings', 100),
-      ncol('私信留资数', 'pm_leads', 100),
-      ncol('广告线索', 'pm_leads_ad', 92),
-      ncol('自然线索', 'pm_leads_nature', 92),
+      // Morgandada 2026-10-23 拍板：私信留资/广告线索/自然线索三数合一为「广告线索」=商业+自然（线索分析合计）
+      ncol('广告线索', 'pm_leads_total', 100),
       ncol('内容发布数', 'item_cnt', 104),
       ncol('内容曝光数', 'exposure_sum', 120),
       { title: '操作', key: 'action', width: 80 },
@@ -263,7 +262,7 @@ async function reload() {
   try {
     const res = await getKoxAccountRanking({
       ...dateParams(),
-      ...(isMdd.value ? { metric: 'pm_leads' } : {}),
+      ...(isMdd.value ? { metric: 'pm_leads_total' } : {}),
       page: pagination.value.current,
       page_size: pagination.value.pageSize,
     });
@@ -357,7 +356,7 @@ async function exportDetail() {
   for (;;) {
     const res = await getKoxAccountRanking({
       ...dateParams(),
-      ...(isMdd.value ? { metric: 'pm_leads' } : {}),
+      ...(isMdd.value ? { metric: 'pm_leads_total' } : {}),
       page,
       page_size: 100,
     });
@@ -375,7 +374,7 @@ async function exportDetail() {
       : { 账号标签: r.account_tag ?? '', 账号类型: r.account_type }),
     私信进线: r.pm_inquiries,
     私信开口: r.pm_openings,
-    私信留资: r.pm_leads,
+    ...(isMdd.value ? { 广告线索: r.pm_leads_total } : { 私信留资: r.pm_leads }),
     ...(isTesla.value
       ? {}
       : r.total_leads != null

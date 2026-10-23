@@ -47,12 +47,15 @@
         <div class="hero-divider"></div>
         <div class="hero-item">
           <div class="hero-label">
-            私信留资
-            <a-tooltip v-if="isMdd" title="员工矩阵→员工数据明细（员工维度）窗口逐日求和">
+            {{ isMdd ? '广告线索' : '私信留资' }}
+            <a-tooltip v-if="isMdd" title="广告线索=商业线索+自然线索（线索管理→线索分析按归属账户窗口合计，与账号表现分析同源；2026-10-23 三数合一）">
+              <span class="mdd-tip">*</span>
+            </a-tooltip>
+            <a-tooltip v-else title="员工矩阵→员工数据明细（员工维度）窗口逐日求和">
               <span class="mdd-tip">*</span>
             </a-tooltip>
           </div>
-          <div class="hero-value green">{{ fmt(isMdd ? mddStaffWindow.msg_leads_num : summary.msg_leads_num) }}</div>
+          <div class="hero-value green">{{ fmt(isMdd ? mddClueTotal : summary.msg_leads_num) }}</div>
         </div>
         <div class="hero-divider"></div>
         <div class="hero-item">
@@ -203,11 +206,18 @@ const staffColumns = [
   { title: '投广消耗', key: 'rtbIncomeAmt', width: 100 },
 ];
 
-const columns = computed(() => (dim.value === 'brand' ? brandColumns : staffColumns));
+const columns = computed(() => {
+  const base = dim.value === 'brand' ? brandColumns : staffColumns;
+  // Morgandada：私信留资不再单列（2026-10-23 三数合一；员工数据明细无线索分析归属，无法替换为广告线索）
+  return isMdd.value ? base.filter((c) => c.key !== 'msgLeadsNum') : base;
+});
 
 // MDD：绑定员工号对齐运营账号数、员工笔记数对齐运营总览「产出内容数」（同窗口同源）
 const mddAccountTotal = ref(0);
 const mddNoteCnt = ref(0);
+// MDD：广告线索=线索分析合计（账号表现同源），趋势线按日对齐运营总览 trend.lead_leads
+const mddClueTotal = ref(0);
+const mddClueByDay = ref(new Map());
 // Morgandada(5)：私信进线/留资/投广消耗按页面口径注脚（窗口内逐日求和）展示，
 // 取员工维度修复后的 days 求和（latest 为单日值，直接用会显得仍是坏数据）
 const mddStaffWindow = computed(() => {
@@ -221,13 +231,17 @@ const mddStaffWindow = computed(() => {
 async function reloadMddHero() {
   if (!isMdd.value) return;
   try {
-    const rank = await request.get('/kox/account-ranking', { params: { brandId: auth.currentBrandId ?? 5, page_size: 1, metric: 'pm_leads' } });
-    mddAccountTotal.value = rank.total ?? (rank.data ?? {}).total ?? 0;
+    const rank = await request.get('/kox/account-ranking', { params: { brandId: auth.currentBrandId ?? 5, page_size: 100, metric: 'pm_leads_total' } });
+    const d = rank?.data ?? rank ?? {};
+    mddAccountTotal.value = d.total ?? 0;
+    mddClueTotal.value = (d.list ?? []).reduce((s, r) => s + Number(r.pm_leads_total ?? 0), 0);
   } catch { /* ignore */ }
   try {
     const ov = await getMddOverview({ brandId: auth.currentBrandId ?? 5, start: dateParams().start, end: dateParams().end });
     mddNoteCnt.value = ov.summary?.item_cnt ?? 0;
+    mddClueByDay.value = new Map((ov.trend ?? []).map((t) => [String(t.date).slice(0, 10), Number(t.lead_leads ?? 0)]));
   } catch { /* ignore */ }
+  nextTick(renderChart);
 }
 
 async function reloadSummary() {
@@ -290,7 +304,7 @@ function renderChart() {
   chart.setOption(
     {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['员工笔记数', '笔记曝光', '私信进线', '私信留资'] },
+      legend: { data: ['员工笔记数', '笔记曝光', '私信进线', isMdd.value ? '广告线索' : '私信留资'] },
       grid: { left: 60, right: 70, top: 40, bottom: 30 },
       xAxis: { type: 'category', data: days.map((d) => d.date.slice(5)) },
       yAxis: [
@@ -301,7 +315,10 @@ function renderChart() {
         { name: '员工笔记数', type: 'line', smooth: true, data: days.map((d) => d.create_note_num ?? 0), itemStyle: { color: '#3456E6' } },
         { name: '笔记曝光', type: 'line', smooth: true, yAxisIndex: 1, data: days.map((d) => d.soc_read_cnt ?? 0), itemStyle: { color: '#16a34a' } },
         { name: '私信进线', type: 'line', smooth: true, data: days.map((d) => d.message_open_cnt ?? 0), itemStyle: { color: '#d97706' } },
-        { name: '私信留资', type: 'line', smooth: true, data: days.map((d) => d.msg_leads_num ?? 0), itemStyle: { color: '#7c3aed' } },
+        // Morgandada：留资线切广告线索（线索分析按日，与运营总览趋势同源）；其余品牌维持员工数据明细
+        isMdd.value
+          ? { name: '广告线索', type: 'line', smooth: true, data: days.map((d) => mddClueByDay.value.get(String(d.date).slice(0, 10)) ?? 0), itemStyle: { color: '#7c3aed' } }
+          : { name: '私信留资', type: 'line', smooth: true, data: days.map((d) => d.msg_leads_num ?? 0), itemStyle: { color: '#7c3aed' } },
       ],
     },
     { notMerge: true },
@@ -322,7 +339,7 @@ function doExport() {
           笔记曝光: r.socReadCnt ?? 0,
           私信进线: r.messageOpenCnt ?? 0,
           私信开口: r.messageDrivingOpenCnt ?? 0,
-          私信留资: r.msgLeadsNum ?? 0,
+          ...(isMdd.value ? {} : { 私信留资: r.msgLeadsNum ?? 0 }),
           表单留资: r.leadsSuccess ?? 0,
           投广消耗: r.rtbIncomeAmt ?? 0,
         }
@@ -339,7 +356,7 @@ function doExport() {
           新增粉丝: r.addFansNum ?? 0,
           私信进线: r.messageOpenCnt ?? 0,
           私信开口: r.messageDrivingOpenCnt ?? 0,
-          私信留资: r.msgLeadsNum ?? 0,
+          ...(isMdd.value ? {} : { 私信留资: r.msgLeadsNum ?? 0 }),
           表单留资: r.leadsSuccess ?? 0,
           投广消耗: r.rtbIncomeAmt ?? 0,
         },

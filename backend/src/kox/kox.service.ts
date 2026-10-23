@@ -2656,6 +2656,8 @@ export class KoxService {
     // Morgandada(5)：私信三数口径 = MCC 笔记分析「笔记明细分析」（员工笔记）私信咨询/开口/留资数，
     // 全量快照累计，不随日期筛选联动（2026-10-20 客户确认统一口径）
     let pmScopeNote: string | null = null;
+    // Morgandada：广告线索=线索分析「新增线索」按查询窗口合计（顶层字段，2026-10-23 三数合一）
+    let clueTotalSum: number | null = null;
     if ((query.brandId ? Number(query.brandId) : 0) === 5) {
       const pmAgg = await this.prisma.koxNote.aggregate({
         where: { brandId: 5 },
@@ -2664,7 +2666,12 @@ export class KoxService {
       totals.pm_inquiries_sum = pmAgg._sum.pmInquiries ?? 0;
       totals.pm_openings_sum = pmAgg._sum.pmOpenings ?? 0;
       totals.pm_leads_sum = pmAgg._sum.pmLeads ?? 0;
-      pmScopeNote = '来源=MCC 笔记分析·私信咨询/开口/留资数（员工笔记，全量累计口径），不随日期筛选联动';
+      const clueAgg = await this.prisma.clueAnalysisDaily.aggregate({
+        where: { brandId: 5, day: { gte: start, lte: end } },
+        _sum: { clueCnt: true },
+      });
+      clueTotalSum = clueAgg._sum.clueCnt ?? 0;
+      pmScopeNote = '来源=MCC 笔记分析·私信咨询/开口/留资数（员工笔记，全量累计口径），不随日期筛选联动；广告线索=线索分析·新增线索按查询窗口合计';
     }
 
     const byCategory = new Map<string, { inter: number; leads: number }>();
@@ -2686,6 +2693,7 @@ export class KoxService {
 
     return {
       totals,
+      clue_total_sum: clueTotalSum,
       pm_scope_note: pmScopeNote,
       type_efficiency: [...byCategory.entries()].map(([category, v]) => ({
         category,
@@ -3762,6 +3770,7 @@ export class KoxService {
       pm_leads: number;
       pm_leads_ad: number;
       pm_leads_nature: number;
+      pm_leads_total: number;
     }
     const aggById = new Map<number, AccAgg>();
     const idSet = new Set(accounts.map((a) => a.id));
@@ -3781,6 +3790,7 @@ export class KoxService {
       pm_leads: 0,
       pm_leads_ad: 0,
       pm_leads_nature: 0,
+      pm_leads_total: 0,
     });
     const bump = (accountId: number, fn: (a: AccAgg) => void) => {
       let cur = aggById.get(accountId);
@@ -4042,6 +4052,8 @@ export class KoxService {
       for (const [accId, v] of clueByAcc) {
         clueHit += 1;
         bump(accId, (a) => {
+          // 广告线索=商业+自然（线索分析「新增线索」合计，2026-10-23 客户拍板三数合一）
+          a.pm_leads_total = v.c;
           a.pm_leads_ad = v.ad;
           a.pm_leads_nature = v.nature;
         });
@@ -4111,6 +4123,7 @@ export class KoxService {
         pm_leads: g.pm_leads,
         pm_leads_ad: g.pm_leads_ad,
         pm_leads_nature: g.pm_leads_nature,
+        pm_leads_total: g.pm_leads_total,
         total_leads: null,
         service_card_leads: null,
         wecom_copy_leads: null,
@@ -4124,19 +4137,22 @@ export class KoxService {
 
     const METRICS = [
       'pm_leads',
+      'pm_leads_total',
       'exposure_sum',
       'view_sum',
       'interaction_sum',
       'ces',
       'item_cnt',
     ] as const;
+    // Morgandada 默认指标=广告线索（商业+自然合计，2026-10-23 客户拍板三数合一）；其余品牌默认留资数
+    const defaultMetric = brandId === 5 ? 'pm_leads_total' : 'pm_leads';
     const metric = (METRICS as readonly string[]).includes(query.metric ?? '')
       ? (query.metric as (typeof METRICS)[number])
-      : 'pm_leads';
+      : (defaultMetric as (typeof METRICS)[number]);
     // 排序（客户指定 2026-10）：所有排行默认「留资数从多到少」纯降序；切换其他指标时按所选指标降序
     rows.sort((a, b) =>
-      metric === 'pm_leads'
-        ? b.pm_leads - a.pm_leads || a.tier_rank - b.tier_rank
+      metric === 'pm_leads' || metric === 'pm_leads_total'
+        ? b[metric] - a[metric] || a.tier_rank - b.tier_rank
         : b[metric] - a[metric] || b.pm_leads - a.pm_leads,
     );
 
@@ -4169,8 +4185,8 @@ export class KoxService {
       ],
       metric_note: metric_source.startsWith('weekly_snapshot')
         ? '本周数据为客户周度表权威口径快照（总留资=私信留资+服务卡留资+个微复制留资；消耗=笔记投流消耗）；分层为周表留资分层'
-        : metric_source.includes('staff_matrix_belong')
-          ? '私信进线/开口/留资=员工矩阵→员工数据明细按所选区间逐日求和（2026-10-22 客户拍板；员工号数据平台 T+1 出数，2026-10-06 起有数）；广告/自然线索=线索管理→线索分析按归属账户；内容指标=笔记周期累计口径；分层=周度留资折算'
+          : metric_source.includes('staff_matrix_belong')
+          ? '私信进线/开口=员工矩阵→员工数据明细按所选区间逐日求和（2026-10-22 客户拍板；员工号数据平台 T+1 出数，2026-10-06 起有数）；广告线索=商业线索+自然线索（线索管理→线索分析按归属账户合计，2026-10-23 客户拍板三数合一，私信留资不再单列）；内容指标=笔记周期累计口径；分层=周度留资折算'
           : metric_source.includes('leyoon_daily')
           ? `私信进线/开口/留资=乐允投放报表按所选区间逐日聚合（数据自 2026-01-07 起，随区间真实变化）${metric_source.includes('pro_staff') ? '；内容指标=专业号窗口快照' : '；内容指标=笔记周期累计口径'}；分层=周度留资折算`
             : metric_source.startsWith('pro_staff')
