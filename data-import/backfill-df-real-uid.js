@@ -24,11 +24,12 @@ if (fs.existsSync(envPath)) {
 const DRY_RUN = process.argv.includes('--dry-run');
 const BRAND = 7;
 
-// 账号昵称(库内当前名) / 人员 / 清单内昵称 → 真实 UID（来源：奕境小红书AIGC账号清单1012.xlsx Sheet2）
+// 账号昵称(库内当前名) / 人员 / 清单内昵称 → 真实 UID（来源：奕境小红书AIGC账号清单1012.xlsx Sheet2；沈苏洋 UID 为客户 2026-10-23 提供）
 const MAP = [
   { oldUid: 'df_5b536a24fab404b1', owner: '闻媛', listNick: '小红薯6392CA35', uid: '6391b1e4000000001f01f4b8' },
   { oldUid: 'df_8b6a32b34d53adb7', owner: '周瑾', listNick: '奕境momo', uid: '66d7bb88000000001d0321ee' },
   { oldUid: 'df_6a612663474a554b', owner: '喻晨成', listNick: '小红薯682469C2', uid: '682339be000000000e013b35' },
+  { oldUid: 'df_3d1d39e137119be1', owner: '沈苏洋', listNick: '小红薯6A617CE5', uid: '6a6087ba000000000e03cc00' },
 ];
 
 const prisma = new PrismaClient();
