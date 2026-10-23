@@ -757,10 +757,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const byStore = new Map<string, number>();
     // UID 直匹（聚光报表带 author_id）：员工改名后归属不再依赖昵称；df_ 等占位 id 不参与
     const byAuthorUid = new Map<string, number>();
+    const authorIdById = new Map<number, string>();
     for (const a of accounts) {
       if (a.nickname) byNickname.set(a.nickname, a.id);
       if (a.storeName) byStore.set(a.storeName, a.id);
       if (/^[0-9a-f]{24}$/.test(a.authorId)) byAuthorUid.set(a.authorId, a.id);
+      authorIdById.set(a.id, a.authorId ?? '');
     }
 
     const day = new Date(`${statDate}T00:00:00.000Z`);
@@ -829,6 +831,19 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
         byNickname.get(authorName) ??
         (brandUserName ? byStore.get(brandUserName) ?? null : null);
+      // 自愈：昵称命中但账号表 authorId 还是派生值（mdd_/auto_ 前缀或空）时，
+      // 用行内真实 UID 回填——之后员工改名也能靠 UID 直匹（2026-10-23 客户要求全面按 UID 归属）
+      if (
+        accountId != null &&
+        authorUid &&
+        /^[0-9a-f]{24}$/.test(authorUid) &&
+        !byAuthorUid.has(authorUid) &&
+        !/^[0-9a-f]{24}$/.test(authorIdById.get(accountId) ?? '')
+      ) {
+        await this.prisma.kosAccount.update({ where: { id: accountId }, data: { authorId: authorUid } });
+        authorIdById.set(accountId, authorUid);
+        byAuthorUid.set(authorUid, accountId);
+      }
       // 荣威(2)：未匹配创作者自动注册为账号（账号底表每天自动长全，
       // 新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
       if (accountId == null && org.brandId === 2 && authorName) {
