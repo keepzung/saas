@@ -295,9 +295,14 @@
           </template>
           <div :ref="(el) => (leadsEl = el)" class="chart-area" />
         </a-card>
-        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber === 'organic'" style="width: 100%">
+        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber === 'organic'">
           <template #title><div class="chart-title"><span class="bar"></span>自然流趋势（按发布日）</div></template>
           <div :ref="(el) => (organicEl = el)" class="chart-area" />
+        </a-card>
+        <!-- Morgandada(5)：自然流页签日留资折线（线索分析·自然线索逐日，2026-10-23 客户要求） -->
+        <a-card :bordered="false" size="small" class="chart-card" v-if="caliber === 'organic'">
+          <template #title><div class="chart-title"><span class="bar"></span>日留资趋势（自然线索）</div></template>
+          <div :ref="(el) => (organicLeadsEl = el)" class="chart-area" />
         </a-card>
       </div>
     </a-card>
@@ -527,6 +532,7 @@ const trend = ref([]);
 const platform = ref(null);
 const coverage = ref(null);
 const organicSummary = ref(null);
+const organicLeadsEl = ref(null);
 // Morgandada(5)：汇总口径块（与运营总览一致）+ 聚光投放口径块（笔记报表，仅投放笔记）
 const overviewSummary = ref(null);
 const campNoteMetrics = ref(null);
@@ -534,6 +540,7 @@ const campNoteMetrics = ref(null);
 const clueSummary = ref(null);
 const organicEl = ref(null);
 let organicChart = null;
+let organicLeadsChart = null;
 
 // 三口径展示值：聚光=报表原值；自然流=自然块；汇总=投+自相加（消耗仅聚光有）
 // Morgandada(5) 2026-10-23 起口径切换：汇总=运营总览同源（overview 块：明细分析行求和+获客工具统计）；
@@ -755,6 +762,7 @@ function renderCharts() {
   const dates = trend.value.map((t) => t.date);
   if (isMdd.value && caliber.value === 'organic') {
     renderOrganicTrend();
+    renderOrganicLeads();
     return;
   }
   // caliber 切换会经 v-if 销毁/重建图表容器：实例还挂在旧 div 上时必须重新 init，否则画到脱离 DOM 的节点上（图表空白）
@@ -824,10 +832,47 @@ function renderOrganicTrend() {
   );
 }
 
+/** Morgandada(5) 自然流页签：日留资折线（线索分析·自然线索逐日，与顶层 trend 同源含 T+1 尾日裁剪） */
+function renderOrganicLeads() {
+  if (!organicLeadsEl.value) return;
+  if (organicLeadsChart && organicLeadsChart.getDom() !== organicLeadsEl.value) {
+    organicLeadsChart.dispose();
+    organicLeadsChart = null;
+  }
+  if (!organicLeadsChart) organicLeadsChart = echarts.init(organicLeadsEl.value);
+  const t = trend.value ?? [];
+  organicLeadsChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 50, right: 30, top: 24, bottom: 30 },
+      xAxis: { type: 'category', data: t.map((x) => x.date), boundaryGap: false },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          name: '自然线索',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          itemStyle: { color: '#10b981' },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(16,185,129,0.18)' },
+              { offset: 1, color: 'rgba(16,185,129,0.02)' },
+            ]),
+          },
+          data: t.map((x) => x.clue_nature ?? 0),
+        },
+      ],
+    },
+    { notMerge: true },
+  );
+}
+
 function onResize() {
   consumeChart?.resize();
   leadsChart?.resize();
   organicChart?.resize();
+  organicLeadsChart?.resize();
 }
 
 /* ---------- Excel 导出 ---------- */
