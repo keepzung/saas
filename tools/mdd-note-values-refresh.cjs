@@ -23,7 +23,7 @@ const pick = (r, code) => {
   return hit ? (hit.targetValue ?? hit.targetOriginValue ?? hit.targetDownloadValue) : undefined;
 };
 const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };
-const TARGETS = ['note_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt'];
+const TARGETS = ['note_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
 const dayStr = (offsetDays) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 // SparkSyncLog.statDate 是 String 列，传 Date 对象会被 Prisma 拒绝且静默失败
 const todayKey = () => dayStr(0);
@@ -77,6 +77,11 @@ async function pullAll(cookie) {
       naturalExposure: num(pick(r, 'ziran_imp_cnt')),
       naturalViews: num(pick(r, 'ziran_read_cnt')),
       rtbEngage: num(pick(r, 'ads_rtb_engage_cnt')),
+      // 私信三数=笔记明细分析·私信咨询/开口/留资数（2026-10-26 客户要求笔记级留资列，
+      // 重同步管道私信值滞后，随轻刷对齐页面）
+      pmInquiries: num(pick(r, 'message_open_cnt')),
+      pmOpenings: num(pick(r, 'message_driving_open_cnt')),
+      pmLeads: num(pick(r, 'msg_leads_num')),
     };
     const found = await p.koxNote.findFirst({ where: { brandId: 5, noteId }, select: { id: true } });
     if (!found) { missing += 1; continue; }
