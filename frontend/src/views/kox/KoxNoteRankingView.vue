@@ -473,12 +473,13 @@ const columns = computed(() => [
   { title: '收藏', dataIndex: 'collect', width: 80 },
   { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
   { title: '曝光', dataIndex: 'exposure', width: 110 },
-  // Morgandada(5)：笔记私信进线/开口=MCC 笔记分析私信列（全量快照累计，与顶部汇总卡同口径）；
-  // 2026-10-23 客户拍板：私信留资不再单列（笔记级无线索分析归属），广告线索仅在顶部汇总卡提供
+  // Morgandada(5)：笔记私信三数=MCC 笔记明细分析私信列（私信咨询/开口/留资数，全量快照累计）；
+  // 2026-10-26 客户要求恢复笔记级「留资」列（星火资产→笔记分析→笔记明细分析·私信留资数）
   ...(isMdd.value
     ? [
         { title: '进线', dataIndex: 'pmIn', width: 80 },
         { title: '开口', dataIndex: 'pmOpen', width: 80 },
+        { title: '留资', dataIndex: 'pmLeads', width: 80, sorter: (a, b) => a.pmLeads - b.pmLeads },
       ]
     : []),
   // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
@@ -915,7 +916,7 @@ function onFilterChange() {
   else nextTick(renderCharts);
 }
 
-const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads' };
+const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads', pmLeads: 'pmLeads' };
 
 function onTableChange(pag, _filters, sorter) {
   page.value = pag.current ?? 1;
@@ -950,7 +951,7 @@ async function exportCsv() {
     const head = isTesla.value
       ? ['标题', '笔记链接', 'UID', '发布者', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '发布时间']
       : isMdd.value
-        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '进线', '开口', '发布时间']
+        ? ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '进线', '开口', '留资', '发布时间']
         : ['标题', '笔记链接', 'UID', '发布者', '内容类型', '提及车型', '账号类型', '点赞', '评论', '分享', '收藏', '阅读', '曝光', '表单线索', '发布时间'];
     let rows;
     if (mode.value === 'real') {
@@ -986,7 +987,7 @@ async function exportCsv() {
               n.collects,
               n.views,
               n.exposure,
-              ...(isMdd.value ? [n.pm_inquiries, n.pm_openings] : [n.form_leads]),
+              ...(isMdd.value ? [n.pm_inquiries, n.pm_openings, n.pm_leads] : [n.form_leads]),
               n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD HH:mm') : '',
             ],
       );
@@ -994,7 +995,7 @@ async function exportCsv() {
       rows = filtered.value.map((n) =>
         isTesla.value
           ? [n.title, n.noteUrl || '', n.uid || '', n.author, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, n.publishTime]
-          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [n.pmIn, n.pmOpen] : [n.formLeads]), n.publishTime],
+          : [n.title, n.noteUrl || '', n.uid || '', n.author, n.type, n.model, n.accountType, n.digg, n.comment, n.share, n.collect, n.view, n.exposure, ...(isMdd.value ? [n.pmIn, n.pmOpen, n.pmLeads] : [n.formLeads]), n.publishTime],
       );
     }
     const csv = [head, ...rows]
