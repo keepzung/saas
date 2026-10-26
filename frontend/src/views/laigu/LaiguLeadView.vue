@@ -1148,9 +1148,9 @@ onMounted(() => {
   min-height: 560px;
 }
 
-/* 一级：KOS 账号树 */
+/* 一级：KOS 账号树（280px：「MorganDaDa+门店名」昵称较长，200px 截断严重） */
 .kos-tree {
-  width: 200px;
+  width: 280px;
   flex-shrink: 0;
   border-right: 1px solid #eef2f7;
   display: flex;

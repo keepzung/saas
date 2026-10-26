@@ -805,7 +805,7 @@ export class MddSalesController {
       };
     });
 
-    // 6. 参考爆文：每品类 留资→互动 排序 TOP5
+    // 6. 参考爆文：每品类 留资→互动 排序 TOP10（建议卡引用 3 条，看笔记弹窗展示全量）
     const noteAgg = new Map<string, NoteAgg>();
     for (const s of statRows) {
       const meta = noteMeta.get(s.noteId);
@@ -828,7 +828,7 @@ export class MddSalesController {
     for (const [cat, list] of byCatNotes) {
       byCatNotes.set(
         cat,
-        list.sort((a, b) => (b.leads - a.leads) || (b.engagement - a.engagement)).slice(0, 5),
+        list.sort((a, b) => (b.leads - a.leads) || (b.engagement - a.engagement)).slice(0, 10),
       );
     }
 

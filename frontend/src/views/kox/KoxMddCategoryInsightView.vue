@@ -147,8 +147,16 @@
           :pagination="false"
           row-key="category"
           size="small"
-          :scroll="{ x: 1100 }"
-        />
+          :scroll="{ x: 1200 }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'notes_action'">
+              <a-button size="small" type="link" @click="openNotes(record.category)">
+                <EyeOutlined /> 看笔记
+              </a-button>
+            </template>
+          </template>
+        </a-table>
       </a-card>
     </template>
 
@@ -289,6 +297,39 @@
       </a-form>
     </a-modal>
 
+    <!-- 品类参考笔记弹窗 -->
+    <a-modal
+      v-model:open="noteModal.open"
+      :title="`「${noteModal.category}」参考笔记（窗口内，按留资/互动排序 TOP10）`"
+      :footer="null"
+      width="780px"
+    >
+      <a-alert
+        v-if="!noteModal.notes.length"
+        type="info"
+        show-icon
+        message="该品类暂无标题命中笔记——正是全新选题空间，建议从成交爆品卖点切入创作"
+      />
+      <div v-else class="note-list">
+        <a
+          v-for="nt in noteModal.notes"
+          :key="nt.noteId"
+          :href="nt.url || 'javascript:;'"
+          target="_blank"
+          class="note-row"
+        >
+          <div class="note-title">{{ nt.title || '(无标题)' }}</div>
+          <div class="note-meta">
+            <span>{{ nt.author || '匿名' }}</span>
+            <a-tag color="green" class="mini">留资 {{ nt.leads }}</a-tag>
+            <a-tag color="blue" class="mini">互动 {{ fmt(nt.engagement) }}</a-tag>
+            <a-tag class="mini">开口 {{ nt.pmOpenings }}</a-tag>
+            <a-tag class="mini">阅读 {{ fmt(nt.views) }}</a-tag>
+          </div>
+        </a>
+      </div>
+    </a-modal>
+
     <a-collapse ghost class="scope-collapse">
       <a-collapse-panel key="scope" header="口径与规则说明">
         <div class="scope-list">
@@ -302,7 +343,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { BulbOutlined, DownloadOutlined, InfoCircleOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons-vue';
+import { BulbOutlined, DownloadOutlined, EyeOutlined, InfoCircleOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons-vue';
 import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -336,6 +377,15 @@ const rules = ref([]);
 const recalcLoading = ref(false);
 const ruleModal = reactive({ open: false, saving: false, id: null, pattern: '', matchType: 'contains', category: null, priority: 100, remark: '' });
 const defModal = reactive({ open: false, saving: false, id: null, name: '', sort: 99, remark: '' });
+const noteModal = reactive({ open: false, category: '', notes: [] });
+
+const notesByCat = computed(() => new Map((topNotes.value ?? []).map((t) => [t.category, t.notes ?? []])));
+
+function openNotes(category) {
+  noteModal.category = category;
+  noteModal.notes = notesByCat.value.get(category) ?? [];
+  noteModal.open = true;
+}
 
 const defOptions = computed(() => defs.value.filter((d) => d.enabled).map((d) => ({ label: d.name, value: d.name })));
 const activeNotes = computed(() => categorySummary.value.reduce((a, s) => a + (s.notes_active ?? 0), 0));
@@ -358,6 +408,7 @@ const summaryColumns = [
   { title: '篇/周', dataIndex: 'notes_per_week', width: 80, align: 'right' },
   { title: '活跃笔记', dataIndex: 'notes_active', width: 90, align: 'right' },
   { title: '互动', dataIndex: 'engagement', width: 90, align: 'right', customRender: ({ text }) => fmt(text) },
+  { title: '参考笔记', key: 'notes_action', width: 100, align: 'center' },
 ];
 
 const typeColumns = [
@@ -953,5 +1004,42 @@ onBeforeUnmount(() => {
   gap: 6px;
   font-size: 12px;
   color: #64748b;
+}
+
+.note-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.note-row {
+  display: block;
+  padding: 10px 4px;
+  border-bottom: 1px solid #f1f5f9;
+  text-decoration: none;
+}
+
+.note-row:hover {
+  background: #f8fafc;
+}
+
+.note-title {
+  font-size: 14px;
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.note-row:hover .note-title {
+  color: #2563eb;
+}
+
+.note-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>
