@@ -758,11 +758,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     // UID 直匹（聚光报表带 author_id）：员工改名后归属不再依赖昵称；df_ 等占位 id 不参与
     const byAuthorUid = new Map<string, number>();
     const authorIdById = new Map<number, string>();
+    const nicknameById = new Map<number, string>();
+    // 改名检测：UID 命中但平台昵称与账号表不一致 → 记入同步日志，巡检发现后主动同步显示名
+    const renames = new Map<string, string>();
     for (const a of accounts) {
       if (a.nickname) byNickname.set(a.nickname, a.id);
       if (a.storeName) byStore.set(a.storeName, a.id);
       if (/^[0-9a-f]{24}$/.test(a.authorId)) byAuthorUid.set(a.authorId, a.id);
       authorIdById.set(a.id, a.authorId ?? '');
+      nicknameById.set(a.id, a.nickname ?? '');
     }
 
     const day = new Date(`${statDate}T00:00:00.000Z`);
@@ -843,6 +847,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         await this.prisma.kosAccount.update({ where: { id: accountId }, data: { authorId: authorUid } });
         authorIdById.set(accountId, authorUid);
         byAuthorUid.set(authorUid, accountId);
+      }
+      // 改名检测（仅 UID 命中时判定，避免门店名兜底误报）
+      const oldNick = accountId != null ? nicknameById.get(accountId) ?? '' : '';
+      if (accountId != null && authorName && oldNick && authorUid && byAuthorUid.get(authorUid) === accountId && oldNick !== authorName && !renames.has(authorUid)) {
+        renames.set(authorUid, `${oldNick}→${authorName}`);
       }
       // 荣威(2)：未匹配创作者自动注册为账号（账号底表每天自动长全，
       // 新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
@@ -938,7 +947,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded,
       accountsRemoved: 0,
-      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}`,
+      message: `total=${total}${opts?.backfill ? ' (backfill)' : ''}${opts?.full ? ' (full)' : ''}${opts?.promoted ? ' (promoted)' : ''}${accountsAdded ? ` +auto${accountsAdded}` : ''}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}${renames.size ? ` | 账号改名:${[...renames.values()].join('、')}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
@@ -1121,6 +1130,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         .filter((a) => /^[0-9a-f]{24}$/.test(a.authorId))
         .map((a) => [a.authorId, a.id]),
     );
+    // 改名检测（与 syncNotes 同口径）：UID 命中但平台昵称与账号表不一致 → 记入同步日志
+    const nicknameByIdD = new Map(accounts.map((a) => [a.id, a.nickname ?? '']));
+    const renames = new Map<string, string>();
 
     const rows: Record<string, unknown>[] = [];
     let total = 0;
@@ -1158,6 +1170,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       const accountId =
         (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
         (authorName ? byNickname.get(authorName) ?? null : null);
+      const oldNickD = accountId != null ? nicknameByIdD.get(accountId) ?? '' : '';
+      if (accountId != null && authorName && oldNickD && authorUid && byAuthorUid.get(authorUid) === accountId && oldNickD !== authorName && !renames.has(authorUid)) {
+        renames.set(authorUid, `${oldNickD}→${authorName}`);
+      }
       // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
       if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
         const key = authorName ?? '(作者为空)';
@@ -1209,7 +1225,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
-      message: `total=${total}, window=${timeStart}~${statDate}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}`,
+      message: `total=${total}, window=${timeStart}~${statDate}${skipped.size ? ` | 跳过基线外作者:${[...skipped.entries()].map(([a, c]) => `${a}×${c}`).join('、')}` : ''}${renames.size ? ` | 账号改名:${[...renames.values()].join('、')}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
