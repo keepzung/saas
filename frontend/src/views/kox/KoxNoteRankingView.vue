@@ -200,7 +200,7 @@
         :columns="columns"
         :data-source="tableRows"
         :loading="loading"
-        :scroll="{ x: 1260 }"
+        :scroll="{ x: 1030 }"
         :pagination="{
           total: tableTotal,
           current: page,
@@ -465,22 +465,22 @@ const modelOptions = computed(() =>
 );
 
 const columns = computed(() => [
-  { key: 'title', title: '标题', width: 250 },
-  { title: '发布者', dataIndex: 'author', width: 120, ellipsis: true },
-  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 180 },
-  { title: '点赞', dataIndex: 'digg', width: 75, sorter: (a, b) => a.digg - b.digg },
-  { title: '评论', dataIndex: 'comment', width: 75, sorter: (a, b) => a.comment - b.comment },
-  { title: '分享', dataIndex: 'share', width: 75 },
-  { title: '收藏', dataIndex: 'collect', width: 75 },
-  { title: '阅读', dataIndex: 'view', width: 90, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
-  { title: '曝光', dataIndex: 'exposure', width: 95 },
+  { key: 'title', title: '标题', width: 200 },
+  { title: '发布者', dataIndex: 'author', width: 100, ellipsis: true },
+  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 140 },
+  { title: '点赞', dataIndex: 'digg', width: 62, sorter: (a, b) => a.digg - b.digg },
+  { title: '评论', dataIndex: 'comment', width: 62, sorter: (a, b) => a.comment - b.comment },
+  { title: '分享', dataIndex: 'share', width: 62 },
+  { title: '收藏', dataIndex: 'collect', width: 62 },
+  { title: '阅读', dataIndex: 'view', width: 72, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
+  { title: '曝光', dataIndex: 'exposure', width: 76 },
   // Morgandada(5)：笔记私信三数=MCC 笔记明细分析私信列（私信咨询/开口/留资数，全量快照累计）；
   // 2026-10-26 客户要求恢复笔记级「留资」列（星火资产→笔记分析→笔记明细分析·私信留资数）
   ...(isMdd.value
     ? [
-        { title: '进线', dataIndex: 'pmIn', width: 80 },
-        { title: '开口', dataIndex: 'pmOpen', width: 80 },
-        { title: '留资', dataIndex: 'pmLeads', width: 80, sorter: (a, b) => a.pmLeads - b.pmLeads },
+        { title: '进线', dataIndex: 'pmIn', width: 64 },
+        { title: '开口', dataIndex: 'pmOpen', width: 64 },
+        { title: '留资', dataIndex: 'pmLeads', width: 64, sorter: (a, b) => a.pmLeads - b.pmLeads },
       ]
     : []),
   // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
