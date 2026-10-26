@@ -53,6 +53,14 @@
           </div>
           <RightOutlined class="entry-arrow" />
         </div>
+        <div v-if="Number(brandId) === 5" class="entry-card" @click="go('/kox_df/sales/category-insight')">
+          <div class="entry-icon" style="background:#fdf2f2;color:#ef4444"><RadarChartOutlined /></div>
+          <div class="entry-body">
+            <div class="entry-title">成交选题雷达</div>
+            <div class="entry-desc">成交品类 × 留资反哺选题，看什么好卖就写什么</div>
+          </div>
+          <RightOutlined class="entry-arrow" />
+        </div>
       </div>
     </div>
   </PageWrapper>
@@ -66,6 +74,7 @@ import {
   AppstoreOutlined,
   PictureOutlined,
   BulbOutlined,
+  RadarChartOutlined,
   RightOutlined,
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';

@@ -1394,6 +1394,7 @@ model MddSalesOrder {
   channel      String? // 渠道
   productModel String?
   productName  String?
+  category     String? // 成交品类（品名经 MddCategoryRule 归类；未命中=未归类）
   color        String?
   size         String?
   quantity     Int      @default(0)
@@ -1410,7 +1411,38 @@ model MddSalesOrder {
   @@index([brandId, month])
   @@index([brandId, storeName])
   @@index([brandId, staff])
+  @@index([brandId, category])
   @@index([phone])
+}
+
+// MDD(5) 成交品类定义（成交选题雷达：品类体系，运营可维护；品类词表挂在 MddCategoryRule）
+model MddCategoryDef {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @default(5)
+  name      String // 品类名，如 针织上衣/开衫/外套/配饰
+  sort      Int      @default(0)
+  enabled   Boolean  @default(true)
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandId, name])
+}
+
+// MDD(5) 品名/标题 → 品类 映射规则（contains/exact 两种匹配，priority 升序首中命中）
+model MddCategoryRule {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @default(5)
+  pattern   String // 关键词（contains）或完整品名（exact）
+  matchType String   @default("contains") // contains | exact
+  category  String // 目标品类名（对应 MddCategoryDef.name）
+  priority  Int      @default(100)
+  enabled   Boolean  @default(true)
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId, enabled, priority])
 }
 
 model KoxRanfDaily {

@@ -211,6 +211,11 @@ const routes = [
         meta: { title: '销售看板' },
       },
       {
+        path: '/kox_df/sales/category-insight',
+        component: () => import('../views/kox/KoxMddCategoryInsightView.vue'),
+        meta: { title: '成交选题雷达' },
+      },
+      {
         path: '/kox_df/campaign-analysis/cycle-report',
         component: () => import('../views/kox/KoxCycleReportView.vue'),
         meta: { title: '周报表' },

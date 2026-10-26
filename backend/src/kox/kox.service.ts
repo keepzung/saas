@@ -23,8 +23,8 @@ const MDD_CATEGORY_RULES: [RegExp, string][] = [
   [/工厂|源头|品牌|morgandada|门店|专柜|skp/i, '品牌故事'],
   [/儿童|宝宝|亲子|男孩|女孩|baby|童/i, '亲子童装'],
 ];
-const MDD_CATEGORY_LIST = ['穿搭展示', '面料材质', '上新预告', '穿搭教程', '活动促销', '品牌故事', '亲子童装', '日常分享'];
-const mddCategoryOf = (title: string | null | undefined) => {
+export const MDD_CATEGORY_LIST = ['穿搭展示', '面料材质', '上新预告', '穿搭教程', '活动促销', '品牌故事', '亲子童装', '日常分享'];
+export const mddCategoryOf = (title: string | null | undefined) => {
   const s = (title ?? '').toLowerCase();
   for (const [re, cat] of MDD_CATEGORY_RULES) if (re.test(s)) return cat;
   return '日常分享';
