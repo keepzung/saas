@@ -833,12 +833,13 @@ export class MddSalesController {
     }
 
     // 7. 内容类型效率（8 类内容轴，回答「怎么写」）
-    const typeAgg = new Map<string, { notes: Set<string>; views: number; engagement: number; pmOpenings: number; leads: number }>();
+    const typeAgg = new Map<string, { notes: Set<string>; exposure: number; views: number; engagement: number; pmOpenings: number; leads: number }>();
     for (const s of statRows) {
       const meta = noteMeta.get(s.noteId);
       const t = mddCategoryOf(meta?.title ?? '');
-      const cur = typeAgg.get(t) ?? { notes: new Set<string>(), views: 0, engagement: 0, pmOpenings: 0, leads: 0 };
+      const cur = typeAgg.get(t) ?? { notes: new Set<string>(), exposure: 0, views: 0, engagement: 0, pmOpenings: 0, leads: 0 };
       cur.notes.add(s.noteId);
+      cur.exposure += s.exposure;
       cur.views += s.views;
       cur.engagement += s.likes + s.collects + s.comments + s.shares;
       cur.pmOpenings += s.pmOpenings;
@@ -850,6 +851,7 @@ export class MddSalesController {
       return {
         type: t,
         notes: a?.notes.size ?? 0,
+        exposure: a?.exposure ?? 0,
         views: a?.views ?? 0,
         engagement: a?.engagement ?? 0,
         pm_openings: a?.pmOpenings ?? 0,
