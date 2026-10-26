@@ -1,9 +1,14 @@
 <template>
   <PageWrapper title="销售看板" subtitle="小红书渠道销售 × 线索转化">
     <template #extra>
-      <a-button size="small" @click="showImport = true">
-        <UploadOutlined /> 导入数据
-      </a-button>
+      <a-space>
+        <a-button size="small" @click="openStaffModal">
+          <TeamOutlined /> 顾问归属
+        </a-button>
+        <a-button size="small" @click="showImport = true">
+          <UploadOutlined /> 导入数据
+        </a-button>
+      </a-space>
     </template>
 
     <a-segmented
@@ -29,24 +34,24 @@
             :allow-clear="false"
             @change="reload"
           />
-          <span class="f-label">省份：</span>
+          <span class="f-label">门店：</span>
           <a-select
-            v-model:value="province"
-            size="small"
-            style="width: 130px"
-            allow-clear
-            placeholder="全部省份"
-            :options="(facets.provinces ?? []).map((p) => ({ label: p, value: p }))"
-            @change="reload"
-          />
-          <span class="f-label">品系：</span>
-          <a-select
-            v-model:value="productLine"
+            v-model:value="storeFilter"
             size="small"
             style="width: 150px"
             allow-clear
-            placeholder="全部品系"
-            :options="(facets.product_lines ?? []).map((p) => ({ label: p, value: p }))"
+            placeholder="全部门店"
+            :options="(facets.stores ?? []).map((s) => ({ label: s, value: s }))"
+            @change="reload"
+          />
+          <span class="f-label">品类：</span>
+          <a-select
+            v-model:value="categoryFilter"
+            size="small"
+            style="width: 140px"
+            allow-clear
+            placeholder="全部品类"
+            :options="(facets.categories ?? []).map((c) => ({ label: c, value: c }))"
             @change="reload"
           />
         </div>
@@ -107,7 +112,7 @@
 
       <a-card size="small" :bordered="false" class="detail-card">
         <template #title>
-          <div class="sec-head"><span class="bar"></span>门店品系销量明细</div>
+          <div class="sec-head"><span class="bar"></span>门店品类销量明细（按订单现算，省份按门店名推断）</div>
         </template>
         <a-table
           :columns="detailColumns"
@@ -238,13 +243,70 @@
         </div>
       </div>
     </a-modal>
+
+    <!-- 顾问归属（人工别名：无矩阵号顾问的门店归属补充） -->
+    <a-modal v-model:open="staffModal.open" title="顾问归属（销售顾问 → 门店）" :footer="null" width="680px">
+      <a-alert type="info" show-icon class="import-tip"
+        message="匹配顺序：人工别名 → 矩阵号昵称后缀 → 账号使用人；保存别名后自动重算全部订单归属。" />
+      <a-alert v-if="staffModal.staffBlank" type="warning" show-icon class="import-tip"
+        :message="`另有 ${staffModal.staffBlank} 单订单「销售顾问」列为空，无法映射归属，需客户在底表补齐顾问后重新导入`" />
+
+      <div class="sec-head" style="margin: 4px 0 8px"><span class="bar"></span>未分配订单（按销量）</div>
+      <a-empty v-if="!staffModal.unassigned.length && !staffModal.loading" description="没有未分配订单" />
+      <a-table
+        v-else
+        :columns="unassignedColumns"
+        :data-source="staffModal.unassigned"
+        :loading="staffModal.loading"
+        :pagination="false"
+        row-key="staff"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'store'">
+            <a-select
+              v-model:value="staffModal.edits[record.staff]"
+              size="small"
+              style="width: 170px"
+              show-search
+              allow-clear
+              placeholder="选择门店"
+              :options="storeOptions"
+            />
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button size="small" type="link" :disabled="!staffModal.edits[record.staff]" @click="saveAlias(record.staff)">
+              保存并重算
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+
+      <div class="sec-head" style="margin: 16px 0 8px"><span class="bar"></span>已配置的别名</div>
+      <a-table
+        :columns="aliasColumns"
+        :data-source="staffModal.aliases"
+        :loading="staffModal.loading"
+        :pagination="false"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'action'">
+            <a-popconfirm title="删除后相关订单重算将回到未分配？" @confirm="removeAlias(record)">
+              <a-button size="small" type="link" danger>删除</a-button>
+            </a-popconfirm>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
   </PageWrapper>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { UploadOutlined } from '@ant-design/icons-vue';
+import { TeamOutlined, UploadOutlined } from '@ant-design/icons-vue';
 import * as echarts from 'echarts';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
@@ -254,14 +316,14 @@ import request from '../../api/request';
 const loading = ref(false);
 const tab = ref('summary');
 const monthRange = ref([dayjs().startOf('year'), dayjs()]);
-const province = ref(undefined);
-const productLine = ref(undefined);
+const storeFilter = ref(undefined);
+const categoryFilter = ref(undefined);
 const showImport = ref(false);
 const importing = ref(false);
 const fileList = ref([]);
 const importResult = ref(null);
 
-const facets = ref({ provinces: [], product_lines: [], months: [] });
+const facets = ref({ stores: [], categories: [], provinces: [], product_lines: [], months: [] });
 const cards = ref({ total_leads: 0, total_sales: 0, conversion_rate: 0 });
 const orderSummary = ref({ orders: 0, qty: 0, amount: 0, customers: 0, repurchase_rate: 0 });
 const staffRanking = ref([]);
@@ -289,6 +351,86 @@ const orderStore = ref(undefined);
 const orderStaff = ref(undefined);
 const orderKeyword = ref('');
 const orderFacets = ref({ stores: [], staff: [] });
+
+// ── 顾问归属（人工别名） ──
+const staffModal = reactive({
+  open: false,
+  loading: false,
+  aliases: [],
+  unassigned: [],
+  staffBlank: 0,
+  edits: {},
+  saving: false,
+});
+
+const storeOptions = computed(() => [
+  ...(facets.value.stores ?? []).map((s) => ({ label: s, value: s })),
+  ...(orderFacets.value.stores ?? [])
+    .filter((s) => !(facets.value.stores ?? []).includes(s))
+    .map((s) => ({ label: s, value: s })),
+]);
+
+const unassignedColumns = [
+  { title: '销售顾问', dataIndex: 'staff', width: 110 },
+  { title: '件数', dataIndex: 'qty', width: 70, align: 'right' },
+  { title: '单数', dataIndex: 'orders', width: 70, align: 'right' },
+  { title: '归属门店', key: 'store', width: 180 },
+  { title: '操作', key: 'action', width: 110 },
+];
+
+const aliasColumns = [
+  { title: '销售顾问', dataIndex: 'staff', width: 120 },
+  { title: '归属门店', dataIndex: 'storeName', width: 150 },
+  { title: '备注', dataIndex: 'remark' },
+  { title: '操作', key: 'action', width: 80 },
+];
+
+async function openStaffModal() {
+  staffModal.open = true;
+  staffModal.loading = true;
+  staffModal.edits = {};
+  try {
+    if (!facets.value.stores?.length || !orderList.value.length) {
+      await Promise.all([reload(), loadOrders()]);
+    }
+    const res = await request.get('/mdd/sales/staff-aliases');
+    staffModal.aliases = res.aliases ?? [];
+    staffModal.unassigned = res.unassigned ?? [];
+    staffModal.staffBlank = res.staff_blank_orders ?? 0;
+  } catch (e) {
+    message.error(e.message || '加载顾问归属失败');
+  } finally {
+    staffModal.loading = false;
+  }
+}
+
+async function saveAlias(staff) {
+  const storeName = staffModal.edits[staff];
+  if (!storeName) return;
+  staffModal.saving = true;
+  try {
+    await request.post('/mdd/sales/staff-aliases', { staff, storeName });
+    const res = await request.post('/mdd/sales/remap-staff');
+    message.success(`已保存映射并重算：更新 ${res.changed} 条订单归属`);
+    staffModal.edits = { ...staffModal.edits, [staff]: undefined };
+    await Promise.all([openStaffModal(), reload(), loadOrders()]);
+  } catch (e) {
+    message.error(e.message || '保存失败');
+  } finally {
+    staffModal.saving = false;
+  }
+}
+
+async function removeAlias(alias) {
+  try {
+    await request.delete(`/mdd/sales/staff-aliases/${alias.id}`);
+    const res = await request.post('/mdd/sales/remap-staff');
+    message.success(`已删除并重算：更新 ${res.changed} 条订单归属`);
+    await Promise.all([openStaffModal(), reload(), loadOrders()]);
+  } catch (e) {
+    message.error(e.message || '删除失败');
+  }
+}
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
 const fmtDay = (v) => (v ? dayjs(v).format('MM-DD') : '-');
@@ -342,8 +484,8 @@ const orderPager = computed(() => ({
 const monthParams = () => ({
   startMonth: monthRange.value?.[0]?.format('YYYY-MM'),
   endMonth: monthRange.value?.[1]?.format('YYYY-MM'),
-  ...(province.value ? { province: province.value } : {}),
-  ...(productLine.value ? { productLine: productLine.value } : {}),
+  ...(storeFilter.value ? { storeName: storeFilter.value } : {}),
+  ...(categoryFilter.value ? { category: categoryFilter.value } : {}),
 });
 
 const orderParams = () => ({

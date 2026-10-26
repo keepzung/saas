@@ -1445,6 +1445,19 @@ model MddCategoryRule {
   @@index([brandId, enabled, priority])
 }
 
+// MDD(5) 销售顾问 → 门店 人工别名（订单顾问列简称/无矩阵号顾问的补充归属，优先级高于昵称后缀/使用人匹配）
+model MddStaffAlias {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @default(5)
+  staff     String // 订单「销售顾问」列原文（如 许莉莉；支持 A/B 多人写法，按人名逐一命中）
+  storeName String // 归属门店（规范化门店名）
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandId, staff])
+}
+
 model KoxRanfDaily {
   id           Int      @id @default(autoincrement())
   brandId      Int      @default(6)

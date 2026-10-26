@@ -46,13 +46,16 @@ export class MddSalesController {
     private readonly mddCategory: MddCategoryService,
   ) {}
 
-  /** 销售顾问 → 门店 映射：KOS 昵称后缀 → 使用人（基线 operatorName）；均未命中返回 null（未分配） */
+  /** 销售顾问 → 门店 映射：人工别名 → KOS 昵称后缀 → 使用人（基线 operatorName）；均未命中 = 未分配 */
   private async staffStoreMaps() {
-    const accs = await this.prisma.kosAccount.findMany({
-      where: { brandId: 5 },
-      select: { nickname: true, operatorName: true, storeName: true, status: true },
-      orderBy: { status: 'asc' },
-    });
+    const [accs, aliases] = await Promise.all([
+      this.prisma.kosAccount.findMany({
+        where: { brandId: 5 },
+        select: { nickname: true, operatorName: true, storeName: true, status: true },
+        orderBy: { status: 'asc' },
+      }),
+      this.prisma.mddStaffAlias.findMany({ where: { brandId: 5 } }),
+    ]);
     const bySuffix = new Map<string, string>();
     const byOperator = new Map<string, string>();
     for (const a of accs) {
@@ -64,19 +67,43 @@ export class MddSalesController {
       const m = a.nickname.match(/[-－]\s*([^-－]+)\s*$/);
       if (m?.[1]?.trim() && !bySuffix.has(m[1].trim())) bySuffix.set(m[1].trim(), store);
     }
-    return { bySuffix, byOperator };
+    const byAlias = new Map<string, string>();
+    for (const a of aliases) {
+      const store = canonicalMddStore(a.storeName);
+      if (a.staff.trim() && store) byAlias.set(a.staff.trim(), store);
+    }
+    return { bySuffix, byOperator, byAlias };
   }
 
   /** 销售顾问（支持 "A/B" 多人）→ 门店；均未命中 = 未分配 */
-  private mapStaffStore(staff: string | null | undefined, maps: { bySuffix: Map<string, string>; byOperator: Map<string, string> }): string {
+  private mapStaffStore(
+    staff: string | null | undefined,
+    maps: { bySuffix: Map<string, string>; byOperator: Map<string, string>; byAlias?: Map<string, string> },
+  ): string {
     const s = String(staff ?? '').trim();
     if (!s) return '未分配';
     const parts = s.split(/[/、,，]/).map((x) => x.trim()).filter(Boolean);
     for (const part of parts) {
-      const hit = maps.bySuffix.get(part) ?? maps.byOperator.get(part);
+      const hit = maps.byAlias?.get(part) ?? maps.bySuffix.get(part) ?? maps.byOperator.get(part);
       if (hit) return hit;
     }
     return '未分配';
+  }
+
+  /** 门店 → 省份（按门店名前缀推断；未匹配返回 null） */
+  private provinceOfStore(store: string): string | null {
+    const rules: [RegExp, string][] = [
+      [/上海/, '上海'],
+      [/南京/, '江苏'],
+      [/北京/, '北京'],
+      [/成都/, '四川'],
+      [/深圳/, '广东'],
+      [/武汉|武商/, '湖北'],
+      [/杭州/, '浙江'],
+      [/西安/, '陕西'],
+    ];
+    for (const [re, prov] of rules) if (re.test(store)) return prov;
+    return null;
   }
 
   /** Excel 导入（前端解析后按行提交；月+门店+品系 upsert） */
@@ -305,7 +332,9 @@ export class MddSalesController {
           ? Math.round(([...repurchasePhones].length / phoneSet.size) * 1000) / 10
           : 0,
       },
-      staff_ranking: [...byStaff.values()].sort((a, b) => b.qty - a.qty),
+      staff_ranking: [...byStaff.values()].sort(
+        (a, b) => Number(a.staff === '未分配') - Number(b.staff === '未分配') || b.qty - a.qty,
+      ),
       facets: {
         stores: [...new Set(all.map((r) => r.storeName).filter(Boolean))].sort(),
         staff: [...new Set(all.map((r) => r.staff).filter(Boolean))].sort(),
@@ -355,7 +384,7 @@ export class MddSalesController {
     return { ok: true };
   }
 
-  /** 看板：三卡（总线索/总销量/总转化率）+ 月度×品系趋势 + 品系排行 + 门店明细 */
+  /** 看板：三卡（总线索/总销量/总转化率）+ 月度×品类趋势 + 品类排行 + 门店明细（订单现算，无订单回退月度汇总） */
   @Get('dashboard')
   async dashboard(
     @Query()
@@ -364,6 +393,8 @@ export class MddSalesController {
       endMonth?: string;
       province?: string;
       productLine?: string;
+      storeName?: string;
+      category?: string;
     },
   ) {
     const today = monthKey(new Date());
@@ -384,8 +415,18 @@ export class MddSalesController {
 
     // 订单级明细（9月起客户底表）：有数据时销量/转化卡以订单为准，与「订单明细」tab 同源
     const orderRows = await this.prisma.mddSalesOrder.findMany({
+      where: {
+        brandId: 5,
+        month: { gte: startMonth, lte: endMonth },
+        ...(query.storeName ? { storeName: query.storeName } : {}),
+        ...(query.category ? { category: query.category } : {}),
+      },
+      select: { quantity: true, amount: true, staff: true, storeName: true, productName: true, category: true, repurchase: true, phone: true, date: true, month: true },
+    });
+    // 筛选项来源（不随门店/品类筛选联动；无订单时前端走旧品系 facets）
+    const allOrderFacets = await this.prisma.mddSalesOrder.findMany({
       where: { brandId: 5, month: { gte: startMonth, lte: endMonth } },
-      select: { quantity: true, amount: true, staff: true, storeName: true, productName: true, repurchase: true, phone: true, date: true },
+      select: { storeName: true, category: true },
     });
     const orderQty = orderRows.reduce((a, r) => a + n(r.quantity), 0);
     const orderAmount =
@@ -437,27 +478,91 @@ export class MddSalesController {
     const totalSales = useOrders ? orderQty : rows.reduce((a, r) => a + n(r.quantity), 0);
     const conversion = totalLeads ? Math.round((totalSales / totalLeads) * 1000) / 10 : 0;
 
-    // 月度 × 品系趋势（TOP8 品系按总量）
-    const byProduct = new Map<string, number>();
-    for (const r of rows) byProduct.set(r.productLine, (byProduct.get(r.productLine) ?? 0) + n(r.quantity));
-    const topProducts = [...byProduct.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([p]) => p);
-    const monthList = [...new Set(rows.map((r) => r.month))].sort();
-    const trend = monthList.map((m) => {
-      const point: Record<string, unknown> = { month: m };
-      for (const p of topProducts) {
-        point[p] = rows
-          .filter((r) => r.month === m && r.productLine === p)
-          .reduce((a, r) => a + n(r.quantity), 0);
+    // 品类维度趋势/排行/门店明细：有订单明细时现算（品类=品名关键词归类），否则回退月度汇总品系
+    let trend: Record<string, unknown>[] = [];
+    let ranking: { name: string; quantity: number }[] = [];
+    let detail: Record<string, unknown>[] = [];
+    let topCats: string[] = [];
+    if (useOrders) {
+      const byCat = new Map<string, number>();
+      for (const r of orderRows) {
+        const cat = r.category ?? '未归类';
+        byCat.set(cat, (byCat.get(cat) ?? 0) + n(r.quantity));
       }
-      return point;
-    });
+      topCats = [...byCat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([c]) => c);
+      const monthList = [...new Set(orderRows.map((r) => r.month))].sort();
+      trend = monthList.map((m) => {
+        const point: Record<string, unknown> = { month: m };
+        for (const c of topCats) {
+          point[c] = orderRows
+            .filter((r) => r.month === m && (r.category ?? '未归类') === c)
+            .reduce((a, r) => a + n(r.quantity), 0);
+        }
+        return point;
+      });
+      ranking = [...byCat.entries()].map(([name, quantity]) => ({ name, quantity })).sort((a, b) => b.quantity - a.quantity);
 
-    const ranking = [...byProduct.entries()]
-      .map(([productLine, qty]) => ({ product_line: productLine, quantity: qty }))
-      .sort((a, b) => b.quantity - a.quantity);
+      // 门店明细（矩阵：门店 × 品类；省份按门店名推断）
+      const byStore = new Map<string, { store: string; province: string | null; total: number; byCat: Map<string, number> }>();
+      for (const r of orderRows) {
+        const store = r.storeName || '未分配';
+        const cur = byStore.get(store) ?? { store, province: this.provinceOfStore(store), total: 0, byCat: new Map<string, number>() };
+        cur.total += n(r.quantity);
+        const cat = r.category ?? '未归类';
+        cur.byCat.set(cat, (cur.byCat.get(cat) ?? 0) + n(r.quantity));
+        byStore.set(store, cur);
+      }
+      detail = [...byStore.values()]
+        .map((s) => {
+          const row: Record<string, unknown> = { store: s.store, province: s.province, total: s.total };
+          for (const c of topCats) row[c] = s.byCat.get(c) ?? 0;
+          return row;
+        })
+        .sort((a, b) => (b.total as number) - (a.total as number));
+    } else {
+      // 月度 × 品系趋势（TOP8 品系按总量，旧月度汇总口径）
+      const byProduct = new Map<string, number>();
+      for (const r of rows) byProduct.set(r.productLine, (byProduct.get(r.productLine) ?? 0) + n(r.quantity));
+      const topProducts = [...byProduct.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([p]) => p);
+      const monthList = [...new Set(rows.map((r) => r.month))].sort();
+      trend = monthList.map((m) => {
+        const point: Record<string, unknown> = { month: m };
+        for (const p of topProducts) {
+          point[p] = rows
+            .filter((r) => r.month === m && r.productLine === p)
+            .reduce((a, r) => a + n(r.quantity), 0);
+        }
+        return point;
+      });
+      ranking = [...byProduct.entries()].map(([name, quantity]) => ({ name, quantity })).sort((a, b) => b.quantity - a.quantity);
+
+      const byStore = new Map<
+        string,
+        { store: string; province: string | null; total: number; byProduct: Map<string, number> }
+      >();
+      for (const r of rows) {
+        const cur =
+          byStore.get(r.storeName) ??
+          { store: r.storeName, province: r.province, total: 0, byProduct: new Map<string, number>() };
+        cur.total += n(r.quantity);
+        cur.byProduct.set(r.productLine, (cur.byProduct.get(r.productLine) ?? 0) + n(r.quantity));
+        byStore.set(r.storeName, cur);
+      }
+      detail = [...byStore.values()]
+        .map((s) => {
+          const row: Record<string, unknown> = {
+            store: s.store,
+            province: s.province,
+            total: s.total,
+          };
+          for (const p of topProducts) row[p] = s.byProduct.get(p) ?? 0;
+          return row;
+        })
+        .sort((a, b) => (b.total as number) - (a.total as number));
+    }
 
     // 订单品名销量排行（按订单明细 productName，前 20）
     const byName = new Map<string, number>();
@@ -485,31 +590,6 @@ export class MddSalesController {
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
       .map(([date, v]) => ({ date, qty: v.qty, amount: Math.round(v.amount * 100) / 100 }));
 
-    // 门店明细（矩阵：门店 × 品系）
-    const byStore = new Map<
-      string,
-      { store: string; province: string | null; total: number; byProduct: Map<string, number> }
-    >();
-    for (const r of rows) {
-      const cur =
-        byStore.get(r.storeName) ??
-        { store: r.storeName, province: r.province, total: 0, byProduct: new Map() };
-      cur.total += n(r.quantity);
-      cur.byProduct.set(r.productLine, (cur.byProduct.get(r.productLine) ?? 0) + n(r.quantity));
-      byStore.set(r.storeName, cur);
-    }
-    const detail = [...byStore.values()]
-      .map((s) => {
-        const row: Record<string, unknown> = {
-          store: s.store,
-          province: s.province,
-          total: s.total,
-        };
-        for (const p of topProducts) row[p] = s.byProduct.get(p) ?? 0;
-        return row;
-      })
-      .sort((a, b) => (b.total as number) - (a.total as number));
-
     return {
       start_month: startMonth,
       end_month: endMonth,
@@ -518,8 +598,8 @@ export class MddSalesController {
         total_sales: totalSales,
         conversion_rate: conversion,
         scope_note: useOrders
-          ? `销量=订单明细（${orderRows.length} 单/${orderQty} 台/¥${orderAmount.toLocaleString()}）；线索=来鼓留资会话；转化率=销量÷线索`
-          : '销量=MDD 提供的小红书渠道销售清单；线索=来鼓留资会话（账户维度，随月份联动）；转化率=销量÷线索',
+          ? `销量=订单明细（${orderRows.length} 单/${orderQty} 台/¥${orderAmount.toLocaleString()}）；品类=品名关键词规则归类；门店=销售顾问映射（人工别名优先）；省份=按门店名推断；线索=来鼓留资会话；转化率=销量÷线索`
+          : '销量=MDD 提供的小红书渠道销售清单（月度汇总口径）；线索=来鼓留资会话（账户维度，随月份联动）；转化率=销量÷线索',
       },
       order_summary: {
         orders: orderRows.length,
@@ -530,17 +610,29 @@ export class MddSalesController {
           ? Math.round(([...repurchasePhones].length / phoneSet.size) * 1000) / 10
           : 0,
       },
-      staff_ranking: [...staffRankingMap.values()].sort((a, b) => b.qty - a.qty),
+      staff_ranking: [...staffRankingMap.values()].sort(
+        (a, b) => Number(a.staff === '未分配') - Number(b.staff === '未分配') || b.qty - a.qty,
+      ),
       trend,
       daily_trend: dailyTrend,
       ranking,
       order_ranking: orderRanking,
       detail,
-      facets: {
-        provinces: provinces.map((x) => x.province).filter(Boolean),
-        product_lines: productLines.map((x) => x.productLine).filter(Boolean),
-        months: months.map((x) => x.month).sort(),
-      },
+      facets: useOrders
+        ? {
+            stores: [...new Set(allOrderFacets.map((r) => r.storeName).filter(Boolean))].sort(),
+            categories: [...new Set(allOrderFacets.map((r) => r.category).filter(Boolean))].sort(),
+            provinces: [],
+            product_lines: [],
+            months: months.map((x) => x.month).sort(),
+          }
+        : {
+            stores: [],
+            categories: [],
+            provinces: provinces.map((x) => x.province).filter(Boolean),
+            product_lines: productLines.map((x) => x.productLine).filter(Boolean),
+            months: months.map((x) => x.month).sort(),
+          },
       empty_hint: rows.length || orderRows.length
         ? null
         : '暂无销售数据：请通过「导入数据」上传 9月dada小红书销售明细汇总.xlsx（订单明细）或月度汇总清单',
@@ -1037,5 +1129,65 @@ export class MddSalesController {
     const res = await this.mddCategory.reclassifyOrders();
     this.mddCategory.invalidate();
     return res;
+  }
+
+  // ───────────────────────── 顾问归属（人工别名） ─────────────────────────
+
+  /** 顾问归属：别名列表 + 未分配清单（顾问列为空的订单单独计数，无法映射） */
+  @Get('staff-aliases')
+  async staffAliases() {
+    const [aliases, unGrouped, blankCount] = await Promise.all([
+      this.prisma.mddStaffAlias.findMany({ where: { brandId: 5 }, orderBy: { staff: 'asc' } }),
+      this.prisma.mddSalesOrder.groupBy({
+        by: ['staff'],
+        _count: true,
+        _sum: { quantity: true },
+        where: { brandId: 5, storeName: '未分配', staff: { not: null } },
+        orderBy: { _sum: { quantity: 'desc' } },
+      }),
+      this.prisma.mddSalesOrder.count({ where: { brandId: 5, storeName: '未分配', staff: null } }),
+    ]);
+    return {
+      aliases,
+      unassigned: unGrouped.map((u) => ({ staff: u.staff, orders: u._count, qty: u._sum.quantity ?? 0 })),
+      staff_blank_orders: blankCount,
+    };
+  }
+
+  @Post('staff-aliases')
+  async upsertStaffAlias(@Body() dto: { staff?: string; storeName?: string; remark?: string }) {
+    const staff = String(dto.staff ?? '').trim();
+    const storeName = canonicalMddStore(dto.storeName);
+    if (!staff || !storeName) throw new BadRequestException('顾问名与门店必填');
+    return this.prisma.mddStaffAlias.upsert({
+      where: { brandId_staff: { brandId: 5, staff } },
+      create: { brandId: 5, staff, storeName, remark: dto.remark ? String(dto.remark) : null },
+      update: { storeName, remark: dto.remark ? String(dto.remark) : null },
+    });
+  }
+
+  @Delete('staff-aliases/:id')
+  async deleteStaffAlias(@Param('id', ParseIntPipe) id: number) {
+    await this.prisma.mddStaffAlias.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  /** 按当前规则（人工别名→昵称后缀→使用人）重算全部订单门店归属 */
+  @Post('remap-staff')
+  async remapStaff() {
+    const maps = await this.staffStoreMaps();
+    const orders = await this.prisma.mddSalesOrder.findMany({
+      where: { brandId: 5 },
+      select: { id: true, staff: true, storeName: true },
+    });
+    let changed = 0;
+    for (const o of orders) {
+      const next = this.mapStaffStore(o.staff, maps);
+      if (next !== (o.storeName ?? '未分配')) {
+        await this.prisma.mddSalesOrder.update({ where: { id: o.id }, data: { storeName: next } });
+        changed += 1;
+      }
+    }
+    return { total: orders.length, changed };
   }
 }
