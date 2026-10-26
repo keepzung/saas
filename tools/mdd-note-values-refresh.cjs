@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // MDD(brand5) KoxNote 数值列高频刷新：用与星火后台/导出一致的轻量查询（员工笔记+发布窗口，无数据窗口），
-// 只更新数值列（曝光/阅读/互动/自然列），元数据由每日重同步维护。目的：看板数字与平台导出对齐。
-// 发布窗口=滚动近 60 天（covers 客户核对窗口，勿用固定起点否则窗口后移后老笔记不再刷新）。
+// 只更新数值列（曝光/阅读/互动/自然列/私信三数），元数据由每日重同步维护。目的：看板数字与平台导出对齐。
+// 发布窗口=滚动近 365 天（视图上限 366）覆盖全量笔记——老笔记的私信数会被平台滞后回填，窗口过窄会漏刷。
 // 用法: node mdd-note-values-refresh.cjs   （读 SparkOrgConfig.brandId=5 cookie；幂等；成败均写 SparkSyncLog）
 const fs = require('fs');
 const path = require('path');
@@ -34,10 +34,10 @@ async function pullAll(cookie) {
     const body = {
       viewAlias: 'mcc_assets_creativityContent_noteAnalysisView', chart: 'noteList', sorts: [],
       dynamicTargets: TARGETS,
-      page: { pageNo: page, pageSize: 100 },
+      page: { pageNo: page, pageSize: 500 },
       frontFilterList: [
         { filterField: 'time_dim', filterFieldName: '时间维度', filterType: 20, selectFilter: { selectType: 10, selectShowType: 0, valueSource: 0, selectLabels: [mk('all_key')] } },
-        { filterField: 'note_publish_date', filterFieldName: '笔记发布日期', filterType: 10, timeFilter: { pattern: 10, timeShowType: 11, disableRange: 1, limitMax: 366, quickDates: [6], values: [dayStr(-60), dayStr(0)] } },
+        { filterField: 'note_publish_date', filterFieldName: '笔记发布日期', filterType: 10, timeFilter: { pattern: 10, timeShowType: 11, disableRange: 1, limitMax: 366, quickDates: [6], values: [dayStr(-365), dayStr(0)] } },
         { filterField: 'is_rtb_adver', filterFieldName: '推广状态', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [mk('全部')] } },
         { filterField: 'content_type', filterFieldName: '笔记来源', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [mk('员工笔记')] } },
         { filterField: 'note_type', filterFieldName: '笔记类型', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [mk('全部')] } },
@@ -53,7 +53,7 @@ async function pullAll(cookie) {
     const d = j.data?.detailListVo ?? {};
     const list = d.detailDataList ?? d.detailVoList ?? [];
     rows.push(...list);
-    if (rows.length >= (d.total ?? 0) || list.length < 100) break;
+    if (rows.length >= (d.total ?? 0) || list.length < 500) break;
   }
   return rows;
 }
