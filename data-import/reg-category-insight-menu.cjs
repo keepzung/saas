@@ -4,10 +4,10 @@
 const { PrismaClient } = require('/opt/saas/backend/node_modules/@prisma/client');
 const p = new PrismaClient();
 (async () => {
-  // 1. 找运营分析组（category，kox 组）
-  const opGroup = await p.moduleNode.findFirst({ where: { name: '运营分析', type: 'category' } });
-  if (!opGroup) { console.error('未找到 运营分析 category 节点'); process.exit(1); }
-  console.log('运营分析组 id=', opGroup.id);
+  // 1. 找运营分析组（线上为 group 类型，key=m_kox_g0；兼容 category）
+  const opGroup = await p.moduleNode.findFirst({ where: { name: '运营分析', type: { in: ['group', 'category'] } } });
+  if (!opGroup) { console.error('未找到 运营分析 节点'); process.exit(1); }
+  console.log('运营分析组 id=', opGroup.id, 'type=', opGroup.type);
 
   // 2. upsert 成交选题雷达节点（排在销售看板后）
   const existing = await p.moduleNode.findUnique({ where: { key: 'mdd_category_insight' } });
