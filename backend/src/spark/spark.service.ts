@@ -979,11 +979,25 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       if (rows.length >= total || !data.rows.length) break;
     }
     let upserted = 0;
+    // 改名检测：线索分析的 sub_user_name 是平台当前昵称，UID 命中账号但名字不一致 → 记入同步日志
+    const accountsC = await this.prisma.kosAccount.findMany({
+      where: { brandId: org.brandId },
+      select: { id: true, nickname: true, authorId: true },
+    });
+    const byAuthorUidC = new Map(
+      accountsC.filter((a) => /^[0-9a-f]{24}$/.test(a.authorId)).map((a) => [a.authorId, a]),
+    );
+    const renamesC = new Map<string, string>();
     for (const r of rows) {
       const m = this.staffRowMap(r);
       const subUserId = str(m.get('sub_user_id'));
       const dayStr = str(m.get('date_key')) || statDate;
       if (!subUserId) continue;
+      const accC = byAuthorUidC.get(subUserId);
+      const subUserName = str(m.get('sub_user_name'));
+      if (accC && accC.nickname && subUserName && accC.nickname !== subUserName && !renamesC.has(subUserId)) {
+        renamesC.set(subUserId, `${accC.nickname}→${subUserName}`);
+      }
       const day = new Date(`${dayStr}T00:00:00.000Z`);
       const data = {
         subUserName: str(m.get('sub_user_name')) || null,
@@ -1009,7 +1023,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
-      message: `total=${total}, day=${statDate}`,
+      message: `total=${total}, day=${statDate}${renamesC.size ? ` | 账号改名:${[...renamesC.values()].join('、')}` : ''}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
