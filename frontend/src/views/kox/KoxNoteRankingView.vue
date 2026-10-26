@@ -200,6 +200,7 @@
         :columns="columns"
         :data-source="tableRows"
         :loading="loading"
+        :scroll="{ x: 1260 }"
         :pagination="{
           total: tableTotal,
           current: page,
@@ -464,15 +465,15 @@ const modelOptions = computed(() =>
 );
 
 const columns = computed(() => [
-  { key: 'title', title: '标题', width: 300 },
-  { title: '发布者', dataIndex: 'author', width: 130, ellipsis: true },
-  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 220 },
-  { title: '点赞', dataIndex: 'digg', width: 80, sorter: (a, b) => a.digg - b.digg },
-  { title: '评论', dataIndex: 'comment', width: 80, sorter: (a, b) => a.comment - b.comment },
-  { title: '分享', dataIndex: 'share', width: 80 },
-  { title: '收藏', dataIndex: 'collect', width: 80 },
-  { title: '阅读', dataIndex: 'view', width: 100, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
-  { title: '曝光', dataIndex: 'exposure', width: 110 },
+  { key: 'title', title: '标题', width: 250 },
+  { title: '发布者', dataIndex: 'author', width: 120, ellipsis: true },
+  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 180 },
+  { title: '点赞', dataIndex: 'digg', width: 75, sorter: (a, b) => a.digg - b.digg },
+  { title: '评论', dataIndex: 'comment', width: 75, sorter: (a, b) => a.comment - b.comment },
+  { title: '分享', dataIndex: 'share', width: 75 },
+  { title: '收藏', dataIndex: 'collect', width: 75 },
+  { title: '阅读', dataIndex: 'view', width: 90, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
+  { title: '曝光', dataIndex: 'exposure', width: 95 },
   // Morgandada(5)：笔记私信三数=MCC 笔记明细分析私信列（私信咨询/开口/留资数，全量快照累计）；
   // 2026-10-26 客户要求恢复笔记级「留资」列（星火资产→笔记分析→笔记明细分析·私信留资数）
   ...(isMdd.value
