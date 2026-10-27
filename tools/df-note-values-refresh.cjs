@@ -103,7 +103,10 @@ async function pullAll(cookie) {
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&amp;/g, '&')
-      .replace(/(\s*#[^\s#]+)+\s*$/g, '')
+      .replace(/\[话题\]#/g, '')
+      .replace(/^(?:\s*#[^\s#]+)+\s*/, '')
+      .replace(/(?:\s*#[^\s#]+)+\s*$/g, '')
+      .replace(/\s+#\s*$/, '')
       .trim();
   let filled = 0, skipped = 0;
   const pending = await p.koxNote.findMany({
@@ -134,7 +137,6 @@ async function pullAll(cookie) {
     await new Promise((r) => setTimeout(r, 400)); // 限速防风控
   }
   if (pending.length) console.log(`titles backfilled: filled=${filled} skipped=${skipped}`);
-
   const finalMsg = `${msg}; titles: pending=${pending.length} filled=${filled} skipped=${skipped}`;
   await p.sparkSyncLog.create({ data: { brandId: BRAND, syncType: 'note_values_refresh', statDate: todayKey(), status: 'success', fetched: rows.length, upserted: updated, message: finalMsg.slice(0, 490) } }).catch(() => {});
 })().catch(async (e) => {
