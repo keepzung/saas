@@ -135,10 +135,11 @@
           <a-select
             v-model:value="selAccount"
             size="small"
-            style="width: 240px"
+            style="width: 260px"
             show-search
+            :virtual="false"
             option-filter-prop="label"
-            placeholder="选择 KOS 账号"
+            placeholder="输入昵称搜索 / 下拉选择账号"
             :options="accountOptions"
           />
           <span v-if="selAccountInfo" class="muted mini">
@@ -161,7 +162,7 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'title'">
-              <a :href="record.url || 'javascript:;'" target="_blank" class="note-link">{{ record.title || '(无标题)' }}</a>
+              <a :href="xhsSearch(record.title)" target="_blank" class="note-link" title="在小红书搜索该标题（需登录小红书网页版）">{{ record.title || '(无标题)' }}</a>
               <a-tag v-if="record.category !== '未归类'" class="mini">{{ record.category }}</a-tag>
             </template>
             <template v-else-if="column.key === 'content'">
@@ -389,14 +390,11 @@
         message="该品类暂无标题命中笔记——正是全新选题空间，建议从成交爆品卖点切入创作"
       />
       <div v-else class="note-list">
-        <a
-          v-for="nt in noteModal.notes"
-          :key="nt.noteId"
-          :href="nt.url || 'javascript:;'"
-          target="_blank"
-          class="note-row"
-        >
-          <div class="note-title">{{ nt.title || '(无标题)' }}</div>
+        <div v-for="nt in noteModal.notes" :key="nt.noteId" class="note-row">
+          <div class="note-title">
+            <a :href="xhsSearch(nt.title)" target="_blank" title="在小红书搜索该标题（需登录小红书网页版）">{{ nt.title || '(无标题)' }}</a>
+            <a v-if="nt.url" :href="nt.url" target="_blank" class="note-raw-link" title="笔记原文直链（token 可能过期打不开）">原文</a>
+          </div>
           <div class="note-meta">
             <span>{{ nt.author || '匿名' }}</span>
             <a-tag color="green" class="mini">留资 {{ nt.leads }}</a-tag>
@@ -404,7 +402,7 @@
             <a-tag class="mini">开口 {{ nt.pmOpenings }}</a-tag>
             <a-tag class="mini">阅读 {{ fmt(nt.views) }}</a-tag>
           </div>
-        </a>
+        </div>
       </div>
     </a-modal>
 
@@ -489,6 +487,8 @@ const notesFor = computed(() => {
 const allScope = computed(() => ({ ...(kos.value.scope_note ?? {}), ...(scopeNote.value ?? {}) }));
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
+// 小红书笔记直链的 xsec_token 会过期（客户端常被 300012 安全限制拦），标题搜索页稳定可达
+const xhsSearch = (t) => `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent((t ?? '').replace(/[✨🔥🍂👍 embrcj]/gu, '').trim() || '小红书')}`;
 
 const kosColumns = [
   { title: 'KOS 账号', key: 'nickname', dataIndex: 'nickname', width: 220, fixed: 'left' },
@@ -1210,6 +1210,13 @@ onBeforeUnmount(() => {
 
 .note-row:hover .note-title {
   color: #2563eb;
+}
+
+.note-raw-link {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .note-meta {
