@@ -1025,6 +1025,7 @@ export class KoxService {
             n.comments,
             n.shares,
             n.followCount,
+            brandId,
           );
           noteByDate.set(key, cur);
         }
@@ -1089,6 +1090,7 @@ export class KoxService {
               view_sum: v.view_sum,
               exposure_sum: v.exposure_sum,
               interaction_sum: v.interaction_sum,
+              ces_sum: v.ces_sum,
               ...campPart(campByDate.get(key)),
             });
           }
@@ -1529,7 +1531,7 @@ export class KoxService {
         g.interaction_sum += n.likes + n.collects + n.comments + n.shares;
         g.digg_sum += n.likes;
         g.follow_sum += n.followCount;
-        g.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
+        g.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount, brandId);
       });
       // 门店账号明细（前端展开行）：账号 → 发布数/曝光；无 authorUrl 时用创作者 UID 拼小红书主页链接
       const profileUrl = /^[\da-f]{16,}$/i.test(acct.authorId)
@@ -3519,6 +3521,7 @@ export class KoxService {
             n.comments,
             n.shares,
             n.followCount,
+            brandId,
           );
           // Morgandada(5)：私信三数由下方员工矩阵叠加层单独累计（此处再加会双计——历史 bug，
           // metric_note 只声明员工矩阵口径）；私信线索=线索分析（叠加层）
@@ -3679,9 +3682,9 @@ export class KoxService {
       metric_note:
         brandId === 6
           ? '笔记数量/有发布=聚光「商业内容管理」按发布时间窗口去重（A）；曝光/阅读/互动=专业号「数据中心-员工数据」按窗口取数（E，逐日求和优先/三档快照回退）；私信进线/开口/留资=客户管理（旧版）获客工具统计按日×账号求和（G，留资含全部组件）；区域/标签归属按 210 账号基线，未匹配不入表；排序默认留资数从多到少，「全国」置底'
-          : brandId === 5
-            ? '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合，MorganDaDa 官号主账户行单独成行；CES=赞1+藏1+评4+享4+关注8'
-            : '私信进线/开口/留资=聚光笔记报表私信字段按窗口求和；自然线索=未投流笔记私信留资推导（广告线索无独立管道）；CES=赞1+藏1+评4+享4+关注8',
+            : brandId === 5
+              ? '私信进线/开口=员工矩阵→员工数据明细按窗口逐日求和（2026-10-22 口径）；私信线索=线索管理→线索分析「新增线索」合计（广告+自然，按归属账户 UID，2026-10-23 口径）；广告/自然线索=同源拆分（2026-10-22 口径）；Morgandada 区域行=按账号归属城市聚合，MorganDaDa 官号主账户行单独成行；CES=赞1+藏1+评4+享4+关注8'
+              : `私信进线/开口/留资=聚光笔记报表私信字段按窗口求和；自然线索=未投流笔记私信留资推导（广告线索无独立管道）；CES=赞1+藏1+评4+享4+关注${brandId === 7 ? '4（东风口径 2026-10-27）' : '8'}`,
       regions: sortRows([...groups.entries()].map(mapRow)),
       tags: sortRows([...tagGroups.entries()].map(mapRow)),
       tier_meta: KOS_TIERS.map((t) => ({
@@ -3913,7 +3916,7 @@ export class KoxService {
         a.comments += n.comments;
         a.shares += n.shares;
         a.fans_gained += n.followCount;
-        a.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount);
+        a.ces += calcCes(n.likes, n.collects, n.comments, n.shares, n.followCount, brandId);
       });
     }
 

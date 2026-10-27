@@ -52,15 +52,17 @@ export function classifyTier(leads: number, days: number): KosTierMeta {
   return tierOfWeekly(toWeekly(leads, days));
 }
 
-/** 小红书通用 CES：点赞×1 + 收藏×1 + 评论×4 + 分享×4 + 关注×8 */
+/** 小红书通用 CES：点赞×1 + 收藏×1 + 评论×4 + 分享×4 + 关注×8；东风(7) 客户口径关注×4（2026-10-27） */
 export function calcCes(
   likes = 0,
   collects = 0,
   comments = 0,
   shares = 0,
   follows = 0,
+  brandId?: number,
 ): number {
-  return likes + collects + comments * 4 + shares * 4 + follows * 8;
+  const followWeight = brandId === 7 ? 4 : 8;
+  return likes + collects + comments * 4 + shares * 4 + follows * followWeight;
 }
 
 @Injectable()
