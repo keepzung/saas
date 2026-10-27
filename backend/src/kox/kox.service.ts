@@ -2425,6 +2425,7 @@ export class KoxService {
     accountTag?: string;
     regionName?: string;
     metric?: string;
+    order?: string;
     page?: string;
     page_size?: string;
   }) {
@@ -2444,7 +2445,10 @@ export class KoxService {
       pmLeads: { pmLeads: 'desc' },
       publishTime: { publishTime: 'desc' },
     };
-    const orderBy = METRICS[query.metric ?? ''] ?? METRICS.views;
+    // order=asc 时按所选指标升序（列头升序排列用，2026-10-27）
+    const dir = query.order === 'asc' ? 'asc' : 'desc';
+    const metricKey = query.metric ?? '';
+    const orderBy = METRICS[metricKey] ? { [metricKey]: dir } : METRICS.views;
 
     const accountInclude = {
       account: {

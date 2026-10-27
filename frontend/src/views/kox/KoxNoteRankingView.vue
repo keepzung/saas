@@ -415,6 +415,7 @@ async function loadRegionFacets() {
   }
 }
 const metric = ref('views');
+const order = ref('descend');
 const mode = ref('loading'); // 'loading' | 'real' | 'demo'
 const realTotal = ref(0);
 const realFacets = ref({ categories: [], models: [] });
@@ -468,25 +469,25 @@ const columns = computed(() => [
   { key: 'title', title: '标题', width: 200 },
   { title: '发布者', dataIndex: 'author', width: 100, ellipsis: true },
   { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 140 },
-  { title: '点赞', dataIndex: 'digg', width: 62, sorter: (a, b) => a.digg - b.digg },
-  { title: '评论', dataIndex: 'comment', width: 62, sorter: (a, b) => a.comment - b.comment },
-  { title: '分享', dataIndex: 'share', width: 62 },
-  { title: '收藏', dataIndex: 'collect', width: 62 },
-  { title: '阅读', dataIndex: 'view', width: 72, sorter: (a, b) => a.view - b.view, defaultSortOrder: 'descend' },
-  { title: '曝光', dataIndex: 'exposure', width: 76 },
+  { title: '点赞', dataIndex: 'digg', width: 62, sorter: true },
+  { title: '评论', dataIndex: 'comment', width: 62, sorter: true },
+  { title: '分享', dataIndex: 'share', width: 62, sorter: true },
+  { title: '收藏', dataIndex: 'collect', width: 62, sorter: true },
+  { title: '阅读', dataIndex: 'view', width: 72, sorter: true, defaultSortOrder: 'descend' },
+  { title: '曝光', dataIndex: 'exposure', width: 76, sorter: true },
   // Morgandada(5)：笔记私信三数=MCC 笔记明细分析私信列（私信咨询/开口/留资数，全量快照累计）；
   // 2026-10-26 客户要求恢复笔记级「留资」列（星火资产→笔记分析→笔记明细分析·私信留资数）
   ...(isMdd.value
     ? [
         { title: '进线', dataIndex: 'pmIn', width: 64 },
         { title: '开口', dataIndex: 'pmOpen', width: 64 },
-        { title: '留资', dataIndex: 'pmLeads', width: 64, sorter: (a, b) => a.pmLeads - b.pmLeads },
+        { title: '留资', dataIndex: 'pmLeads', width: 64, sorter: true },
       ]
     : []),
   // 特斯拉/MDD：表单线索无笔记级数据源（MCC 报表未返回 leads_success，恒为 0），按客户要求隐藏
   ...(isTesla.value || isMdd.value
     ? []
-    : [{ title: '表单线索', dataIndex: 'formLeads', width: 90, sorter: (a, b) => a.formLeads - b.formLeads }]),
+    : [{ title: '表单线索', dataIndex: 'formLeads', width: 90, sorter: true }]),
 ]);
 
 const violationColumns = [
@@ -811,6 +812,7 @@ function realParams(extra = {}) {
     brandId: auth.currentBrandId ?? undefined,
     start: custom ? dateRange.value[0] : dayjs().subtract(days.value - 1, 'day').format('YYYY-MM-DD'),
     end: custom ? dateRange.value[1] : dayjs().format('YYYY-MM-DD'),
+    order: order.value === 'ascend' ? 'asc' : 'desc',
     ...(typeFilter.value !== '全部' ? { category: typeFilter.value } : {}),
     ...(modelFilter.value !== '全部车型' ? { modelTag: modelFilter.value } : {}),
     ...(keyword.value ? { keyword: keyword.value } : {}),
@@ -917,12 +919,16 @@ function onFilterChange() {
   else nextTick(renderCharts);
 }
 
-const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', formLeads: 'formLeads', pmLeads: 'pmLeads' };
+const SORT_METRIC = { digg: 'likes', comment: 'comments', view: 'views', share: 'shares', collect: 'collects', exposure: 'exposure', formLeads: 'formLeads', pmLeads: 'pmLeads' };
 
 function onTableChange(pag, _filters, sorter) {
   page.value = pag.current ?? 1;
   if (mode.value === 'real') {
-    metric.value = sorter?.order ? SORT_METRIC[sorter.field] ?? 'views' : 'views';
+    const nextMetric = sorter?.order ? SORT_METRIC[sorter.field] ?? 'views' : 'views';
+    const nextOrder = sorter?.order ?? 'descend';
+    if (nextMetric !== metric.value || nextOrder !== order.value) page.value = 1;
+    metric.value = nextMetric;
+    order.value = nextOrder;
     loadReal({ fetchSummary: false });
   }
 }

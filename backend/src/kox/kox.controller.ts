@@ -191,6 +191,7 @@ export class KoxController {
       accountTag?: string;
       regionName?: string;
       metric?: string;
+      order?: string;
       page?: string;
       page_size?: string;
     },
