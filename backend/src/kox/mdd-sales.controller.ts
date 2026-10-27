@@ -1339,7 +1339,8 @@ export class MddSalesController {
     const laiguRows = await this.prisma.laiguLead.groupBy({
       by: ['subSource'],
       _count: true,
-      where: { brandId: 5, isMdd: true, isResource: true, sessionCreatedAt: { gte: winStart, lt: winEndEx }, subSource: { not: null } },
+      // 不按 isMdd 过滤：isMdd 的自然流量判定依赖账号集快照会漏判；uid 精确匹配天然只归基线账号
+      where: { brandId: 5, isResource: true, sessionCreatedAt: { gte: winStart, lt: winEndEx }, subSource: { not: null } },
     });
     const laiguByAcc = new Map<number, number>();
     for (const r of laiguRows) {
