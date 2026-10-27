@@ -93,7 +93,9 @@ async function pullAll(cookie) {
     };
     const found = await p.koxNote.findFirst({ where: { brandId: BRAND, noteId }, select: { id: true } });
     if (!found) { missing += 1; continue; }
-    await p.koxNote.update({ where: { id: found.id }, data });
+    // note_link 每次报表都带新 xsec_token：顺带刷新 noteUrl，供无标题回填抓页面用（旧 token 会过期 404）
+    const freshUrl = String(pick(r, 'note_link') ?? '').trim();
+    await p.koxNote.update({ where: { id: found.id }, data: { ...data, ...(freshUrl ? { noteUrl: freshUrl } : {}) } });
     updated += 1;
   }
   const msg = `values refreshed: mcc_rows=${rows.length} updated=${updated} not_in_db=${missing}`;
