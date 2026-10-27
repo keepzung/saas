@@ -182,7 +182,7 @@
       </a-card>
     </template>
 
-    <!-- ─── Tab3 品类供需（建议 + 矩阵） ─── -->
+    <!-- ─── Tab3 品类供需（数据看板） ─── -->
     <template v-if="tab === 'matrix'">
       <a-alert
         v-if="unclassified.length"
@@ -195,33 +195,6 @@
           {{ unclassified.slice(0, 5).map((u) => `${u.name}(${u.qty}件)`).join('、') }}
         </template>
       </a-alert>
-
-      <a-empty v-if="!suggestions.length && !loading" description="当前窗口暂无选题机会（各品类供需匹配均衡）" />
-      <div class="sugg-list">
-        <div v-for="s in suggestions" :key="s.type + s.category" class="sugg-card" :class="`sugg-${s.type}`">
-          <div class="sugg-head">
-            <a-tag :color="typeMeta[s.type]?.color" class="sugg-tag">{{ typeMeta[s.type]?.label }}</a-tag>
-            <span class="sugg-title">{{ s.title }}</span>
-            <a-tag v-if="s.weekly_target" color="blue" class="sugg-week">每周 +{{ s.weekly_target }} 篇</a-tag>
-          </div>
-          <div class="sugg-reason">{{ s.reason }}</div>
-          <div class="sugg-action"><BulbOutlined /> {{ s.action }}</div>
-          <div v-if="s.ref_notes.length" class="sugg-refs">
-            <div class="refs-label">参考爆文：</div>
-            <a
-              v-for="rn in s.ref_notes"
-              :key="rn.noteId"
-              :href="rn.url || 'javascript:;'"
-              target="_blank"
-              class="ref-note"
-            >
-              <span class="ref-title">{{ rn.title || '(无标题)' }}</span>
-              <span class="ref-meta">{{ rn.author || '匿名' }} · 互动{{ fmt(rn.engagement) }} · 留资{{ rn.leads }}</span>
-            </a>
-          </div>
-          <div v-else class="sugg-refs muted mini">暂无该品类命中笔记——全新选题空间</div>
-        </div>
-      </div>
 
       <a-card size="small" :bordered="false" class="detail-card">
         <div class="filter-row" style="margin-bottom: 8px">
@@ -448,7 +421,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { BulbOutlined, DownloadOutlined, EyeOutlined, InfoCircleOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons-vue';
+import { DownloadOutlined, EyeOutlined, InfoCircleOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons-vue';
 import * as echarts from 'echarts';
 import dayjs from 'dayjs';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -475,13 +448,6 @@ const topNotes = ref([]);
 const suggestions = ref([]);
 const unclassified = ref([]);
 const scopeNote = ref({});
-
-const typeMeta = {
-  supply_gap_sales: { label: '成交缺口', color: 'red' },
-  supply_gap_leads: { label: '留资缺口', color: 'orange' },
-  leads_no_conversion: { label: '转化观察', color: 'gold' },
-  sales_low_leads: { label: '拉新空间', color: 'purple' },
-};
 
 // 口径维护状态
 const defs = ref([]);
