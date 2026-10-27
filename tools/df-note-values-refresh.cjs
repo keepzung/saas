@@ -64,10 +64,14 @@ async function pullAll(cookie) {
 }
 
 (async () => {
+  // 数值刷新需要 MCC cookie（过期会抛错）；失败不阻断后面的无标题回填
+  let valuesError = null, valuesMsg = '';
+  let rows = [], updated = 0, missing = 0;
+  try {
   const cfg = await p.sparkOrgConfig.findUnique({ where: { brandId: BRAND } });
   if (!cfg?.cookie) throw new Error(`brand${BRAND} 无 cookie`);
-  const rows = await pullAll(cfg.cookie);
-  let updated = 0, missing = 0;
+  const rowsLocal = await pullAll(cfg.cookie);
+  rows = rowsLocal;
   for (const r of rows) {
     const noteId = String(pick(r, 'note_id') ?? '').trim();
     if (!noteId) continue;
@@ -93,7 +97,12 @@ async function pullAll(cookie) {
     updated += 1;
   }
   const msg = `values refreshed: mcc_rows=${rows.length} updated=${updated} not_in_db=${missing}`;
+  valuesMsg = msg;
   console.log(msg);
+  } catch (e) {
+    valuesError = e;
+    console.error(`values skipped: ${e.message}`);
+  }
 
   // ── 无标题回填：抓笔记页 meta description（正文首行），去尾部话题标签后作为展示标题 ──
   const tArg = process.argv.find((a) => a.startsWith('--titles-max='));
@@ -137,8 +146,9 @@ async function pullAll(cookie) {
     await new Promise((r) => setTimeout(r, 1200)); // 限速防风控（抓页面比 API 敏感，批量抓取会触发盾）
   }
   if (pending.length) console.log(`titles backfilled: filled=${filled} skipped=${skipped}`);
-  const finalMsg = `${msg}; titles: pending=${pending.length} filled=${filled} skipped=${skipped}`;
-  await p.sparkSyncLog.create({ data: { brandId: BRAND, syncType: 'note_values_refresh', statDate: todayKey(), status: 'success', fetched: rows.length, upserted: updated, message: finalMsg.slice(0, 490) } }).catch(() => {});
+  const status = valuesError ? 'failed' : 'success';
+  const finalMsg = `${valuesError ? `values failed: ${valuesError.message}` : valuesMsg}; titles: pending=${pending.length} filled=${filled} skipped=${skipped}`;
+  await p.sparkSyncLog.create({ data: { brandId: BRAND, syncType: 'note_values_refresh', statDate: todayKey(), status, fetched: rows.length, upserted: updated, message: finalMsg.slice(0, 490) } }).catch(() => {});
 })().catch(async (e) => {
   console.error(`FAIL: ${e.message}`);
   await p.sparkSyncLog.create({ data: { brandId: BRAND, syncType: 'note_values_refresh', statDate: todayKey(), status: 'failed', fetched: 0, upserted: 0, message: `FAIL: ${e.message}`.slice(0, 490) } }).catch(() => {});
