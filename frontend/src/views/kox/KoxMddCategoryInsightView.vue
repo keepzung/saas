@@ -12,7 +12,6 @@
         { label: '种草转化榜', value: 'kos' },
         { label: '笔记明细', value: 'notes' },
         { label: '品类供需', value: 'matrix' },
-        { label: '内容类型', value: 'content' },
         { label: '口径维护', value: 'caliber' },
       ]"
       class="tab-seg"
@@ -252,23 +251,7 @@
       </a-card>
     </template>
 
-    <!-- ─── Tab4 内容类型 ─── -->
-    <template v-if="tab === 'content'">
-      <a-card size="small" :bordered="false" title="内容类型效率（穿搭展示/面料材质等 8 类内容轴，回答「怎么写」）">
-        <div ref="typeEl" style="height: 360px" />
-      </a-card>
-      <a-card size="small" :bordered="false" class="detail-card" title="类型明细">
-        <a-table
-          :columns="typeColumns"
-          :data-source="contentType"
-          :pagination="false"
-          row-key="type"
-          size="small"
-        />
-      </a-card>
-    </template>
-
-    <!-- ─── Tab5 口径维护 ─── -->
+    <!-- ─── Tab4 口径维护 ─── -->
     <template v-if="tab === 'caliber'">
       <a-alert type="info" show-icon class="hint-bar"
         message="品类由「关键词规则」按优先级首中命中（品名/笔记标题+话题+正文共用）；规则改动后点击「重算订单品类」生效。" />
@@ -457,7 +440,7 @@ const onlyWithLeads = ref(false);
 const cards = ref({ total_qty: 0, total_amount: 0, total_orders: 0, customers: 0, repurchase_rate: 0, total_leads: 0, supply_notes: 0, qty_wow: null, leads_wow: null });
 const categorySummary = ref([]);
 const matrix = ref([]);
-const contentType = ref([]);
+const contentType = ref([]); // 保留接口字段，页面不再展示（客户不需要内容类型建议）
 const topNotes = ref([]);
 const suggestions = ref([]);
 const unclassified = ref([]);
@@ -555,17 +538,6 @@ const summaryColumns = [
   { title: '参考笔记', key: 'notes_action', width: 100, align: 'center' },
 ];
 
-const typeColumns = [
-  { title: '内容类型', dataIndex: 'type', width: 110 },
-  { title: '活跃笔记', dataIndex: 'notes', width: 90, align: 'right' },
-  { title: '曝光', dataIndex: 'exposure', width: 100, align: 'right', customRender: ({ text }) => fmt(text) },
-  { title: '互动', dataIndex: 'engagement', width: 100, align: 'right', sorter: (a, b) => a.engagement - b.engagement, customRender: ({ text }) => fmt(text) },
-  { title: '私信开口', dataIndex: 'pm_openings', width: 100, align: 'right' },
-  { title: '留资', dataIndex: 'leads', width: 90, align: 'right', sorter: (a, b) => a.leads - b.leads },
-  { title: '篇均留资', key: 'lpn', width: 90, align: 'right', customRender: ({ record }) => (record.notes ? Math.round((record.leads / record.notes) * 100) / 100 : 0) },
-];
-
-const defColumns = [
   { title: '品类', dataIndex: 'name', width: 120 },
   { title: '排序', dataIndex: 'sort', width: 70, align: 'right' },
   { title: '启用', key: 'enabled', width: 80 },
@@ -596,9 +568,7 @@ const wowText = (w) => {
 };
 
 let scatterChart = null;
-let typeChart = null;
 const scatterEl = ref(null);
-const typeEl = ref(null);
 
 const monthParams = () => ({
   startMonth: monthRange.value?.[0]?.format('YYYY-MM'),
@@ -643,7 +613,6 @@ function gotoAccountNotes(accountId) {
 function onTabChange(v) {
   nextTick(() => {
     if (v === 'matrix') renderScatter();
-    if (v === 'content') renderType();
     if (v === 'caliber' && !defs.value.length) loadCaliber();
   });
 }
@@ -709,26 +678,6 @@ function renderScatter() {
             data: [{ xAxis: medX }, { yAxis: medY }],
           },
         },
-      ],
-    },
-    { notMerge: true },
-  );
-}
-
-function renderType() {
-  if (!typeEl.value) return;
-  if (!typeChart) typeChart = echarts.init(typeEl.value);
-  const rows = [...contentType.value].reverse();
-  typeChart.setOption(
-    {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { data: ['互动', '留资'], bottom: 0 },
-      grid: { left: 90, right: 40, top: 16, bottom: 44 },
-      xAxis: { type: 'value' },
-      yAxis: { type: 'category', data: rows.map((r) => r.type) },
-      series: [
-        { name: '互动', type: 'bar', data: rows.map((r) => r.engagement), itemStyle: { color: '#3456e6' }, barMaxWidth: 18 },
-        { name: '留资', type: 'bar', data: rows.map((r) => r.leads), itemStyle: { color: '#10b981' }, barMaxWidth: 18 },
       ],
     },
     { notMerge: true },
@@ -928,7 +877,7 @@ function onExport() {
 
 function onResize() {
   scatterChart?.resize();
-  typeChart?.resize();
+
 }
 
 onMounted(() => {
@@ -939,7 +888,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
   scatterChart?.dispose();
-  typeChart?.dispose();
+
 });
 </script>
 
