@@ -56,8 +56,8 @@
         <div v-if="Number(brandId) === 5" class="entry-card" @click="go('/kox_df/sales/category-insight')">
           <div class="entry-icon" style="background:#fdf2f2;color:#ef4444"><RadarChartOutlined /></div>
           <div class="entry-body">
-            <div class="entry-title">成交选题雷达</div>
-            <div class="entry-desc">成交品类 × 留资反哺选题，看什么好卖就写什么</div>
+            <div class="entry-title">种草转化分析</div>
+            <div class="entry-desc">KOS 账号×笔记×成交归因，回溯每篇笔记看转化</div>
           </div>
           <RightOutlined class="entry-arrow" />
         </div>

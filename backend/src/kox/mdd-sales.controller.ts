@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { classifyByRules, MddCategoryService } from './mdd-category.service';
+import { classifyByRules, classifyNote, MddCategoryService } from './mdd-category.service';
 import { MDD_CATEGORY_LIST, mddCategoryOf } from './kox.service';
 
 /** 数值安全解析 */
@@ -1189,5 +1189,276 @@ export class MddSalesController {
       }
     }
     return { total: orders.length, changed };
+  }
+
+  // ───────────────────────── KOS 种草转化（账号×笔记归因） ─────────────────────────
+
+  /**
+   * 销售顾问 → 矩阵号映射（种草转化榜）：人工别名(账号) → 昵称后缀 → 使用人。
+   * 返回 staff原文 → { accountId, source }；多人写法任一人命中即归。
+   */
+  private async staffAccountMaps() {
+    const [accs, aliases] = await Promise.all([
+      this.prisma.kosAccount.findMany({
+        where: { brandId: 5 },
+        select: { id: true, nickname: true, operatorName: true, status: true },
+        orderBy: { status: 'asc' },
+      }),
+      this.prisma.mddStaffAlias.findMany({
+        where: { brandId: 5, accountId: { not: null } },
+        select: { staff: true, accountId: true },
+      }),
+    ]);
+    const byAlias = new Map<string, { accountId: number; source: string }>();
+    for (const a of aliases) if (a.staff.trim() && a.accountId) byAlias.set(a.staff.trim(), { accountId: a.accountId, source: 'alias' });
+    const bySuffix = new Map<string, { accountId: number; source: string }>();
+    const byOperator = new Map<string, { accountId: number; source: string }>();
+    for (const a of accs) {
+      if (a.operatorName?.trim() && !byOperator.has(a.operatorName.trim())) {
+        byOperator.set(a.operatorName.trim(), { accountId: a.id, source: 'operator' });
+      }
+      const m = a.nickname.match(/[-－]\s*([^-－]+)\s*$/);
+      if (m?.[1]?.trim() && !bySuffix.has(m[1].trim())) bySuffix.set(m[1].trim(), { accountId: a.id, source: 'suffix' });
+    }
+    return { byAlias, bySuffix, byOperator };
+  }
+
+  private mapStaffAccount(
+    staff: string | null | undefined,
+    maps: { byAlias: Map<string, { accountId: number; source: string }>; bySuffix: Map<string, { accountId: number; source: string }>; byOperator: Map<string, { accountId: number; source: string }> },
+  ): { accountId: number; source: string } | null {
+    const s = String(staff ?? '').trim();
+    if (!s) return null;
+    for (const part of s.split(/[/、,，]/).map((x) => x.trim()).filter(Boolean)) {
+      const hit = maps.byAlias.get(part) ?? maps.bySuffix.get(part) ?? maps.byOperator.get(part);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * KOS 种草转化（成交选题雷达重构主接口）：
+   * 账号级成交=订单销售顾问归属矩阵号（人工别名→昵称后缀→使用人，顾问级精确）；
+   * 笔记级留资/开口/互动=笔记日维度窗口求和（平台口径精确）；
+   * 笔记级成交=账号内按笔记留资占比分摊（估算，attribution='estimated'；零留资笔记不分摊）。
+   */
+  @Get('kos-conversion')
+  async kosConversion(@Query() query: { startMonth?: string; endMonth?: string }) {
+    const today = monthKey(new Date());
+    const endMonth = /^\d{4}-\d{2}$/.test(query.endMonth ?? '') ? (query.endMonth as string) : today;
+    const startMonth = /^\d{4}-\d{2}$/.test(query.startMonth ?? '')
+      ? (query.startMonth as string)
+      : this.shiftMonth(endMonth, -2);
+    const winStart = new Date(`${startMonth}-01T00:00:00+08:00`);
+    const winEndEx = new Date(new Date(`${endMonth}-01T00:00:00+08:00`).getTime() + 31 * 86400000);
+    const weeks = Math.max((this.monthRange(startMonth, endMonth).length * 30) / 7, 1);
+
+    // 1) 订单（成交）→ 账号
+    const [orderRows, maps] = await Promise.all([
+      this.prisma.mddSalesOrder.findMany({
+        where: { brandId: 5, month: { gte: startMonth, lte: endMonth } },
+        select: { staff: true, quantity: true, amount: true, phone: true },
+      }),
+      this.staffAccountMaps(),
+    ]);
+    interface AccOrderAgg { orders: number; qty: number; amount: number; customers: Set<string>; staffs: Set<string> }
+    const accOrders = new Map<number, AccOrderAgg>();
+    const unmatched = new Map<string, { staff: string; orders: number; qty: number; amount: number }>();
+    let blankStaffOrders = 0;
+    for (const r of orderRows) {
+      const hit = this.mapStaffAccount(r.staff, maps);
+      const qty = n(r.quantity);
+      const amount = Number(r.amount ?? 0);
+      if (!hit) {
+        const key = (r.staff ?? '').trim() || '(顾问列为空)';
+        const cur = unmatched.get(key) ?? { staff: key, orders: 0, qty: 0, amount: 0 };
+        cur.orders += 1;
+        cur.qty += qty;
+        cur.amount += amount;
+        unmatched.set(key, cur);
+        if (!key || key === '(顾问列为空)') blankStaffOrders += 1;
+        continue;
+      }
+      const cur = accOrders.get(hit.accountId) ?? { orders: 0, qty: 0, amount: 0, customers: new Set<string>(), staffs: new Set<string>() };
+      cur.orders += 1;
+      cur.qty += qty;
+      cur.amount += amount;
+      if (r.phone) cur.customers.add(r.phone);
+      cur.staffs.add((r.staff ?? '').trim());
+      accOrders.set(hit.accountId, cur);
+    }
+
+    // 2) 笔记与日维度（留资/表现）
+    const rules = await this.mddCategory.loadRulesPublic();
+    const [publishedNotes, statRows] = await Promise.all([
+      this.prisma.koxNote.findMany({
+        where: { brandId: 5, publishTime: { gte: winStart, lt: winEndEx }, accountId: { not: null } },
+        select: { noteId: true, accountId: true, title: true, content: true, topics: true, noteUrl: true, publishTime: true },
+        orderBy: { publishTime: 'desc' },
+      }),
+      this.prisma.koxNoteDailyStat.findMany({
+        where: { brandId: 5, day: { gte: winStart, lt: winEndEx } },
+        select: { noteId: true, exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, pmOpenings: true, pmLeads: true, formLeads: true },
+      }),
+    ]);
+    interface NoteAgg2 { noteId: string; accountId: number; title: string; url: string | null; content: string | null; topics: string[]; category: string; publishTime: Date | null; exposure: number; views: number; engagement: number; pmOpenings: number; leads: number }
+    const noteAgg = new Map<string, NoteAgg2>();
+    for (const nt of publishedNotes) {
+      noteAgg.set(nt.noteId, {
+        noteId: nt.noteId,
+        accountId: nt.accountId as number,
+        title: nt.title ?? '',
+        url: nt.noteUrl ?? null,
+        content: nt.content,
+        topics: nt.topics ?? [],
+        category: classifyNote(nt.title, nt.content, nt.topics ?? [], rules),
+        publishTime: nt.publishTime,
+        exposure: 0, views: 0, engagement: 0, pmOpenings: 0, leads: 0,
+      });
+    }
+    for (const s of statRows) {
+      const agg = noteAgg.get(s.noteId);
+      if (!agg) continue;
+      agg.exposure += s.exposure;
+      agg.views += s.views;
+      agg.engagement += s.likes + s.collects + s.comments + s.shares;
+      agg.pmOpenings += s.pmOpenings;
+      agg.leads += s.pmLeads + s.formLeads;
+    }
+
+    // 3) 来鼓留资会话 per 账号（subSource=主页 userid，从 authorUrl 提取）
+    const accs = await this.prisma.kosAccount.findMany({
+      where: { brandId: 5 },
+      select: { id: true, nickname: true, storeName: true, regionName: true, status: true, authorUrl: true, operatorName: true },
+    });
+    const uidToAcc = new Map<string, number>();
+    for (const a of accs) {
+      const uid = (a.authorUrl ?? '').match(/\/profile\/([0-9a-f]+)$/)?.[1];
+      if (uid) uidToAcc.set(uid, a.id);
+    }
+    const laiguRows = await this.prisma.laiguLead.groupBy({
+      by: ['subSource'],
+      _count: true,
+      where: { brandId: 5, isMdd: true, isResource: true, sessionCreatedAt: { gte: winStart, lt: winEndEx }, subSource: { not: null } },
+    });
+    const laiguByAcc = new Map<number, number>();
+    for (const r of laiguRows) {
+      const accId = r.subSource ? uidToAcc.get(r.subSource) : undefined;
+      if (accId) laiguByAcc.set(accId, (laiguByAcc.get(accId) ?? 0) + r._count);
+    }
+
+    // 4) 账号级汇总输出
+    const accNotes = new Map<number, { published: number; active: Set<string>; leads: number; openings: number; engagement: number; exposure: number }>();
+    const accNoteOf = (accId: number) => {
+      let cur = accNotes.get(accId);
+      if (!cur) {
+        cur = { published: 0, active: new Set<string>(), leads: 0, openings: 0, engagement: 0, exposure: 0 };
+        accNotes.set(accId, cur);
+      }
+      return cur;
+    };
+    for (const nt of noteAgg.values()) {
+      const cur = accNoteOf(nt.accountId);
+      if (nt.publishTime) cur.published += 1;
+      cur.leads += nt.leads;
+      cur.openings += nt.pmOpenings;
+      cur.engagement += nt.engagement;
+      cur.exposure += nt.exposure;
+    }
+    for (const s of statRows) {
+      const agg = noteAgg.get(s.noteId);
+      if (agg) accNoteOf(agg.accountId).active.add(s.noteId);
+    }
+    const accounts = accs
+      .map((a) => {
+        const o = accOrders.get(a.id);
+        const nt = accNotes.get(a.id);
+        const leads = nt?.leads ?? 0;
+        const qty = o?.qty ?? 0;
+        const staffSource = [...(o?.staffs ?? [])].map((s) => {
+          for (const part of s.split(/[/、,，]/).map((x) => x.trim())) {
+            if (maps.byAlias.has(part)) return 'alias';
+            if (maps.bySuffix.has(part)) return 'suffix';
+            if (maps.byOperator.has(part)) return 'operator';
+          }
+          return 'suffix';
+        })[0];
+        return {
+          accountId: a.id,
+          nickname: a.nickname,
+          storeName: a.storeName ?? null,
+          regionName: a.regionName ?? null,
+          status: a.status,
+          staffs: [...(o?.staffs ?? [])],
+          map_source: o ? staffSource ?? 'suffix' : null,
+          orders: o?.orders ?? 0,
+          qty,
+          amount: Math.round((o?.amount ?? 0) * 100) / 100,
+          customers: o?.customers.size ?? 0,
+          notes_published: nt?.published ?? 0,
+          notes_per_week: Math.round(((nt?.published ?? 0) / weeks) * 100) / 100,
+          notes_active: nt?.active.size ?? 0,
+          leads,
+          leads_per_note: nt?.active.size ? Math.round((leads / nt.active.size) * 100) / 100 : 0,
+          pm_openings: nt?.openings ?? 0,
+          engagement: nt?.engagement ?? 0,
+          exposure: nt?.exposure ?? 0,
+          laigu_sessions: laiguByAcc.get(a.id) ?? 0,
+          leads_to_sales_rate: leads ? Math.round((qty / leads) * 1000) / 10 : null,
+        };
+      })
+      .sort((a, b) => Number(a.status === 'enabled') - Number(b.status === 'enabled') || b.qty + b.leads - (a.qty + a.leads));
+
+    // 5) 笔记明细 + 成交分摊估算（账号内按留资占比）
+    const notes = [...noteAgg.values()]
+      .map((nt) => {
+        const acc = accOrders.get(nt.accountId);
+        const accLeads = accNotes.get(nt.accountId)?.leads ?? 0;
+        const share = accLeads > 0 && nt.leads > 0 && acc ? nt.leads / accLeads : 0;
+        return {
+          noteId: nt.noteId,
+          accountId: nt.accountId,
+          title: nt.title,
+          url: nt.url,
+          content: nt.content ? nt.content.slice(0, 200) : null,
+          has_content: Boolean(nt.content),
+          topics: nt.topics,
+          category: nt.category,
+          publish_time: nt.publishTime,
+          exposure: nt.exposure,
+          views: nt.views,
+          engagement: nt.engagement,
+          pm_openings: nt.pmOpenings,
+          leads: nt.leads,
+          est_qty: share ? Math.round(acc!.qty * share * 10) / 10 : 0,
+          est_amount: share ? Math.round(acc!.amount * share * 100) / 100 : 0,
+          attribution: share ? 'estimated' : 'none',
+        };
+      })
+      .sort((a, b) => b.leads + b.est_qty - (a.leads + a.est_qty));
+
+    return {
+      start_month: startMonth,
+      end_month: endMonth,
+      accounts,
+      notes,
+      unmatched: [...unmatched.values()].sort((a, b) => b.qty - a.qty),
+      staff_blank_orders: blankStaffOrders,
+      totals: {
+        orders: orderRows.length,
+        qty: orderRows.reduce((a, r) => a + n(r.quantity), 0),
+        amount: Math.round(orderRows.reduce((a, r) => a + Number(r.amount ?? 0), 0) * 100) / 100,
+        leads: statRows.reduce((a, s) => a + s.pmLeads + s.formLeads, 0),
+        notes_published: publishedNotes.length,
+        matched_qty: [...accOrders.values()].reduce((a, x) => a + x.qty, 0),
+      },
+      scope_note: {
+        account_sales: '账号成交=订单「销售顾问」归属矩阵号（人工别名→昵称后缀→使用人），顾问级精确归因；顾问列空或无矩阵号顾问计入「未匹配」',
+        note_leads: '笔记留资/私信开口=笔记日维度窗口求和（专业号/聚光平台口径，精确）',
+        note_sales: '笔记成交(估算)=账号成交件数/金额按笔记留资占比分摊（零留资笔记不分摊）；精确归因待线索来源笔记探针验证',
+        note_content: '内容品类=标题+话题+正文关键词规则归类（正文采集后生效）；正文来自小红书页面补抓，可能缺历史笔记',
+        laigu: '来鼓留资会话=账号主页UID归属（subSource），含私信承接转化信号',
+      },
+    };
   }
 }

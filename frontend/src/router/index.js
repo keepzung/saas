@@ -213,7 +213,7 @@ const routes = [
       {
         path: '/kox_df/sales/category-insight',
         component: () => import('../views/kox/KoxMddCategoryInsightView.vue'),
-        meta: { title: '成交选题雷达' },
+        meta: { title: '种草转化分析' },
       },
       {
         path: '/kox_df/campaign-analysis/cycle-report',

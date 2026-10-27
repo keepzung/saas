@@ -15,17 +15,45 @@ export interface CategoryRuleLite {
 }
 
 /** 纯函数归类（方便脚本/服务两端复用；rules 须已按 priority 升序） */
-export function classifyByRules(text: string | null | undefined, rules: CategoryRuleLite[]): string {
+export function classifyByRules(
+  text: string | null | undefined,
+  rules: CategoryRuleLite[],
+  opts?: { minPatternLen?: number },
+): string {
   const s = String(text ?? '').trim();
   if (!s) return MDD_CATEGORY_UNCLASSIFIED;
   const lower = s.toLowerCase();
   for (const r of rules) {
     if (!r.pattern) continue;
+    if (opts?.minPatternLen && r.pattern.trim().length < opts.minPatternLen) continue;
     if (r.matchType === 'exact') {
       if (s === r.pattern) return r.category;
     } else if (lower.includes(r.pattern.toLowerCase())) {
       return r.category;
     }
+  }
+  return MDD_CATEGORY_UNCLASSIFIED;
+}
+
+/**
+ * 笔记级归类：标题 > 话题标签 > 正文 首中命中。
+ * 正文匹配跳过单字关键词（如「包」会误命中「包括」），仅 ≥2 字品类词参与。
+ */
+export function classifyNote(
+  title: string | null | undefined,
+  content: string | null | undefined,
+  topics: string[] | null | undefined,
+  rules: CategoryRuleLite[],
+): string {
+  const byTitle = classifyByRules(title, rules);
+  if (byTitle !== MDD_CATEGORY_UNCLASSIFIED) return byTitle;
+  for (const tp of topics ?? []) {
+    const byTopic = classifyByRules(tp, rules);
+    if (byTopic !== MDD_CATEGORY_UNCLASSIFIED) return byTopic;
+  }
+  if (content) {
+    const byContent = classifyByRules(content.slice(0, 800), rules, { minPatternLen: 2 });
+    if (byContent !== MDD_CATEGORY_UNCLASSIFIED) return byContent;
   }
   return MDD_CATEGORY_UNCLASSIFIED;
 }

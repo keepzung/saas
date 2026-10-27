@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="成交选题雷达" subtitle="成交品类 × 留资 × 内容供给 · 用成交数据反哺内容创作">
+  <PageWrapper title="种草转化分析" subtitle="KOS 账号 × 笔记 × 成交归因 · 回溯到每篇笔记看转化">
     <template #extra>
       <a-button size="small" @click="onExport">
         <DownloadOutlined /> 导出
@@ -9,8 +9,9 @@
     <a-segmented
       v-model:value="tab"
       :options="[
-        { label: '选题建议', value: 'suggest' },
-        { label: '供需矩阵', value: 'matrix' },
+        { label: '种草转化榜', value: 'kos' },
+        { label: '笔记明细', value: 'notes' },
+        { label: '品类供需', value: 'matrix' },
         { label: '内容类型', value: 'content' },
         { label: '口径维护', value: 'caliber' },
       ]"
@@ -32,7 +33,7 @@
         <a-popover placement="bottomLeft">
           <template #content>
             <div class="scope-list">
-              <div v-for="(v, k) in scopeNote" :key="k" class="scope-item">{{ v }}</div>
+              <div v-for="(v, k) in allScope" :key="k" class="scope-item">{{ v }}</div>
             </div>
           </template>
           <a-button size="small" type="text">
@@ -42,40 +43,147 @@
       </div>
     </a-card>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">成交件数</div>
-        <div class="stat-value hl-blue">{{ fmt(cards.total_qty) }}<span v-if="cards.qty_wow != null" class="wow" :class="cards.qty_wow >= 0 ? 'up' : 'down'">{{ cards.qty_wow >= 0 ? '↑' : '↓' }}{{ Math.abs(cards.qty_wow) }}%</span></div>
-        <div class="stat-sub muted mini">{{ cards.total_orders }} 单</div>
+    <!-- ─── Tab1 种草转化榜 ─── -->
+    <template v-if="tab === 'kos'">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">成交件数</div>
+          <div class="stat-value hl-blue">{{ fmt(kosTotals.qty) }}</div>
+          <div class="stat-sub muted mini">{{ kosTotals.orders }} 单 · ¥{{ fmt(kosTotals.amount) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">笔记留资</div>
+          <div class="stat-value hl-green">{{ fmt(kosTotals.leads) }}</div>
+          <div class="stat-sub muted mini">专业号+表单口径</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">归因覆盖</div>
+          <div class="stat-value hl-purple">{{ coverRate }}%</div>
+          <div class="stat-sub muted mini">已归到矩阵号的成交件数占比</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">在营账号</div>
+          <div class="stat-value">{{ accounts.length }}</div>
+          <div class="stat-sub muted mini">有成交 {{ accountWithOrders }} · 有留资 {{ accountWithLeads }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">未匹配成交</div>
+          <div class="stat-value hl-orange">{{ fmt(unmatchedQty) }}</div>
+          <div class="stat-sub muted mini">{{ unmatched.length }} 位顾问待配置别名</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">来鼓留资会话</div>
+          <div class="stat-value">{{ fmt(totalLaigu) }}</div>
+          <div class="stat-sub muted mini">账号UID归属 · 私信承接</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">销售额</div>
-        <div class="stat-value">¥{{ fmt(cards.total_amount) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">留资（潜在成交）</div>
-        <div class="stat-value hl-green">{{ fmt(cards.total_leads) }}<span v-if="cards.leads_wow != null" class="wow" :class="cards.leads_wow >= 0 ? 'up' : 'down'">{{ cards.leads_wow >= 0 ? '↑' : '↓' }}{{ Math.abs(cards.leads_wow) }}%</span></div>
-        <div class="stat-sub muted mini">笔记私信+表单留资</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">供给笔记 / 活跃</div>
-        <div class="stat-value hl-purple">{{ fmt(cards.supply_notes) }}<span class="muted mini"> / {{ fmt(activeNotes) }}</span></div>
-        <div class="stat-sub muted mini">窗口内发布 / 有数据笔记</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">成交客户 / 复购率</div>
-        <div class="stat-value">{{ fmt(cards.customers) }}</div>
-        <div class="stat-sub muted mini">复购率 {{ cards.repurchase_rate }}%</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">在售品类 / 选题机会</div>
-        <div class="stat-value">{{ categorySummary.length }}<span class="muted mini"> / </span><span class="hl-orange">{{ suggestions.length }}</span></div>
-        <div class="stat-sub muted mini">含「未归类」以外的品类</div>
-      </div>
-    </div>
 
-    <!-- ─── 选题建议 ─── -->
-    <template v-if="tab === 'suggest'">
+      <a-alert
+        v-if="unmatched.length"
+        type="warning"
+        show-icon
+        class="hint-bar"
+      >
+        <template #message>
+          以下顾问暂无矩阵号映射（可到「销售看板 → 顾问归属」配置别名后自动归位）：
+          {{ unmatched.map((u) => `${u.staff}(${u.qty}件)`).join('、') }}
+          <span v-if="kosStaffBlank">；另有 {{ kosStaffBlank }} 单顾问列为空</span>
+        </template>
+      </a-alert>
+
+      <a-card size="small" :bordered="false">
+        <div class="filter-row" style="margin-bottom: 8px">
+          <span class="f-label">排序口径：</span>
+          <a-segmented
+            v-model:value="kosLens"
+            size="small"
+            :options="[{ label: '按成交', value: 'qty' }, { label: '按留资', value: 'leads' }]"
+          />
+          <span class="muted mini">成交=订单顾问归属（精确）· 留资=笔记日维度（平台口径）</span>
+        </div>
+        <a-table
+          :columns="kosColumns"
+          :data-source="kosSorted"
+          :loading="loading"
+          :pagination="false"
+          row-key="accountId"
+          size="small"
+          :scroll="{ x: 1200 }"
+          :row-class-name="(r) => (r.status !== 'enabled' ? 'row-disabled' : '')"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'nickname'">
+              <a class="acc-link" @click="gotoAccountNotes(record.accountId)">{{ record.nickname }}</a>
+              <a-tag v-if="record.map_source === 'alias'" color="purple" class="mini">别名</a-tag>
+            </template>
+            <template v-else-if="column.key === 'leads_to_sales_rate'">
+              {{ record.leads_to_sales_rate == null ? '-' : `${record.leads_to_sales_rate}%` }}
+            </template>
+            <template v-else-if="column.key === 'qty'">
+              <b>{{ fmt(record.qty) }}</b>
+            </template>
+          </template>
+        </a-table>
+      </a-card>
+    </template>
+
+    <!-- ─── Tab2 笔记明细 ─── -->
+    <template v-if="tab === 'notes'">
+      <a-card size="small" class="filter-card">
+        <div class="filter-row">
+          <span class="f-label">账号：</span>
+          <a-select
+            v-model:value="selAccount"
+            size="small"
+            style="width: 240px"
+            show-search
+            option-filter-prop="label"
+            placeholder="选择 KOS 账号"
+            :options="accountOptions"
+          />
+          <span v-if="selAccountInfo" class="muted mini">
+            成交 {{ fmt(selAccountInfo.qty) }} 件/¥{{ fmt(selAccountInfo.amount) }} · 留资 {{ fmt(selAccountInfo.leads) }} · 笔记 {{ selAccountInfo.notes_published }} 篇
+          </span>
+          <a-checkbox v-model:checked="onlyWithLeads">仅看有留资/转化</a-checkbox>
+        </div>
+      </a-card>
+      <a-card size="small" :bordered="false">
+        <a-empty v-if="!selAccount && !loading" description="先在上方选择一个 KOS 账号" />
+        <a-table
+          v-else
+          :columns="noteColumns"
+          :data-source="notesFor"
+          :loading="loading"
+          :pagination="{ pageSize: 20, showSizeChanger: false, size: 'small' }"
+          row-key="noteId"
+          size="small"
+          :scroll="{ x: 1250 }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'title'">
+              <a :href="record.url || 'javascript:;'" target="_blank" class="note-link">{{ record.title || '(无标题)' }}</a>
+              <a-tag v-if="record.category !== '未归类'" class="mini">{{ record.category }}</a-tag>
+            </template>
+            <template v-else-if="column.key === 'content'">
+              <a-tooltip :title="record.content || '正文未采集'" overlay-style="max-width:420px">
+                <span class="muted mini">{{ record.has_content ? record.content.slice(0, 40) + '…' : '未采集' }}</span>
+              </a-tooltip>
+            </template>
+            <template v-else-if="column.key === 'est_qty'">
+              <a-tooltip title="估算口径：账号成交按笔记留资占比分摊（零留资笔记不分摊）；精确归因待线索来源笔记验证">
+                <span :class="record.est_qty > 0 ? 'est-num' : 'muted'">{{ record.est_qty > 0 ? record.est_qty : '-' }}</span>
+              </a-tooltip>
+            </template>
+            <template v-else-if="column.key === 'publish_time'">
+              {{ record.publish_time ? dayjs(record.publish_time).format('YYYY-MM-DD') : '-' }}
+            </template>
+          </template>
+        </a-table>
+      </a-card>
+    </template>
+
+    <!-- ─── Tab3 品类供需（建议 + 矩阵） ─── -->
+    <template v-if="tab === 'matrix'">
       <a-alert
         v-if="unclassified.length"
         type="warning"
@@ -114,11 +222,8 @@
           <div v-else class="sugg-refs muted mini">暂无该品类命中笔记——全新选题空间</div>
         </div>
       </div>
-    </template>
 
-    <!-- ─── 供需矩阵 ─── -->
-    <template v-if="tab === 'matrix'">
-      <a-card size="small" :bordered="false">
+      <a-card size="small" :bordered="false" class="detail-card">
         <div class="filter-row" style="margin-bottom: 8px">
           <span class="f-label">需求口径：</span>
           <a-segmented
@@ -160,7 +265,7 @@
       </a-card>
     </template>
 
-    <!-- ─── 内容类型 ─── -->
+    <!-- ─── Tab4 内容类型 ─── -->
     <template v-if="tab === 'content'">
       <a-card size="small" :bordered="false" title="内容类型效率（穿搭展示/面料材质等 8 类内容轴，回答「怎么写」）">
         <div ref="typeEl" style="height: 360px" />
@@ -176,10 +281,10 @@
       </a-card>
     </template>
 
-    <!-- ─── 口径维护 ─── -->
+    <!-- ─── Tab5 口径维护 ─── -->
     <template v-if="tab === 'caliber'">
       <a-alert type="info" show-icon class="hint-bar"
-        message="品类由「关键词规则」按优先级首中命中（品名/笔记标题共用）；规则改动后点击「重算订单品类」生效。" />
+        message="品类由「关键词规则」按优先级首中命中（品名/笔记标题+话题+正文共用）；规则改动后点击「重算订单品类」生效。" />
 
       <a-card size="small" :bordered="false" title="品类定义">
         <template #extra>
@@ -333,7 +438,7 @@
     <a-collapse ghost class="scope-collapse">
       <a-collapse-panel key="scope" header="口径与规则说明">
         <div class="scope-list">
-          <div v-for="(v, k) in scopeNote" :key="k" class="scope-item">{{ v }}</div>
+          <div v-for="(v, k) in allScope" :key="k" class="scope-item">{{ v }}</div>
         </div>
       </a-collapse-panel>
     </a-collapse>
@@ -351,10 +456,17 @@ import request from '../../api/request';
 import { exportExcel } from '../../utils/excel';
 
 const loading = ref(false);
-const tab = ref('suggest');
+const tab = ref('kos');
 const lens = ref('sales');
 const monthRange = ref([dayjs().startOf('month').subtract(2, 'month'), dayjs()]);
 
+// 种草转化（KOS 账号×笔记）
+const kos = ref({ accounts: [], notes: [], unmatched: [], staff_blank_orders: 0, totals: {}, scope_note: {} });
+const kosLens = ref('qty');
+const selAccount = ref(null);
+const onlyWithLeads = ref(false);
+
+// 品类供需（原雷达）
 const cards = ref({ total_qty: 0, total_amount: 0, total_orders: 0, customers: 0, repurchase_rate: 0, total_leads: 0, supply_notes: 0, qty_wow: null, leads_wow: null });
 const categorySummary = ref([]);
 const matrix = ref([]);
@@ -379,18 +491,68 @@ const ruleModal = reactive({ open: false, saving: false, id: null, pattern: '', 
 const defModal = reactive({ open: false, saving: false, id: null, name: '', sort: 99, remark: '' });
 const noteModal = reactive({ open: false, category: '', notes: [] });
 
+const defOptions = computed(() => defs.value.filter((d) => d.enabled).map((d) => ({ label: d.name, value: d.name })));
 const notesByCat = computed(() => new Map((topNotes.value ?? []).map((t) => [t.category, t.notes ?? []])));
 
-function openNotes(category) {
-  noteModal.category = category;
-  noteModal.notes = notesByCat.value.get(category) ?? [];
-  noteModal.open = true;
-}
-
-const defOptions = computed(() => defs.value.filter((d) => d.enabled).map((d) => ({ label: d.name, value: d.name })));
-const activeNotes = computed(() => categorySummary.value.reduce((a, s) => a + (s.notes_active ?? 0), 0));
+const kosTotals = computed(() => kos.value.totals ?? {});
+const accounts = computed(() => kos.value.accounts ?? []);
+const unmatched = computed(() => kos.value.unmatched ?? []);
+const unmatchedQty = computed(() => unmatched.value.reduce((a, u) => a + (u.qty ?? 0), 0));
+const totalLaigu = computed(() => accounts.value.reduce((a, x) => a + (x.laigu_sessions ?? 0), 0));
+const accountWithOrders = computed(() => accounts.value.filter((x) => x.qty > 0).length);
+const accountWithLeads = computed(() => accounts.value.filter((x) => x.leads > 0).length);
+const coverRate = computed(() => {
+  const total = kosTotals.value.qty ?? 0;
+  const matched = kosTotals.value.matched_qty ?? 0;
+  return total ? Math.round((matched / total) * 100) : 0;
+});
+const kosSorted = computed(() => {
+  const arr = [...accounts.value];
+  arr.sort((a, b) => (kosLens.value === 'qty' ? b.qty - a.qty : b.leads - a.leads));
+  return arr;
+});
+const accountOptions = computed(() =>
+  kosSorted.value.map((a) => ({ label: `${a.nickname}（成交${a.qty}/留资${a.leads}）`, value: a.accountId })),
+);
+const selAccountInfo = computed(() => accounts.value.find((a) => a.accountId === selAccount.value) ?? null);
+const notesFor = computed(() => {
+  let list = kos.value.notes.filter((n) => n.accountId === selAccount.value);
+  if (onlyWithLeads.value) list = list.filter((n) => n.leads > 0 || n.est_qty > 0);
+  return list;
+});
+const allScope = computed(() => ({ ...(kos.value.scope_note ?? {}), ...(scopeNote.value ?? {}) }));
 
 const fmt = (v) => Number(v ?? 0).toLocaleString();
+
+const kosColumns = [
+  { title: 'KOS 账号', key: 'nickname', dataIndex: 'nickname', width: 220, fixed: 'left' },
+  { title: '门店', dataIndex: 'storeName', width: 110 },
+  { title: '归属顾问', key: 'staffs', width: 120, customRender: ({ record }) => (record.staffs.length ? record.staffs.join('、') : '-') },
+  { title: '成交(件)', key: 'qty', dataIndex: 'qty', width: 90, align: 'right', sorter: (a, b) => a.qty - b.qty },
+  { title: '成交额(元)', dataIndex: 'amount', width: 110, align: 'right', sorter: (a, b) => a.amount - b.amount, customRender: ({ text }) => fmt(text) },
+  { title: '订单', dataIndex: 'orders', width: 70, align: 'right' },
+  { title: '客户', dataIndex: 'customers', width: 70, align: 'right' },
+  { title: '留资', dataIndex: 'leads', width: 80, align: 'right', sorter: (a, b) => a.leads - b.leads },
+  { title: '私信开口', dataIndex: 'pm_openings', width: 90, align: 'right' },
+  { title: '来鼓会话', dataIndex: 'laigu_sessions', width: 90, align: 'right' },
+  { title: '留资→成交', key: 'leads_to_sales_rate', dataIndex: 'leads_to_sales_rate', width: 100, align: 'right' },
+  { title: '发布笔记', dataIndex: 'notes_published', width: 90, align: 'right' },
+  { title: '篇/周', dataIndex: 'notes_per_week', width: 70, align: 'right' },
+  { title: '活跃笔记', dataIndex: 'notes_active', width: 90, align: 'right' },
+  { title: '互动', dataIndex: 'engagement', width: 90, align: 'right', customRender: ({ text }) => fmt(text) },
+];
+
+const noteColumns = [
+  { title: '笔记', key: 'title', dataIndex: 'title', width: 260, fixed: 'left' },
+  { title: '正文摘要', key: 'content', dataIndex: 'content', width: 200 },
+  { title: '发布', key: 'publish_time', dataIndex: 'publish_time', width: 100 },
+  { title: '曝光', dataIndex: 'exposure', width: 90, align: 'right', customRender: ({ text }) => fmt(text) },
+  { title: '互动', dataIndex: 'engagement', width: 80, align: 'right', sorter: (a, b) => a.engagement - b.engagement, customRender: ({ text }) => fmt(text) },
+  { title: '开口', dataIndex: 'pm_openings', width: 70, align: 'right' },
+  { title: '留资', dataIndex: 'leads', width: 70, align: 'right', sorter: (a, b) => a.leads - b.leads },
+  { title: '成交(估)', key: 'est_qty', dataIndex: 'est_qty', width: 90, align: 'right', sorter: (a, b) => a.est_qty - b.est_qty },
+  { title: '成交额(估)', dataIndex: 'est_amount', width: 100, align: 'right', customRender: ({ text }) => (text > 0 ? `¥${fmt(text)}` : '-') },
+];
 
 const summaryColumns = [
   { title: '品类', dataIndex: 'category', width: 100, fixed: 'left' },
@@ -448,7 +610,6 @@ const unclsColumns = [
 
 const wowText = (w) => {
   if (w == null) return '-';
-  const color = w >= 0 ? '#16a34a' : '#ef4444';
   return `${w >= 0 ? '↑' : '↓'}${Math.abs(w)}%`;
 };
 
@@ -465,15 +626,23 @@ const monthParams = () => ({
 async function reload() {
   loading.value = true;
   try {
-    const res = await request.get('/mdd/sales/category-insight', { params: monthParams() });
-    cards.value = res.cards ?? cards.value;
-    categorySummary.value = res.category_summary ?? [];
-    matrix.value = res.matrix ?? [];
-    contentType.value = res.content_type_efficiency ?? [];
-    topNotes.value = res.top_notes ?? [];
-    suggestions.value = res.suggestions ?? [];
-    unclassified.value = res.unclassified ?? [];
-    scopeNote.value = res.scope_note ?? {};
+    const [ins, kosRes] = await Promise.all([
+      request.get('/mdd/sales/category-insight', { params: monthParams() }),
+      request.get('/mdd/sales/kos-conversion', { params: monthParams() }).catch(() => null),
+    ]);
+    cards.value = ins.cards ?? cards.value;
+    categorySummary.value = ins.category_summary ?? [];
+    matrix.value = ins.matrix ?? [];
+    contentType.value = ins.content_type_efficiency ?? [];
+    topNotes.value = ins.top_notes ?? [];
+    suggestions.value = ins.suggestions ?? [];
+    unclassified.value = ins.unclassified ?? [];
+    scopeNote.value = ins.scope_note ?? {};
+    kos.value = kosRes ?? { accounts: [], notes: [], unmatched: [], staff_blank_orders: 0, totals: {}, scope_note: {} };
+    if (kosRes && !selAccount.value && kosRes.accounts?.length) {
+      const top = [...kosRes.accounts].sort((a, b) => b.qty + b.leads - (a.qty + a.leads))[0];
+      selAccount.value = top?.accountId ?? null;
+    }
     await nextTick();
     if (tab.value === 'matrix') renderScatter();
   } catch (e) {
@@ -481,6 +650,12 @@ async function reload() {
   } finally {
     loading.value = false;
   }
+}
+
+function gotoAccountNotes(accountId) {
+  selAccount.value = accountId;
+  tab.value = 'notes';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function onTabChange(v) {
@@ -683,22 +858,55 @@ async function reclassify() {
   }
 }
 
+function openNotes(category) {
+  noteModal.category = category;
+  noteModal.notes = notesByCat.value.get(category) ?? [];
+  noteModal.open = true;
+}
+
 // ─── 导出 ───
 function onExport() {
   const suffix = `${monthRange.value?.[0]?.format('YYYYMM')}-${monthRange.value?.[1]?.format('YYYYMM')}`;
   exportExcel(
     [
       {
-        name: '选题建议',
-        rows: suggestions.value.map((s) => ({
-          类型: typeMeta[s.type]?.label ?? s.type,
-          品类: s.category,
-          建议: s.title,
-          依据: s.reason,
-          行动: s.action,
-          每周建议篇数: s.weekly_target ?? '',
-          参考爆文: s.ref_notes.map((r) => `${r.title}（${r.author}）`).join('；'),
+        name: 'KOS种草转化榜',
+        rows: kosSorted.value.map((a) => ({
+          账号: a.nickname,
+          门店: a.storeName ?? '',
+          归属顾问: a.staffs.join('、'),
+          成交件数: a.qty,
+          成交额: a.amount,
+          订单数: a.orders,
+          客户数: a.customers,
+          留资: a.leads,
+          私信开口: a.pm_openings,
+          来鼓会话: a.laigu_sessions,
+          留资转化率: a.leads_to_sales_rate == null ? '' : `${a.leads_to_sales_rate}%`,
+          发布笔记: a.notes_published,
+          活跃笔记: a.notes_active,
+          互动: a.engagement,
         })),
+      },
+      {
+        name: '笔记明细',
+        rows: kos.value.notes.map((n) => ({
+          账号: accounts.value.find((a) => a.accountId === n.accountId)?.nickname ?? n.accountId,
+          标题: n.title,
+          品类: n.category,
+          发布: n.publish_time ? dayjs(n.publish_time).format('YYYY-MM-DD') : '',
+          曝光: n.exposure,
+          互动: n.engagement,
+          开口: n.pm_openings,
+          留资: n.leads,
+          成交估算: n.est_qty,
+          成交额估算: n.est_amount,
+          链接: n.url ?? '',
+        })),
+      },
+      {
+        name: '未匹配顾问',
+        rows: unmatched.value.map((u) => ({ 顾问: u.staff, 订单: u.orders, 件数: u.qty, 金额: u.amount })),
       },
       {
         name: '品类汇总',
@@ -721,30 +929,18 @@ function onExport() {
         })),
       },
       {
-        name: '供需矩阵',
-        rows: matrix.value.map((m) => ({
-          品类: m.category,
-          成交: m.qty,
-          销售额: m.amount,
-          留资: m.leads,
-          供给笔记: m.notes_published,
-          成交象限: m.quadrant_sales,
-          留资象限: m.quadrant_leads,
-          供给偏低: m.supply_low ? '是' : '否',
-        })),
-      },
-      {
         name: '内容类型',
         rows: contentType.value.map((t) => ({
           类型: t.type,
           活跃笔记: t.notes,
+          曝光: t.exposure,
           互动: t.engagement,
           私信开口: t.pm_openings,
           留资: t.leads,
         })),
       },
     ],
-    `成交选题雷达_${suffix}`,
+    `种草转化分析_${suffix}`,
   );
 }
 
@@ -829,19 +1025,6 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
-.wow {
-  font-size: 12px;
-  margin-left: 6px;
-}
-
-.wow.up {
-  color: #16a34a;
-}
-
-.wow.down {
-  color: #ef4444;
-}
-
 .hl-blue {
   color: #2563eb;
 }
@@ -868,6 +1051,35 @@ onBeforeUnmount(() => {
 
 .detail-card {
   margin-top: 12px;
+}
+
+.row-disabled {
+  opacity: 0.5;
+}
+
+.acc-link {
+  color: #1e293b;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.acc-link:hover {
+  color: #2563eb;
+}
+
+.note-link {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.note-link:hover {
+  color: #2563eb;
+}
+
+.est-num {
+  color: #ea580c;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .sugg-list {
