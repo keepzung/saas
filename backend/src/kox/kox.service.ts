@@ -3707,6 +3707,7 @@ export class KoxService {
     accountTag?: string;
     keyword?: string;
     metric?: string;
+    order?: string;
     page?: string;
     page_size?: string;
   }) {
@@ -4205,7 +4206,7 @@ export class KoxService {
       if (!explicitSort) {
         return metric === 'pm_leads' || metric === 'pm_leads_total'
           ? b[metric] - a[metric] || a.tier_rank - b.tier_rank
-          : b[metric] - a[metric] || b.pm_leads - a.pm_leads;
+          : (b[metric] ?? 0) - (a[metric] ?? 0) || b.pm_leads - a.pm_leads;
       }
       const diff =
         order === 'asc'
