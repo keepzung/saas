@@ -33,7 +33,13 @@ request.interceptors.response.use(
     if (status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('userInfo');
-      if (window.location.pathname !== '/login') {
+      const path = window.location.pathname;
+      const search = window.location.search;
+      if (path.startsWith('/m/') && path !== '/m/login') {
+        // 手机端 401：回 H5 登录页并记住来路（含 ?co= 工作区参数），登录后直达原页
+        const co = new URLSearchParams(search).get('co');
+        window.location.href = `/m/login?redirect=${encodeURIComponent(path + search)}${co ? `&co=${encodeURIComponent(co)}` : ''}`;
+      } else if (path !== '/login') {
         window.location.href = '/login';
       }
     }
