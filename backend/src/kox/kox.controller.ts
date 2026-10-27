@@ -139,6 +139,7 @@ export class KoxController {
       accountTag?: string;
       keyword?: string;
       metric?: string;
+      order?: string;
       page?: string;
       page_size?: string;
     },

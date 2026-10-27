@@ -4178,23 +4178,41 @@ export class KoxService {
     const METRICS = [
       'pm_leads',
       'pm_leads_total',
+      'pm_inquiries',
+      'pm_openings',
       'exposure_sum',
       'view_sum',
       'interaction_sum',
       'ces',
       'item_cnt',
+      'likes_sum',
+      'collects_sum',
+      'comments_sum',
+      'shares_sum',
+      'note_quality',
+      'fans_gained',
     ] as const;
     // Morgandada 默认指标=广告线索（商业+自然合计，2026-10-23 客户拍板三数合一）；其余品牌默认留资数
     const defaultMetric = brandId === 5 ? 'pm_leads_total' : 'pm_leads';
     const metric = (METRICS as readonly string[]).includes(query.metric ?? '')
       ? (query.metric as (typeof METRICS)[number])
       : (defaultMetric as (typeof METRICS)[number]);
-    // 排序（客户指定 2026-10）：所有排行默认「留资数从多到少」纯降序；切换其他指标时按所选指标降序
-    rows.sort((a, b) =>
-      metric === 'pm_leads' || metric === 'pm_leads_total'
-        ? b[metric] - a[metric] || a.tier_rank - b.tier_rank
-        : b[metric] - a[metric] || b.pm_leads - a.pm_leads,
-    );
+    // 列头点击排序（2026-10-27）：metric 命中白名单即按其排序，order 支持 asc/desc（默认降序）；
+    // 未传 metric 时维持原口径「留资数从多到少」纯降序
+    const order = query.order === 'asc' ? 'asc' : 'desc';
+    const explicitSort = (query.metric ?? '') !== '' && (METRICS as readonly string[]).includes(query.metric ?? '');
+    rows.sort((a, b) => {
+      if (!explicitSort) {
+        return metric === 'pm_leads' || metric === 'pm_leads_total'
+          ? b[metric] - a[metric] || a.tier_rank - b.tier_rank
+          : b[metric] - a[metric] || b.pm_leads - a.pm_leads;
+      }
+      const diff =
+        order === 'asc'
+          ? (a[metric] ?? 0) - (b[metric] ?? 0)
+          : (b[metric] ?? 0) - (a[metric] ?? 0);
+      return diff || b.pm_leads - a.pm_leads;
+    });
 
     const tierStat = KOS_TIERS.map((t) => ({
       key: t.key,

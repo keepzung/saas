@@ -142,6 +142,9 @@ const tierStat = ref([]);
 const data = ref({ metric_note: '', metric_source: '' });
 const isWeeklySnap = computed(() => String(data.value.metric_source || '').startsWith('weekly_snapshot'));
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'] });
+// 列头服务端排序状态（metric=行字段名，order=ascend/descend）
+const sortField = ref('');
+const sortOrder = ref('descend');
 
 // 宽表（特斯拉/东风多列）启用横向滚动；Morgandada 精简列：自然表高随内容撑开（页面级滚动），
 // 表头用 CSS sticky 跟随滚动容器，修复「固定 560px 表体截断内容 + 下方大片空白」
@@ -153,13 +156,12 @@ const tableScroll = computed(() => {
 });
 const tableSticky = computed(() => (isTesla.value ? { offsetHeader: 56 } : undefined));
 
-const numSorter = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0);
 const ncol = (title, key, width = 96) => ({
   title,
   key,
   dataIndex: key,
   width,
-  sorter: numSorter(key),
+  sorter: true, // 服务端排序（onTableChange 带 metric/order 重新请求全量排序）
   align: 'right',
 });
 
@@ -262,7 +264,11 @@ async function reload() {
   try {
     const res = await getKoxAccountRanking({
       ...dateParams(),
-      ...(isMdd.value ? { metric: 'pm_leads_total' } : {}),
+      ...(sortField.value
+        ? { metric: sortField.value, order: sortOrder.value === 'ascend' ? 'asc' : 'desc' }
+        : isMdd.value
+          ? { metric: 'pm_leads_total' }
+          : {}),
       page: pagination.value.current,
       page_size: pagination.value.pageSize,
     });
@@ -292,9 +298,21 @@ function onFilterChange() {
   reload();
 }
 
-function onTableChange(pag) {
+function onTableChange(pag, filters, sorter) {
   pagination.value.current = pag.current;
   pagination.value.pageSize = pag.pageSize;
+  // 列头排序：服务端全量排序（点同一列切换升/降序，点「排名」列或取消排序恢复默认留资排序）
+  if (sorter && sorter.field && sorter.order) {
+    if (sorter.field !== sortField.value || sorter.order !== sortOrder.value) {
+      pagination.value.current = 1;
+    }
+    sortField.value = String(sorter.field);
+    sortOrder.value = sorter.order;
+  } else if (sortField.value) {
+    sortField.value = '';
+    sortOrder.value = 'descend';
+    pagination.value.current = 1;
+  }
   reload();
 }
 
