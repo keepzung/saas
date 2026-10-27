@@ -97,7 +97,7 @@ async function pullAll(cookie) {
 
   // ── 无标题回填：抓笔记页 meta description（正文首行），去尾部话题标签后作为展示标题 ──
   const tArg = process.argv.find((a) => a.startsWith('--titles-max='));
-  const TITLES_MAX = Number(tArg ? tArg.split('=')[1] : '') || 30;
+  const TITLES_MAX = Number(tArg ? tArg.split('=')[1] : '') || 20;
   const stripTags = (s) =>
     s
       .replace(/&quot;/g, '"')
@@ -134,7 +134,7 @@ async function pullAll(cookie) {
     } catch {
       skipped += 1;
     }
-    await new Promise((r) => setTimeout(r, 400)); // 限速防风控
+    await new Promise((r) => setTimeout(r, 1200)); // 限速防风控（抓页面比 API 敏感，批量抓取会触发盾）
   }
   if (pending.length) console.log(`titles backfilled: filled=${filled} skipped=${skipped}`);
   const finalMsg = `${msg}; titles: pending=${pending.length} filled=${filled} skipped=${skipped}`;
