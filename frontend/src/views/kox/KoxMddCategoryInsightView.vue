@@ -538,6 +538,7 @@ const summaryColumns = [
   { title: '参考笔记', key: 'notes_action', width: 100, align: 'center' },
 ];
 
+const defColumns = [
   { title: '品类', dataIndex: 'name', width: 120 },
   { title: '排序', dataIndex: 'sort', width: 70, align: 'right' },
   { title: '启用', key: 'enabled', width: 80 },
