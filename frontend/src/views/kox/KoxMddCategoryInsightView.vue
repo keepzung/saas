@@ -162,7 +162,7 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'title'">
-              <a :href="xhsSearch(record.title)" target="_blank" class="note-link" title="在小红书搜索该标题（需登录小红书网页版）">{{ record.title || '(无标题)' }}</a>
+              <span class="note-link">{{ record.title || '(无标题)' }}</span>
               <a-tag v-if="record.category !== '未归类'" class="mini">{{ record.category }}</a-tag>
             </template>
             <template v-else-if="column.key === 'content'">
@@ -178,6 +178,19 @@
             <template v-else-if="column.key === 'publish_time'">
               {{ record.publish_time ? dayjs(record.publish_time).format('YYYY-MM-DD') : '-' }}
             </template>
+          </template>
+          <template #expandedRowRender="{ record }">
+            <div class="note-expand">
+              <img v-if="record.cover_url" :src="record.cover_url" class="expand-cover" referrerpolicy="no-referrer" @error="$event.target.style.display = 'none'" />
+              <div class="expand-body">
+                <div class="expand-title">{{ record.title || '(无标题)' }}</div>
+                <div class="expand-content">{{ record.content || '正文未采集（后台补抓中）' }}</div>
+                <div class="expand-links">
+                  <a v-if="record.url" :href="record.url" target="_blank">原文直链 ↗（可能被风控拦）</a>
+                  <a :href="xhsSearch(record.title)" target="_blank">小红书搜索该标题 ↗（需登录）</a>
+                </div>
+              </div>
+            </div>
           </template>
         </a-table>
       </a-card>
@@ -392,9 +405,12 @@
       <div v-else class="note-list">
         <div v-for="nt in noteModal.notes" :key="nt.noteId" class="note-row">
           <div class="note-title">
-            <a :href="xhsSearch(nt.title)" target="_blank" title="在小红书搜索该标题（需登录小红书网页版）">{{ nt.title || '(无标题)' }}</a>
-            <a v-if="nt.url" :href="nt.url" target="_blank" class="note-raw-link" title="笔记原文直链（token 可能过期打不开）">原文</a>
+            <span>{{ nt.title || '(无标题)' }}</span>
+            <a v-if="nt.url" :href="nt.url" target="_blank" class="note-raw-link" title="笔记原文直链（可能被小红书风控拦截）">原文 ↗</a>
+            <a :href="xhsSearch(nt.title)" target="_blank" class="note-raw-link" title="在小红书搜索该标题（需登录小红书网页版）">搜索 ↗</a>
           </div>
+          <div v-if="nt.content" class="note-content">{{ nt.content }}</div>
+          <div v-else class="note-content muted">（正文未采集）</div>
           <div class="note-meta">
             <span>{{ nt.author || '匿名' }}</span>
             <a-tag color="green" class="mini">留资 {{ nt.leads }}</a-tag>
@@ -1217,6 +1233,59 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #94a3b8;
   font-weight: 400;
+}
+
+.note-content {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.note-expand {
+  display: flex;
+  gap: 12px;
+  background: #fafbfc;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.expand-cover {
+  width: 80px;
+  height: 106px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.expand-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.expand-title {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.expand-content {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.expand-links {
+  margin-top: 8px;
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
 }
 
 .note-meta {

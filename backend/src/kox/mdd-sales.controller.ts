@@ -32,6 +32,8 @@ interface NoteAgg {
   url: string | null;
   author: string | null;
   category: string;
+  content: string | null;
+  coverUrl: string | null;
   views: number;
   engagement: number;
   pmOpenings: number;
@@ -717,7 +719,7 @@ export class MddSalesController {
       }),
     ]);
 
-    // 3. 笔记主表（供给=窗口内发布；标题→品类归类）
+    // 3. 笔记主表（供给=窗口内发布；标题+正文+话题→品类归类）
     const rules = await this.mddCategory.loadRulesPublic();
     const [publishedNotes, activeNoteIds] = await Promise.all([
       this.prisma.koxNote.findMany({
@@ -726,17 +728,19 @@ export class MddSalesController {
       }),
       Promise.resolve([...new Set(statRows.map((s) => s.noteId))]),
     ]);
-    const noteMeta = new Map<string, { title: string; url: string | null; author: string | null; category: string }>();
+    const noteMeta = new Map<string, { title: string; url: string | null; author: string | null; content: string | null; coverUrl: string | null; category: string }>();
     const metaRows = await this.prisma.koxNote.findMany({
       where: { brandId: 5, noteId: { in: [...new Set([...activeNoteIds, ...publishedNotes.map((p2) => p2.noteId)])] } },
-      select: { noteId: true, title: true, noteUrl: true, authorName: true },
+      select: { noteId: true, title: true, noteUrl: true, authorName: true, content: true, coverUrl: true, topics: true },
     });
     for (const nt of metaRows) {
       noteMeta.set(nt.noteId, {
         title: nt.title ?? '',
         url: nt.noteUrl ?? null,
         author: nt.authorName ?? null,
-        category: classifyByRules(nt.title, rules),
+        content: nt.content,
+        coverUrl: nt.coverUrl ?? null,
+        category: classifyNote(nt.title, nt.content, nt.topics ?? [], rules),
       });
     }
     for (const p2 of publishedNotes) {
@@ -745,7 +749,9 @@ export class MddSalesController {
           title: p2.title ?? '',
           url: p2.noteUrl ?? null,
           author: p2.authorName ?? null,
-          category: classifyByRules(p2.title, rules),
+          content: null,
+          coverUrl: null,
+          category: classifyNote(p2.title, null, [], rules),
         });
       }
     }
@@ -904,6 +910,7 @@ export class MddSalesController {
       if (!meta || meta.category === '未归类') continue;
       const cur = noteAgg.get(s.noteId) ?? {
         noteId: s.noteId, title: meta.title, url: meta.url, author: meta.author, category: meta.category,
+        content: meta.content ? meta.content.slice(0, 300) : null, coverUrl: meta.coverUrl,
         views: 0, engagement: 0, pmOpenings: 0, leads: 0,
       };
       cur.views += s.views;
@@ -1293,7 +1300,7 @@ export class MddSalesController {
     const [publishedNotes, statRows] = await Promise.all([
       this.prisma.koxNote.findMany({
         where: { brandId: 5, publishTime: { gte: winStart, lt: winEndEx }, accountId: { not: null } },
-        select: { noteId: true, accountId: true, title: true, content: true, topics: true, noteUrl: true, publishTime: true },
+        select: { noteId: true, accountId: true, title: true, content: true, topics: true, noteUrl: true, publishTime: true, coverUrl: true },
         orderBy: { publishTime: 'desc' },
       }),
       this.prisma.koxNoteDailyStat.findMany({
@@ -1301,7 +1308,7 @@ export class MddSalesController {
         select: { noteId: true, exposure: true, views: true, likes: true, collects: true, comments: true, shares: true, pmOpenings: true, pmLeads: true, formLeads: true },
       }),
     ]);
-    interface NoteAgg2 { noteId: string; accountId: number; title: string; url: string | null; content: string | null; topics: string[]; category: string; publishTime: Date | null; exposure: number; views: number; engagement: number; pmOpenings: number; leads: number }
+    interface NoteAgg2 { noteId: string; accountId: number; title: string; url: string | null; content: string | null; coverUrl: string | null; topics: string[]; category: string; publishTime: Date | null; exposure: number; views: number; engagement: number; pmOpenings: number; leads: number }
     const noteAgg = new Map<string, NoteAgg2>();
     for (const nt of publishedNotes) {
       noteAgg.set(nt.noteId, {
@@ -1310,6 +1317,7 @@ export class MddSalesController {
         title: nt.title ?? '',
         url: nt.noteUrl ?? null,
         content: nt.content,
+        coverUrl: nt.coverUrl ?? null,
         topics: nt.topics ?? [],
         category: classifyNote(nt.title, nt.content, nt.topics ?? [], rules),
         publishTime: nt.publishTime,
@@ -1421,7 +1429,8 @@ export class MddSalesController {
           accountId: nt.accountId,
           title: nt.title,
           url: nt.url,
-          content: nt.content ? nt.content.slice(0, 200) : null,
+          content: nt.content ? nt.content.slice(0, 1000) : null,
+          cover_url: nt.coverUrl,
           has_content: Boolean(nt.content),
           topics: nt.topics,
           category: nt.category,
