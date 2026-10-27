@@ -148,9 +148,7 @@
         </div>
       </a-card>
       <a-card size="small" :bordered="false">
-        <a-empty v-if="!selAccount && !loading" description="先在上方选择一个 KOS 账号" />
         <a-table
-          v-else
           :columns="noteColumns"
           :data-source="notesFor"
           :loading="loading"
@@ -433,7 +431,7 @@ const monthRange = ref([dayjs().startOf('month').subtract(2, 'month'), dayjs()])
 // 种草转化（KOS 账号×笔记）
 const kos = ref({ accounts: [], notes: [], unmatched: [], staff_blank_orders: 0, totals: {}, scope_note: {} });
 const kosLens = ref('qty');
-const selAccount = ref(null);
+const selAccount = ref(0); // 0 = 全部账号（无筛选）
 const onlyWithLeads = ref(false);
 
 // 品类供需（原雷达）
@@ -474,12 +472,13 @@ const kosSorted = computed(() => {
   arr.sort((a, b) => (kosLens.value === 'qty' ? b.qty - a.qty : b.leads - a.leads));
   return arr;
 });
-const accountOptions = computed(() =>
-  kosSorted.value.map((a) => ({ label: `${a.nickname}（成交${a.qty}/留资${a.leads}）`, value: a.accountId })),
-);
-const selAccountInfo = computed(() => accounts.value.find((a) => a.accountId === selAccount.value) ?? null);
+const accountOptions = computed(() => [
+  { label: '全部账号（无筛选）', value: 0 },
+  ...kosSorted.value.map((a) => ({ label: `${a.nickname}（成交${a.qty}/留资${a.leads}）`, value: a.accountId })),
+]);
+const selAccountInfo = computed(() => (selAccount.value ? accounts.value.find((a) => a.accountId === selAccount.value) ?? null : null));
 const notesFor = computed(() => {
-  let list = kos.value.notes.filter((n) => n.accountId === selAccount.value);
+  let list = selAccount.value ? kos.value.notes.filter((n) => n.accountId === selAccount.value) : kos.value.notes;
   if (onlyWithLeads.value) list = list.filter((n) => n.leads > 0 || n.est_qty > 0);
   return list;
 });
@@ -592,10 +591,7 @@ async function reload() {
     unclassified.value = ins.unclassified ?? [];
     scopeNote.value = ins.scope_note ?? {};
     kos.value = kosRes ?? { accounts: [], notes: [], unmatched: [], staff_blank_orders: 0, totals: {}, scope_note: {} };
-    if (kosRes && !selAccount.value && kosRes.accounts?.length) {
-      const top = [...kosRes.accounts].sort((a, b) => b.qty + b.leads - (a.qty + a.leads))[0];
-      selAccount.value = top?.accountId ?? null;
-    }
+    if (kosRes && selAccount.value == null) selAccount.value = 0;
     await nextTick();
     if (tab.value === 'matrix') renderScatter();
   } catch (e) {
