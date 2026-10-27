@@ -934,7 +934,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.koxNote.upsert({
         where: { noteId },
         create: { noteId, ...data },
-        update: data,
+        // 星火报表无正文（content 恒 null），更新时跳过 content 以免覆盖已采集的正文
+        update: { ...data, content: undefined },
       });
       upserted += 1;
     }
