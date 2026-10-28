@@ -17,10 +17,12 @@
           <span class="f-label">账号标签：</span>
           <a-select
             v-model:value="accountTag"
+            mode="multiple"
             size="small"
-            style="width: 150px"
+            style="min-width: 150px"
             allow-clear
             placeholder="全部"
+            :max-tag-count="1"
             :options="tagOptions"
             @change="reload"
           />
@@ -252,7 +254,7 @@ const AD_PILLS = [
 const quick = ref('30');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);
 const caliber = ref('total');
-const accountTag = ref(undefined);
+const accountTag = ref([]);
 const tagOptions = ref([]);
 const blockTab = ref('publish');
 const rankMetric = ref('pm_leads_total');
@@ -375,7 +377,7 @@ function dateParams() {
     p.start = range.value[0].format('YYYY-MM-DD');
     p.end = range.value[1].format('YYYY-MM-DD');
   }
-  if (accountTag.value) p.accountTag = accountTag.value;
+  if (accountTag.value.length) p.accountTag = accountTag.value.join(',');
   return p;
 }
 

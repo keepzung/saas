@@ -2259,7 +2259,7 @@ export class KoxService {
         { account: { nickname: { contains: query.author, mode: 'insensitive' } } },
       ];
     if (query.accountTag || query.regionName) {
-      const scoped = { ...(query.accountTag ? { accountTag: query.accountTag } : {}), ...(query.regionName ? { regionName: query.regionName } : {}) };
+      const scoped = { ...(query.accountTag ? { accountTag: { in: query.accountTag.split(',').map((t) => t.trim()).filter(Boolean) } } : {}), ...(query.regionName ? { regionName: query.regionName } : {}) };
       const accs = await this.prisma.kosAccount.findMany({
         where: scoped,
         select: { id: true, nickname: true },
@@ -2900,7 +2900,7 @@ export class KoxService {
 
     // 账号（账号标签筛选联动：账号/内容类指标随标签过滤）
     const kosAccounts = await this.prisma.kosAccount.findMany({
-      where: { brandId, status: 'enabled', ...(query.accountTag ? { accountTag: query.accountTag } : {}) },
+      where: { brandId, status: 'enabled', ...(query.accountTag ? { accountTag: { in: query.accountTag.split(',').map((t) => t.trim()).filter(Boolean) } } : {}) },
       select: { id: true, nickname: true, storeName: true, fans: true, accountTag: true },
     });
     const tagRows = await this.prisma.kosAccount.findMany({
@@ -3732,7 +3732,7 @@ export class KoxService {
       ...(query.accountType ? { accountType: query.accountType } : {}),
       ...(query.regionName ? { regionName: query.regionName } : {}),
       ...(query.tag || query.accountTag
-        ? { accountTag: query.tag || query.accountTag }
+        ? { accountTag: { in: (query.tag || query.accountTag).split(',').map((t) => t.trim()).filter(Boolean) } }
         : {}),
       ...(query.keyword
         ? { nickname: { contains: query.keyword, mode: 'insensitive' } }

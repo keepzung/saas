@@ -33,10 +33,12 @@
       <a-select
         v-if="!isDf"
         v-model:value="tag"
+        mode="multiple"
         size="small"
-        style="width: 130px"
+        style="min-width: 150px"
         allow-clear
         placeholder="账号标签"
+        :max-tag-count="1"
         :options="tagOptions"
         @change="onFilterChange"
       />
@@ -132,7 +134,7 @@ const quick = ref('7');
 const range = ref([dayjs().subtract(6, 'day'), dayjs()]);
 const regionName = ref(undefined);
 const accountType = ref(undefined);
-const tag = ref(undefined);
+const tag = ref([]);
 const keyword = ref('');
 const regionOptions = ref([]);
 const tagOptions = ref([]);
@@ -254,7 +256,7 @@ function dateParams() {
   }
   if (regionName.value) p.regionName = regionName.value;
   if (accountType.value) p.accountType = accountType.value;
-  if (tag.value) p.tag = tag.value;
+  if (tag.value.length) p.tag = tag.value.join(',');
   if (keyword.value.trim()) p.keyword = keyword.value.trim();
   return p;
 }
@@ -415,7 +417,7 @@ onMounted(() => {
     range.value = [dayjs(route.query.start), dayjs(route.query.end)];
     quick.value = '';
   }
-  if (route.query.tag) tag.value = route.query.tag;
+  if (route.query.tag) tag.value = String(route.query.tag).split(',').filter(Boolean);
   if (route.query.regionName) regionName.value = route.query.regionName;
   loadFacets();
   reload();
