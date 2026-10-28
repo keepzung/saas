@@ -3731,8 +3731,8 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
       ...(query.accountType ? { accountType: query.accountType } : {}),
       ...(query.regionName ? { regionName: query.regionName } : {}),
-      ...(query.tag || query.accountTag
-        ? { accountTag: { in: (query.tag || query.accountTag).split(',').map((t) => t.trim()).filter(Boolean) } }
+      ...((query.tag || query.accountTag)
+        ? { accountTag: { in: (query.tag || query.accountTag || '').split(',').map((t) => t.trim()).filter(Boolean) } }
         : {}),
       ...(query.keyword
         ? { nickname: { contains: query.keyword, mode: 'insensitive' } }
