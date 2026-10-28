@@ -302,8 +302,8 @@ async function reportBrand1() {
 async function main() {
   console.log(`MDD(${FROM}) → marketineok(${TO}) 演示数据复制`);
   console.log(`目标库: ${dbLabel()}${DRY_RUN ? ' [dry-run 只读]' : CLEAN_ONLY ? ' [仅清理]' : ' [将写入]'}`);
-  if (!DRY_RUN && /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || '')) {
-    throw new Error('DATABASE_URL 指向本地库——本脚本仅应在服务器上对 saas_prod 执行');
+  if (!DRY_RUN && !/\/saas_prod(\?|$)/.test(process.env.DATABASE_URL || '')) {
+    throw new Error('DATABASE_URL 未指向 saas_prod——本脚本仅应在服务器上对 saas_prod 执行');
   }
 
   const before = await snapshotFrom('复制前');
