@@ -12,7 +12,9 @@
           <a-select
             v-model:value="accountTag"
             size="small"
-            style="width: 150px"
+            mode="multiple"
+            :max-tag-count="1"
+            style="width: 200px"
             allow-clear
             placeholder="全部"
             :options="tagOptions"
@@ -280,7 +282,7 @@ const RANK_METRICS = [
 
 const quick = ref('30');
 const range = ref([dayjs().subtract(29, 'day'), dayjs()]);
-const accountTag = ref(undefined);
+const accountTag = ref([]);
 const regionName = ref('');
 const tagOptions = ref([]);
 const regionOptions = ref([]);
@@ -326,7 +328,8 @@ function dateParams() {
     p.start = range.value[0].format('YYYY-MM-DD');
     p.end = range.value[1].format('YYYY-MM-DD');
   }
-  if (accountTag.value) p.accountTag = accountTag.value;
+  // 账号标签多选：逗号分隔传后端（overview/noteFilters/account-ranking 均按 in 列表解析）
+  if (accountTag.value?.length) p.accountTag = accountTag.value.join(',');
   if (regionName.value) p.regionName = regionName.value;
   return p;
 }
@@ -358,8 +361,8 @@ async function reload() {
 async function loadRank() {
   try {
     const params = { ...dateParams(), metric: rankMetric.value, page_size: 20 };
-    // 排行卡自带筛选优先；未选时跟随页面级筛选
-    const tag = rankTag.value ?? accountTag.value;
+    // 排行卡自带筛选优先；未选时跟随页面级筛选（多标签逗号拼接，后端 in 解析）
+    const tag = rankTag.value ?? (accountTag.value?.length ? accountTag.value.join(',') : '');
     const region = rankRegion.value ?? regionName.value;
     if (tag) params.tag = tag;
     if (region) params.regionName = region;
@@ -512,7 +515,7 @@ function goAccount() {
   const q = new URLSearchParams();
   q.set('start', range.value?.[0]?.format('YYYY-MM-DD') ?? '');
   q.set('end', range.value?.[1]?.format('YYYY-MM-DD') ?? '');
-  const tag = rankTag.value ?? accountTag.value;
+  const tag = rankTag.value ?? (accountTag.value?.length ? accountTag.value.join(',') : '');
   const region = rankRegion.value ?? regionName.value;
   if (tag) q.set('tag', tag);
   if (region) q.set('regionName', region);

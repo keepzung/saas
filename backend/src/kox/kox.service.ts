@@ -271,7 +271,8 @@ export class KoxService {
       : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
     const platform = query.platform || 'all';
     const brandId = query.brandId ? Number(query.brandId) : undefined;
-    const accountTag = query.accountTag || '';
+    // 账号标签多选：逗号分隔（与账号表现分析/笔记列表口径一致）
+    const accountTag = (query.accountTag ?? '').split(',').map((t) => t.trim()).filter(Boolean);
     const regionName = query.regionName || '';
 
     const where: Prisma.KoxDailyStatWhereInput = {
@@ -281,7 +282,7 @@ export class KoxService {
     };
     const accountWhere: Prisma.KosAccountWhereInput = {
       ...(brandId ? { brandId } : {}),
-      ...(accountTag ? { accountTag } : {}),
+      ...(accountTag.length ? { accountTag: { in: accountTag } } : {}),
       ...(regionName ? { regionName } : {}),
       // 字段1：账号基线 = 大区刷新对照表（192 户），非对照表账号置 disabled 不计入
       status: 'enabled',
@@ -296,7 +297,7 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
     };
     let filteredAccounts: { id: number; nickname: string }[] | null = null;
-    if (accountTag || regionName) {
+    if (accountTag.length || regionName) {
       filteredAccounts = await this.prisma.kosAccount.findMany({
         where: accountWhere,
         select: { id: true, nickname: true },
@@ -578,12 +579,12 @@ export class KoxService {
       if (proMatrix) {
         staffUse = proMatrix.rows;
         matrixMeta = { source: proMatrix.source, dateType: proMatrix.dateType, statDate: proMatrix.statDate };
-        if (accountTag || regionName) {
+        if (accountTag.length || regionName) {
           staffUse = proMatrix.rows.filter((s) => {
             const a = gAccOfStaff(s);
             return (
               !!a &&
-              (!accountTag || a.accountTag === accountTag) &&
+              (!accountTag.length || (a.accountTag != null && accountTag.includes(a.accountTag))) &&
               (!regionName || a.regionName === regionName)
             );
           });
