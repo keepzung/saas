@@ -21,6 +21,13 @@ export const BRAND_THEMES = {
     logoW: 288,
     sidebarLogoH: 34, // 侧栏品牌 logo 高度（默认 24 太小）
   },
+  4: {
+    name: '大众项目工作区',
+    logo: '/images/login/vw-logo.png',
+    short: '大众',
+    logoH: 44, // 欢迎页头部 logo 高度（VW 方形圆标，默认 36 偏小；≤44 不触发头部条加高）
+    sidebarLogoH: 30, // 侧栏品牌 logo 高度（圆形标默认 24 太小）
+  },
 };
 
 export function brandTheme(brandId) {
