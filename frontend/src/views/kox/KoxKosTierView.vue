@@ -35,11 +35,13 @@
           <div class="toolbar-right">
             <span class="tb-label">账号标签：</span>
             <a-select
-              v-model:value="tag"
+              v-model:value="tags"
+              mode="multiple"
               size="small"
-              style="width: 130px"
+              style="min-width: 150px"
               allow-clear
               placeholder="全部"
+              :max-tag-count="1"
               :options="tagOptions"
               @change="reload"
             />
@@ -135,7 +137,7 @@ const TIERS = [
 
 const quick = ref('7');
 const range = ref([dayjs().subtract(6, 'day'), dayjs()]);
-const tag = ref(undefined);
+const tags = ref([]);
 const tagOptions = ref([]);
 const regionFilter = ref(undefined);
 const regionOptions = ref([]);
@@ -154,7 +156,7 @@ function dateParams() {
     p.start = range.value[0].format('YYYY-MM-DD');
     p.end = range.value[1].format('YYYY-MM-DD');
   }
-  if (tag.value) p.tag = tag.value;
+  if (tags.value.length) p.tag = tags.value.join(',');
   if (regionFilter.value) p.regionName = regionFilter.value;
   if (keyword.value) p.keyword = keyword.value;
   return p;

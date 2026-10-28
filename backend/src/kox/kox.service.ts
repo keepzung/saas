@@ -4676,9 +4676,11 @@ export class KoxService {
     // 口径：整行内容指标 = 专业号员工矩阵窗口快照（发布/曝光/阅读/互动）；线索经营按归属账号三数
     // KoxNote 笔记口径弃用（星火 partner 通道停更，仅保留笔记级明细用途）
     // 账号基线=大区刷新对照表（192 户，与运营总览一致）
+    // 账号标签支持多选：tag 传逗号分隔值（2026-10-28 客户要求；单值兼容旧调用）
+    const tagFilter = (query.tag ?? '').split(',').map((t) => t.trim()).filter(Boolean);
     const accountWhere: Prisma.KosAccountWhereInput = {
       ...(brandId ? { brandId } : {}),
-      ...(query.tag ? { accountTag: query.tag } : {}),
+      ...(tagFilter.length ? { accountTag: { in: tagFilter } } : {}),
       ...(query.regionName ? { regionName: query.regionName } : {}),
       ...(query.keyword
         ? { nickname: { contains: query.keyword, mode: 'insensitive' } }
