@@ -183,12 +183,33 @@ async function mockCategoryBackfill() {
     where: { brandId: TO, noteId: { startsWith: PREFIX } },
     select: { id: true, noteId: true, title: true, content: true, topics: true, category: true, modelTag: true },
   });
-  let catSet = 0, modelSet = 0, changed = 0;
+
+  // 第一遍：规则命中，统计实测品类分布（作为未命中笔记的加权分配依据）
+  const matched = new Map(); // id → 命中品类
   const dist = new Map();
   for (const n of notes) {
     const cat = classifyNoteLocal(n.title, n.content, n.topics, rules);
-    const nextCategory = cat === MDD_UNCLASSIFIED ? null : cat;
-    // 约 72% 命中品类的笔记视作「提及了品类」(modelTag=品类)，其余留空 → 饼图显示 未提及
+    if (cat !== MDD_UNCLASSIFIED) { matched.set(n.id, cat); dist.set(cat, (dist.get(cat) ?? 0) + 1); }
+  }
+  const weighted = [...dist.entries()].sort((a, b) => b[1] - a[1]);
+  const weightedTotal = weighted.reduce((s, [, c]) => s + c, 0);
+  /** 未命中笔记按实测占比加权分派品类（稳定 hash，重跑一致）；pct 传入不同盐分离 hash 用途 */
+  const pickWeighted = (noteId, salt) => {
+    let h = hashPct(salt + noteId);
+    for (const [c, cnt] of weighted) {
+      if (h < Math.round((cnt / weightedTotal) * 100)) return c;
+      h -= Math.round((cnt / weightedTotal) * 100);
+    }
+    return weighted[weighted.length - 1][0];
+  };
+
+  // 第二遍：回填。未命中笔记约 10% 保持未分类(真实感)，其余加权分派；
+  // 命中品类的笔记约 72% 视作「提及了品类」(modelTag=品类)，其余留空 → 饼图显示 未提及
+  let catSet = 0, modelSet = 0, changed = 0;
+  const finalDist = new Map();
+  for (const n of notes) {
+    let nextCategory = matched.get(n.id) ?? null;
+    if (!nextCategory) nextCategory = hashPct('u' + n.noteId) < 10 ? null : pickWeighted(n.noteId, 'c');
     const nextModel = nextCategory && hashPct(n.noteId) < 72 ? nextCategory : null;
     if (nextCategory !== (n.category ?? null) || nextModel !== (n.modelTag ?? null)) {
       changed += 1;
@@ -196,11 +217,11 @@ async function mockCategoryBackfill() {
         await prisma.koxNote.update({ where: { id: n.id }, data: { category: nextCategory, modelTag: nextModel } });
       }
     }
-    if (nextCategory) { catSet += 1; dist.set(nextCategory, (dist.get(nextCategory) ?? 0) + 1); }
+    if (nextCategory) { catSet += 1; finalDist.set(nextCategory, (finalDist.get(nextCategory) ?? 0) + 1); }
     if (nextModel) modelSet += 1;
   }
   console.log(`  品类回填: ${notes.length} 篇 → category ${catSet} 篇 / modelTag(提及) ${modelSet} 篇，更新 ${changed} 行${DRY_RUN ? '（dry-run 不写）' : ''}`);
-  for (const [c, n] of [...dist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`    ${c}: ${n} 篇`);
+  for (const [c, n] of [...finalDist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`    ${c}: ${n} 篇`);
 }
 
 const prisma = new PrismaClient();
