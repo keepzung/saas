@@ -12,6 +12,9 @@
 //   node copy-mdd-to-brand1.cjs --dry-run   # 只读试跑，打印将复制的行数，不写库
 //   node copy-mdd-to-brand1.cjs             # 清旧 mock 行 + 全量复制(日常重跑入口，幂等)
 //   node copy-mdd-to-brand1.cjs --clean     # 仅清除 brand 1 的 mock 行(回滚)
+//   node copy-mdd-to-brand1.cjs --align-date 2026-10-29
+//       # 演示对齐：把各表日期整体刚性平移(保留日内时刻与相对间隔)，使数据截止日=指定日 00:00。
+//       # 冻结快照 + 滑动时间窗(近7天/今日)在演示当天才不会出现尾日/当日归零。
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
@@ -34,6 +37,97 @@ const PREFIX = 'b1m_';
 const DRY_RUN = process.argv.includes('--dry-run');
 const CLEAN_ONLY = process.argv.includes('--clean');
 const BATCH = 500;
+
+// ── 日期对齐(--align-date YYYY-MM-DD)：冻结快照对齐到演示日 ──────────────
+// 各表按锚点字段取 brand 5 数据截止时刻，整体平移使截止时刻=演示日 00:00（ms 级刚性平移，
+// 保留日内时刻/相对间隔，日期唯一键平移后仍不冲突）。仅作用于 brand 1 的 mock 行。
+const ALIGN_ARG = (() => {
+  const i = process.argv.indexOf('--align-date');
+  return i > -1 ? process.argv[i + 1] : null;
+})();
+const ALIGN_CONFIG = {
+  koxNote: { anchor: ['publishTime'], dates: ['publishTime', 'statDate'] },
+  koxNoteDailyStat: { anchor: ['day'], dates: ['day'] },
+  koxContentNoteDaily: { anchor: ['day'], dates: ['day', 'notePublishTime'] },
+  koxContentStatDaily: { anchor: ['day'], dates: ['day'] },
+  koxJuguangNoteDaily: { anchor: ['day'], dates: ['day'] },
+  koxCampaignDailyStat: { anchor: ['statDate'], dates: ['statDate'] },
+  // lastConsumeDate 为 'YYYY-MM-DD' 字符串，与 partnerSnapshotAt 取较晚者为锚
+  sparkAccount: {
+    anchor: ['partnerSnapshotAt', 'lastConsumeDate'], strFields: ['lastConsumeDate'],
+    dates: ['partnerSnapshotAt'], strDates: ['lastConsumeDate'],
+  },
+  sparkStaffBrandDaily: { anchor: ['statDate'], dates: ['statDate'] },
+  sparkStaffUserDaily: { anchor: ['statDate'], dates: ['statDate'] },
+  proKosOverview: { anchor: ['statDate'], dates: ['statDate', 'startDate', 'endDate'] },
+  proKosStaff: { anchor: ['statDate'], dates: ['statDate'] }, // bindTime 保留原值(历史绑定时间更自然)
+  laiguLead: {
+    anchor: ['sessionCreatedAt', 'sessionEndedAt', 'firstMessageAt', 'lastMessageAt'],
+    dates: ['sessionCreatedAt', 'sessionEndedAt', 'firstMessageAt', 'lastMessageAt'],
+  },
+  laiguComment: { anchor: ['createdAt'], dates: ['createdAt'] },
+  proClueDaily: { anchor: ['day'], dates: ['day'] },
+  proClueUserDay: { anchor: ['day'], dates: ['day'] },
+  proClueToolStatDaily: { anchor: ['day'], dates: ['day'] },
+  clueAnalysisDaily: { anchor: ['day'], dates: ['day'] },
+  clueAcqToolDaily: { anchor: ['day'], dates: ['day'] },
+  koxDailyStat: { anchor: ['statDate'], dates: ['statDate'] },
+  koxRegionAdSnapshot: { anchor: ['statDate'], dates: ['statDate'] },
+};
+const ALIGN_SHIFTS = {}; // model → 平移毫秒数
+/** 'YYYY-MM-DD...' → 本地零点 Date（JS 默认把纯日期串当 UTC，这里显式按本地解析） */
+function parseLocalDateStr(s) {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+async function computeAlignShifts(target00) {
+  for (const [model, cfg] of Object.entries(ALIGN_CONFIG)) {
+    let maxA = null;
+    for (const f of cfg.anchor) {
+      let v = null;
+      if ((cfg.strFields || []).includes(f)) {
+        const rows = await prisma[model].findMany({ where: { brandId: FROM }, select: { [f]: true } });
+        for (const r of rows) {
+          const d = r[f] ? parseLocalDateStr(r[f]) : null;
+          if (d && (!maxA || d > maxA)) maxA = d;
+        }
+        continue;
+      }
+      const r = await prisma[model].aggregate({ _max: { [f]: true }, where: { brandId: FROM } });
+      v = r._max[f];
+      if (v && (!maxA || v > maxA)) maxA = v;
+    }
+    ALIGN_SHIFTS[model] = maxA ? target00.getTime() - maxA.getTime() : 0;
+    if (ALIGN_SHIFTS[model] < 0) {
+      console.log(`  日期对齐 ${model}: 数据截止已晚于目标日(${maxA?.toISOString?.() ?? maxA})，平移量取 0`);
+      ALIGN_SHIFTS[model] = 0;
+    }
+  }
+}
+function alignRow(model, row) {
+  const ms = ALIGN_SHIFTS[model];
+  if (!ms) return row;
+  const cfg = ALIGN_CONFIG[model];
+  for (const f of cfg.dates) if (row[f] instanceof Date) row[f] = new Date(row[f].getTime() + ms);
+  for (const f of cfg.strDates || []) {
+    if (typeof row[f] === 'string' && /^\d{4}-/.test(row[f])) {
+      const d = parseLocalDateStr(row[f]);
+      if (d) {
+        const nd = new Date(d.getTime() + ms);
+        const p = (n) => String(n).padStart(2, '0');
+        row[f] = `${nd.getFullYear()}-${p(nd.getMonth() + 1)}-${p(nd.getDate())}` + row[f].slice(10);
+      }
+    }
+  }
+  return row;
+}
+function fmtShift(ms) {
+  const abs = Math.abs(ms);
+  const d = Math.floor(abs / 86400000);
+  const h = Math.round((abs % 86400000) / 3600000);
+  return `${ms >= 0 ? '+' : '-'}${d}天${h}小时`;
+}
 
 const prisma = new PrismaClient();
 
@@ -188,51 +282,54 @@ async function copyAll() {
   const srcNotes = await prisma.koxNote.findMany({ where: { brandId: FROM } });
   await insertMany('koxNote', srcNotes.map((r) => {
     const { id, noteId, accountId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, noteId: PREFIX + noteId, accountId: remapAcc(accountId) };
+    return alignRow('koxNote', { ...rest, brandId: TO, noteId: PREFIX + noteId, accountId: remapAcc(accountId) });
   }), 'KoxNote');
 
   // ── 4. 笔记日Stat（量最大，分批）──
   const srcNoteStats = await prisma.koxNoteDailyStat.findMany({ where: { brandId: FROM } });
   await insertMany('koxNoteDailyStat', srcNoteStats.map((r) => {
     const { id, noteId, accountId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, noteId: PREFIX + noteId, accountId: remapAcc(accountId) };
+    return alignRow('koxNoteDailyStat', { ...rest, brandId: TO, noteId: PREFIX + noteId, accountId: remapAcc(accountId) });
   }), 'KoxNoteDailyStat');
 
   // ── 5. 聚光/投流 ──
   const srcContentNotes = await prisma.koxContentNoteDaily.findMany({ where: { brandId: FROM } });
   await insertMany('koxContentNoteDaily', srcContentNotes.map((r) => {
     const { id, noteId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, noteId: PREFIX + noteId };
+    return alignRow('koxContentNoteDaily', { ...rest, brandId: TO, noteId: PREFIX + noteId });
   }), 'KoxContentNoteDaily');
 
   const srcContentStats = await prisma.koxContentStatDaily.findMany({ where: { brandId: FROM } });
   await insertMany('koxContentStatDaily', srcContentStats.map((r) => {
     const { id, vSellerId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, vSellerId: PREFIX + vSellerId };
+    return alignRow('koxContentStatDaily', { ...rest, brandId: TO, vSellerId: PREFIX + vSellerId });
   }), 'KoxContentStatDaily');
 
   const srcJuguang = await prisma.koxJuguangNoteDaily.findMany({ where: { brandId: FROM } });
   await insertMany('koxJuguangNoteDaily', srcJuguang.map((r) => {
     const { id, noteId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, noteId: PREFIX + noteId };
+    return alignRow('koxJuguangNoteDaily', { ...rest, brandId: TO, noteId: PREFIX + noteId });
   }), 'KoxJuguangNoteDaily');
 
   const srcCampaign = await prisma.koxCampaignDailyStat.findMany({ where: { brandId: FROM } });
   await insertMany('koxCampaignDailyStat', srcCampaign.map((r) => {
     const { id, virtualSellerId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, virtualSellerId: PREFIX + virtualSellerId };
+    return alignRow('koxCampaignDailyStat', { ...rest, brandId: TO, virtualSellerId: PREFIX + virtualSellerId });
   }), 'KoxCampaignDailyStat');
 
   const srcSparkAccounts = await prisma.sparkAccount.findMany({ where: { brandId: FROM } });
   await insertMany('sparkAccount', srcSparkAccounts.map((r) => {
     const { id, virtualSellerId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, virtualSellerId: PREFIX + virtualSellerId };
+    return alignRow('sparkAccount', { ...rest, brandId: TO, virtualSellerId: PREFIX + virtualSellerId });
   }), 'SparkAccount');
 
   // ── 6. 员工矩阵 / 专业号（复合唯一键含 brandId，直接换 brandId）──
   const copyBrandScoped = async (model, label) => {
     const rows = await prisma[model].findMany({ where: { brandId: FROM } });
-    await insertMany(model, rows.map((r) => { const { id, ...rest } = strip(r); return { ...rest, brandId: TO }; }), label);
+    await insertMany(model, rows.map((r) => {
+      const { id, ...rest } = strip(r);
+      return alignRow(model, { ...rest, brandId: TO });
+    }), label);
   };
   await copyBrandScoped('sparkStaffBrandDaily', 'SparkStaffBrandDaily');
   await copyBrandScoped('sparkStaffUserDaily', 'SparkStaffUserDaily');
@@ -243,7 +340,7 @@ async function copyAll() {
   const srcLeads = await prisma.laiguLead.findMany({ where: { brandId: FROM } });
   await insertMany('laiguLead', srcLeads.map((r) => {
     const { id, sessionId, ...rest } = strip(r);
-    return { ...rest, brandId: TO, sessionId: PREFIX + sessionId };
+    return alignRow('laiguLead', { ...rest, brandId: TO, sessionId: PREFIX + sessionId });
   }), 'LaiguLead');
 
   await copyBrandScoped('laiguComment', 'LaiguComment');
@@ -307,6 +404,16 @@ async function main() {
   }
 
   const before = await snapshotFrom('复制前');
+
+  if (ALIGN_ARG && !CLEAN_ONLY) {
+    const target00 = parseLocalDateStr(ALIGN_ARG);
+    if (!target00 || Number.isNaN(target00.getTime())) throw new Error(`--align-date 格式应为 YYYY-MM-DD，收到: ${ALIGN_ARG}`);
+    console.log(`\n[日期对齐] 各表数据截止时刻 → ${ALIGN_ARG} 00:00（刚性平移，仅 brand ${TO}）`);
+    await computeAlignShifts(target00);
+    for (const [model, ms] of Object.entries(ALIGN_SHIFTS)) {
+      if (ms) console.log(`  ${model}: ${fmtShift(ms)}`);
+    }
+  }
 
   await cleanMock();
   if (!CLEAN_ONLY) await copyAll();
