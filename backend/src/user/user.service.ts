@@ -366,7 +366,7 @@ export class UserService {
   /**
    * 批量开通（4级账号体系）：手机号即登录账号。
    * 每行独立处理，单行失败不影响其余行；已存在手机号视为更新（昵称/组织/品牌角色/绑定）。
-   * 缺省密码 = passwordPrefix(默认 Mdd@) + 手机号后 4 位。
+   * 缺省密码 = MKT2026（2026-10-27 客户指定）；显式传 passwordPrefix 时仍为 前缀+手机号后 4 位。
    */
   async createUsersBatch(operatorId: number, dto: BatchCreateUsersDto) {
     const operatorRole = await this.assertOperator(operatorId);
@@ -380,7 +380,8 @@ export class UserService {
       allowedBrands = new Set(mine.map((m) => m.brandId));
     }
 
-    const prefix = dto.passwordPrefix ?? 'Mdd@';
+    // 行未填密码时：未传 passwordPrefix → 统一默认密码 MKT2026；显式传了前缀 → 前缀+手机号后 4 位
+    const prefix = dto.passwordPrefix;
     const result = {
       total: dto.rows.length,
       added: 0,
@@ -428,7 +429,7 @@ export class UserService {
           where: { phone: row.phone },
           select: { id: true },
         });
-        const password = row.password ?? `${prefix}${row.phone.slice(-4)}`;
+        const password = row.password ?? (prefix ? `${prefix}${row.phone.slice(-4)}` : 'MKT2026');
         let userId: number;
         if (exists) {
           await this.prisma.user.update({

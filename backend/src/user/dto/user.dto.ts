@@ -153,7 +153,7 @@ export class BatchCreateUsersDto {
   @Type(() => BatchUserRowDto)
   rows: BatchUserRowDto[];
 
-  /** 缺省密码生成前缀：`Mdd@` + 手机号后 4 位 */
+  /** 缺省密码前缀（可选）：显式传时为 前缀+手机号后 4 位；不传则统一默认密码 MKT2026 */
   @IsOptional()
   @IsString()
   @MaxLength(20)

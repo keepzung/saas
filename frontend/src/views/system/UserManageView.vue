@@ -247,7 +247,7 @@
         <a-row :gutter="12">
           <a-col :span="12">
             <a-form-item label="密码生成前缀">
-              <a-input v-model:value="batchPasswordPrefix" placeholder="Mdd@" />
+              <a-input v-model:value="batchPasswordPrefix" placeholder="留空则统一默认密码 MKT2026" />
             </a-form-item>
           </a-col>
           <a-col :span="12">
@@ -593,7 +593,7 @@ async function submitBatchAssign() {
 const batchOpen = ref(false);
 const batchBrandId = ref(null);
 const batchRoleKey = ref('kos_operator');
-const batchPasswordPrefix = ref('Mdd@');
+const batchPasswordPrefix = ref('');
 const batchKosModules = ref(true);
 const batchRows = ref([]);
 const batchErrors = ref([]);
@@ -680,7 +680,7 @@ async function submitBatch() {
     }));
     const res = await batchCreateUsers({
       rows: payloadRows,
-      passwordPrefix: batchPasswordPrefix.value || 'Mdd@',
+      ...(batchPasswordPrefix.value ? { passwordPrefix: batchPasswordPrefix.value } : {}),
     });
     batchResult.value = res;
     message.success(`导入完成：新增 ${res.added} · 更新 ${res.updated} · 失败 ${res.failed}`);
