@@ -349,6 +349,8 @@ const isDf = [7, 8].includes(Number(auth.currentBrandId));
 // 特斯拉：内容分类 tag 意义有限 + 表单线索无笔记级数据源，按客户要求隐藏
 const isTesla = computed(() => Number(auth.currentBrandId ?? 0) === 6);
 const isMdd = computed(() => Number(auth.currentBrandId ?? 0) === 5);
+// 大众(4)：无数据时绝不回退演示（荣威假笔记对客户严重误导），如实空态
+const isVw = computed(() => Number(auth.currentBrandId ?? 0) === 4);
 const PAGE_SIZE = 10;
 const EXPORT_ROW_CAP = 5000;
 
@@ -945,9 +947,9 @@ function showDetail(row) {
   detailOpen.value = true;
 }
 
-// 封面加载失败：MDD 回退到中性占位（车图为其他品牌演示兜底，不得出现在 MDD）
+// 封面加载失败：MDD/大众回退到中性占位（车图为其他品牌演示兜底，不得出现在这些工作区）
 function onCoverError(record) {
-  record.cover = isMdd.value ? '' : `/images/kox-notes/note${(record.id % 5) + 1}.webp`;
+  record.cover = isMdd.value || isVw.value ? '' : `/images/kox-notes/note${(record.id % 5) + 1}.webp`;
 }
 
 const exporting = ref(false);
@@ -1157,15 +1159,21 @@ onMounted(async () => {
       summaryData.value = await getKoxNotesSummary(realParams());
       nextTick(renderCharts);
       nextTick(loadWordcloud);
+    } else if (isVw.value) {
+      mode.value = 'real';
     } else {
       mode.value = 'demo';
       await loadAccounts();
       regenerate();
     }
   } catch {
-    mode.value = 'demo';
-    await loadAccounts();
-    regenerate();
+    if (isVw.value) {
+      mode.value = 'real';
+    } else {
+      mode.value = 'demo';
+      await loadAccounts();
+      regenerate();
+    }
   } finally {
     loading.value = false;
     window.addEventListener('resize', onResize);

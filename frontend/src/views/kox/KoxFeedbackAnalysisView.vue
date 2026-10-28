@@ -270,7 +270,9 @@ const auth = useAuthStore();
 const isTesla = Number(auth.currentBrandId) === 6;
 // Morgandada(5) 同样接来鼓私信真实口径（服务端 isMdd 过滤已就绪）
 const isMdd = Number(auth.currentBrandId) === 5;
-const realChannel = isTesla || isMdd;
+// 大众(4)：暂未接来鼓，但绝不回退演示数据（假评论对客户严重误导），如实空态
+const isVw = Number(auth.currentBrandId) === 4;
+const realChannel = isTesla || isMdd || isVw;
 // 口径切换（MDD）：私信分析 / 评论监控 / 私信监控 —— 醒目视角切换条（客户要求显性化入口）
 const feedbackScope = ref('dm');
 const SCOPE_OPTIONS = [
@@ -542,7 +544,7 @@ async function loadData() {
   comments.value = [];
   page.value = 1;
   if (realChannel) {
-    laiguNote.value = '来鼓数据暂不可用，请稍后重试';
+    laiguNote.value = isVw ? '来鼓通道未接入（等待渠道凭证配置）' : '来鼓数据暂不可用，请稍后重试';
     return;
   }
   laiguNote.value = '来鼓通道未接入（等待渠道凭证配置），当前为演示数据';

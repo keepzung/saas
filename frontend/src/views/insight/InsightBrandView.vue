@@ -1,5 +1,5 @@
 <template>
-  <PageWrapper title="品牌监测" subtitle="华帝全平台社媒声量监测：内容、互动与情感倾向">
+  <PageWrapper title="品牌监测" subtitle="全平台社媒声量监测：内容、互动与情感倾向">
     <template #extra>
       <a-radio-group v-model:value="platform" size="small" @change="reloadAll">
         <a-radio-button value="">全部平台</a-radio-button>
@@ -226,6 +226,7 @@ import {
   markIrrelevant,
 } from '../../api/insight';
 import { useBreakpoint } from '../../composables/useBreakpoint';
+import { useAuthStore } from '../../stores/auth';
 
 const { isMobile } = useBreakpoint();
 
@@ -278,7 +279,11 @@ const fmtTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-');
 
 async function reloadOverview() {
   try {
-    const params = { platform: platform.value || undefined };
+    const auth = useAuthStore();
+    const params = {
+      platform: platform.value || undefined,
+      brandId: auth.currentBrandId ?? undefined,
+    };
     if (range.value?.[0]) {
       params.start = range.value[0].format('YYYY-MM-DD');
       params.end = range.value[1].format('YYYY-MM-DD');
@@ -293,12 +298,14 @@ async function reloadOverview() {
 async function reloadContents() {
   loading.value = true;
   try {
+    const auth = useAuthStore();
     const res = await getInsightContents({
       page: page.value,
       page_size: pageSize.value,
       platform: platform.value || undefined,
       sentiment: sentiment.value || undefined,
       keyword: keyword.value || undefined,
+      brandId: auth.currentBrandId ?? undefined,
     });
     list.value = res.list.map((r) => ({
       ...r,

@@ -9,8 +9,8 @@ export const getInsightContents = (params) =>
 export const markIrrelevant = (id) =>
   request.post(`/insight/brand/contents/${id}/irrelevant`);
 
-export const getInsightReports = () =>
-  request.get('/insight/brand/reports');
+export const getInsightReports = (params) =>
+  request.get('/insight/brand/reports', { params });
 
 export const createInsightReport = (data) =>
   request.post('/insight/brand/reports', data);

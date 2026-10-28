@@ -111,7 +111,7 @@
             <a-button size="small" type="link" danger @click="removeSet(s)">删除</a-button>
           </div>
           <div class="manage-row">
-            <a-input v-model:value="newSetName" size="small" style="width: 180px" placeholder="新套图名称（如 外-波尔多紫）" />
+            <a-input v-model:value="newSetName" size="small" style="width: 180px" placeholder="新套图名称（如 外观-白色）" />
             <a-button size="small" type="primary" @click="addSet">新增套图</a-button>
           </div>
         </a-tab-pane>

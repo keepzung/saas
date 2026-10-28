@@ -36,7 +36,7 @@
     </template>
 
     <a-alert
-      v-if="cookieValid === false"
+      v-if="cookieValid === false && !isVw"
       type="error"
       show-icon
       style="margin-bottom: 12px"
@@ -506,6 +506,8 @@ const auth = useAuthStore();
 const isTesla = computed(() => (auth.currentBrandId ?? 0) === 6);
 // Morgandada：投放三口径切换（自然流 / 聚光投放 / 汇总）
 const isMdd = computed(() => (auth.currentBrandId ?? 0) === 5);
+// 大众(4)：无投流数据时如实空态，绝不回退演示（荣威假经销商对客户严重误导）
+const isVw = computed(() => (auth.currentBrandId ?? 0) === 4);
 const caliber = ref('juguang');
 const PAGE_SIZE = 10;
 
@@ -692,15 +694,15 @@ async function probeAndLoad() {
         realParams({ metric: 'fee', page: page.value, page_size: PAGE_SIZE }),
       );
       applyData(probe, listRes);
-    } else if (isTesla.value) {
-      // 特斯拉工作区不降级为演示数据：该区间无投放就如实显示 0
+    } else if (isTesla.value || isVw.value) {
+      // 特斯拉/大众工作区不降级为演示数据：该区间无投放就如实显示 0
       mode.value = 'real';
       applyData(probe, { total: 0, list: [] });
     } else {
       mode.value = 'demo';
     }
   } catch {
-    if (isTesla.value) {
+    if (isTesla.value || isVw.value) {
       mode.value = 'real';
       applyData({ summary: {}, trend: [] }, { total: 0, list: [] });
     } else {

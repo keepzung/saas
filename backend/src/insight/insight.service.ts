@@ -6,15 +6,23 @@ import { PrismaService } from '../prisma/prisma.service';
 export class InsightService {
   constructor(private prisma: PrismaService) {}
 
-  async overview(query: { start?: string; end?: string; platform?: string }) {
+  async overview(query: {
+    start?: string;
+    end?: string;
+    platform?: string;
+    brandId?: string;
+  }) {
     const end = query.end ? new Date(query.end) : new Date();
     const start = query.start
       ? new Date(query.start)
       : new Date(end.getTime() - 29 * 24 * 3600 * 1000);
     const platform = query.platform || 'all';
+    // 品牌监测按工作区隔离（旧调用不传 brandId 时回落 brand1，保持兼容）
+    const brandId = Number(query.brandId ?? 1) || 1;
 
     const where: Prisma.InsightDailyStatWhereInput = {
       platform,
+      brandId,
       statDate: { gte: start, lte: end },
     };
     const rows = await this.prisma.insightDailyStat.findMany({
@@ -53,10 +61,14 @@ export class InsightService {
     platform?: string;
     sentiment?: string;
     keyword?: string;
+    brandId?: string;
   }) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const pageSize = Math.min(50, Number(query.page_size ?? 15) || 15);
-    const where: Prisma.InsightContentWhereInput = { irrelevant: false };
+    const where: Prisma.InsightContentWhereInput = {
+      irrelevant: false,
+      brandId: Number(query.brandId ?? 1) || 1,
+    };
     if (query.platform) where.platform = query.platform;
     if (query.sentiment) where.sentiment = query.sentiment;
     if (query.keyword) {
@@ -108,8 +120,9 @@ export class InsightService {
     return { id };
   }
 
-  async reports() {
+  async reports(brandIdParam?: string) {
     const rows = await this.prisma.insightReport.findMany({
+      where: { brandId: Number(brandIdParam ?? 1) || 1 },
       orderBy: { createdAt: 'desc' },
     });
     return {
@@ -126,7 +139,7 @@ export class InsightService {
   }
 
   async createReport(
-    dto: { name: string; period?: string; access?: string },
+    dto: { name: string; period?: string; access?: string; brandId?: string },
     userId: number,
   ) {
     const report = await this.prisma.insightReport.create({
@@ -134,6 +147,7 @@ export class InsightService {
         name: dto.name,
         period: dto.period ?? new Date().toISOString().slice(0, 7),
         access: dto.access ?? 'public',
+        brandId: Number(dto.brandId ?? 1) || 1,
         fileSize: 1024 * (200 + Math.floor(Math.random() * 3000)),
         createdById: userId,
       },

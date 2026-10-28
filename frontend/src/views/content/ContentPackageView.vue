@@ -82,7 +82,7 @@
     >
       <a-form layout="vertical" style="margin-top: 12px">
         <a-form-item label="内容包名称" required>
-          <a-input v-model:value="form.name" placeholder="如：华帝烟灶 · 双11种草包" />
+          <a-input v-model:value="form.name" placeholder="如：双11种草包" />
         </a-form-item>
         <a-form-item label="关联产品">
           <a-select
@@ -226,7 +226,7 @@
           <a-textarea v-model:value="matForm.content" :rows="6" />
         </a-form-item>
         <a-form-item label="标签（逗号分隔）">
-          <a-input v-model:value="matForm.tagsStr" placeholder="华帝, 新房装修" />
+          <a-input v-model:value="matForm.tagsStr" placeholder="新品, 日常种草" />
         </a-form-item>
       </a-form>
     </a-modal>

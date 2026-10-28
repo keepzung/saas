@@ -79,7 +79,7 @@
               mode="tags"
               style="width: 420px"
               :max-tag-count="5"
-              placeholder="输入话题词后回车，如：奕境X9（可多个）"
+              placeholder="输入话题词后回车（可多个）"
               :token-separators="[',', '，', ' ']"
             />
             <div class="form-hint" style="margin-top: 6px">

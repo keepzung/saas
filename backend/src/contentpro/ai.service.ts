@@ -194,14 +194,16 @@ export class AiService {
   }): GenerateResult {
     const p = ctx.productName;
     const role = ctx.persona[0] ?? ctx.strategyName ?? '门店销售';
-    const points = ctx.sellingPoints.length
-      ? ctx.sellingPoints
-      : ['限时预售权益，现在下订福利感拉满', '三电终身质保，长期持有放心', '锁单优先排产，早定早提车'];
+    // 兜底模板以策略卖点为骨架；各品牌卖点差异大，不做通用假卖点（历史遗留的东风预设已移除）
+    if (!ctx.sellingPoints.length) {
+      throw new Error('所选策略未配置卖点，无法生成兜底文案，请先在创作策略中补充卖点');
+    }
+    const points = ctx.sellingPoints;
 
     const titles = [
-      `${p}现在订还是等上市？我算给你听`,
-      `第一次看${p}？这篇讲清权益怎么用最划算`,
-      `${p}值不值得下手？${points.length} 个卖点给你交底`,
+      `${p}到底怎么选？帮你把重点捋清楚`,
+      `第一次了解${p}？这篇讲清大家最关心的几件事`,
+      `${p}值不值得入手？${points.length} 个卖点给你交底`,
     ];
 
     const bullet = points.map((s) => `🎁 ${s}`).join('\n\n');
@@ -209,15 +211,15 @@ export class AiService {
       ? ctx.knowledge.replace(/\s+/g, ' ').slice(0, 140)
       : '';
     const content = [
-      `昨天下午有个客户坐在店里，翻着手机问我：现在下手${p}，到底图啥。`,
+      `昨天下午有个客户坐在店里，翻着手机问我：${p}，到底图啥。`,
       '',
-      `我跟你讲，${role.split('，')[0]}最不怕的就是算账。今天把这本账给你摊开：`,
+      `我跟你讲，${role.split('，')[0]}最不怕的就是摆事实。今天把重点给你摊开：`,
       '',
       bullet,
       '',
-      kn ? `再说车本身：${kn}……（篇幅有限，到店我给你逐条讲）` : `再说车本身，到店我给你逐条讲。`,
+      kn ? `再说产品本身：${kn}……（篇幅有限，到店我给你逐条讲）` : `再说产品本身，到店我给你逐条讲。`,
       '',
-      `纠结的其实就一件事：你是想早点提车，还是想等上市后再看价格。这两个需求对应的动作不一样，别混着来。拿不准的把平时通勤和家里几口人用车的情况滴我，我按你的情况把落地账算一遍。`,
+      `每个人情况不一样，别急着下决定。拿不准的把自己的用车场景和预算滴我，我按你的情况帮你捋一遍。`,
       ctx.extra ? `\n备注：${ctx.extra}` : '',
     ]
       .filter((s) => s !== undefined)
@@ -227,13 +229,13 @@ export class AiService {
       new Set(
         [
           p,
-          `${p}预售`,
+          `${p}种草`,
           ...ctx.sellingPoints
             .map((s) => s.split(/[，,：:—]/)[0])
             .map((s) => s.slice(0, 8)),
           ctx.directionName,
           '购车攻略',
-          '限时权益',
+          '到店实拍',
         ].filter(Boolean),
       ),
     ).slice(0, 6);

@@ -70,7 +70,7 @@
       @ok="submitForm"
     >
       <div class="pkg-form">
-        <div class="pf-item"><label><span class="req">*</span> 包名称</label><a-input v-model:value="form.name" :maxlength="30" placeholder="例如：618 中央空调种草包" /></div>
+        <div class="pf-item"><label><span class="req">*</span> 包名称</label><a-input v-model:value="form.name" :maxlength="30" placeholder="例如：618 新品种草包" /></div>
         <div class="pf-item"><label>描述</label><a-textarea v-model:value="form.description" :rows="2" :maxlength="200" /></div>
         <div class="pf-item"><label>关联产品</label>
           <a-select v-model:value="form.productId" :options="productOptions" allow-clear placeholder="可选" show-search option-filter-prop="label" />

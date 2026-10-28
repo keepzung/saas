@@ -21,7 +21,7 @@
           </div>
           <div class="fc-item">
             <label><span class="req">*</span> 任务名称</label>
-            <a-input v-model:value="taskName" :maxlength="40" placeholder="例如：618 护肤新品种草批量稿" />
+            <a-input v-model:value="taskName" :maxlength="40" placeholder="例如：618 新车种草批量稿" />
           </div>
         </div>
       </div>

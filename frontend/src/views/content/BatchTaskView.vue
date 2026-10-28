@@ -164,7 +164,7 @@
     >
       <a-form layout="vertical" style="margin-top: 12px">
         <a-form-item label="任务名称" required>
-          <a-input v-model:value="form.taskName" placeholder="如：华帝烟灶·周末批量生成" />
+          <a-input v-model:value="form.taskName" placeholder="如：周末批量生成" />
         </a-form-item>
         <a-form-item label="目标产品">
           <a-select

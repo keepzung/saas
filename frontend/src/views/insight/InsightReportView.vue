@@ -49,7 +49,7 @@
     >
       <a-form layout="vertical" style="margin-top: 12px">
         <a-form-item label="报告名称" required>
-          <a-input v-model:value="form.name" placeholder="如：华帝品牌监测周报 W35" />
+          <a-input v-model:value="form.name" placeholder="如：品牌监测周报 W35" />
         </a-form-item>
         <a-form-item label="报告所属周期" required>
           <a-input v-model:value="form.period" placeholder="如：2026-08 W35" />
@@ -86,6 +86,7 @@ import {
   deleteInsightReport,
   getInsightReports,
 } from '../../api/insight';
+import { useAuthStore } from '../../stores/auth';
 
 const accessLabel = { public: '公开', password: '密码', private: '内部' };
 const accessColor = { public: 'green', password: 'orange', private: 'red' };
@@ -108,7 +109,8 @@ const form = reactive({ name: '', period: '', access: 'public' });
 async function reload() {
   loading.value = true;
   try {
-    const res = await getInsightReports();
+    const auth = useAuthStore();
+    const res = await getInsightReports({ brandId: auth.currentBrandId ?? undefined });
     list.value = res.list.map((r) => ({
       ...r,
       created_at: dayjs(r.created_at).format('YYYY-MM-DD HH:mm'),
@@ -127,7 +129,8 @@ async function saveCreate() {
   }
   creating.value = true;
   try {
-    await createInsightReport({ ...form });
+    const auth = useAuthStore();
+    await createInsightReport({ ...form, brandId: auth.currentBrandId ?? undefined });
     message.success('报告已上传');
     createOpen.value = false;
     Object.assign(form, { name: '', period: '', access: 'public' });

@@ -20,7 +20,9 @@ export class InsightController {
   constructor(private insightService: InsightService) {}
 
   @Get('insight/brand/overview')
-  overview(@Query() query: { start?: string; end?: string; platform?: string }) {
+  overview(
+    @Query() query: { start?: string; end?: string; platform?: string; brandId?: string },
+  ) {
     return this.insightService.overview(query);
   }
 
@@ -33,6 +35,7 @@ export class InsightController {
       platform?: string;
       sentiment?: string;
       keyword?: string;
+      brandId?: string;
     },
   ) {
     return this.insightService.contents(query);
@@ -44,13 +47,13 @@ export class InsightController {
   }
 
   @Get('insight/brand/reports')
-  reports() {
-    return this.insightService.reports();
+  reports(@Query('brandId') brandId?: string) {
+    return this.insightService.reports(brandId);
   }
 
   @Post('insight/brand/reports')
   createReport(
-    @Body() dto: { name: string; period?: string; access?: string },
+    @Body() dto: { name: string; period?: string; access?: string; brandId?: string },
     @Req() req: Request,
   ) {
     const user = req.user as { id: number };

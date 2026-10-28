@@ -117,7 +117,7 @@ const METRIC_OPTIONS = [
 ];
 
 const auth = useAuthStore();
-const brandId = computed(() => auth.currentBrandId ?? 7);
+const brandId = computed(() => auth.currentBrandId ?? 1);
 
 const range = ref('30');
 const metric = ref('views');

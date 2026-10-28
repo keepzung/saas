@@ -97,7 +97,7 @@ async function exportExcelData() {
   try {
     let rows = [];
     if (mode.value === 'real') {
-      const res = await getSparkProjects({ brandId: auth.currentBrandId ?? 2 });
+      const res = await getSparkProjects({ brandId: auth.currentBrandId ?? 1 });
       rows = (res.list ?? []).map((p) => ({
         项目名称: p.name,
         项目周期: p.period,
@@ -186,6 +186,8 @@ const fmt = (v) => Number(v ?? 0).toLocaleString();
 
 const isDf = [7, 8].includes(Number(auth.currentBrandId));
 const isMdd = computed(() => Number(auth.currentBrandId) === 5);
+// 大众(4)：无项目数据时如实空态，绝不回退演示（荣威假项目对客户严重误导）
+const isVw = computed(() => Number(auth.currentBrandId) === 4);
 
 const columns = computed(() => {
   const base = [
@@ -213,7 +215,7 @@ async function load() {
     if (isMdd.value) {
       // Morgandada：投放账户聚合视图（聚光日报真实数据，无项目档案）
       const res = await getSparkCampaignAccounts({
-        brandId: auth.currentBrandId ?? 5,
+        brandId: auth.currentBrandId ?? 1,
         page_size: 100,
       });
       list.value = (res.list ?? []).map((p) => ({
@@ -237,7 +239,7 @@ async function load() {
       return;
     }
     const res = await getSparkProjects({
-      brandId: auth.currentBrandId ?? 2,
+      brandId: auth.currentBrandId ?? 1,
     });
     if ((res.total ?? 0) > 0) {
       mode.value = 'real';
@@ -257,13 +259,21 @@ async function load() {
         lead_cost: p.msg_leads ? p.msg_lead_cost : '-',
         created_by: p.created_by,
       }));
+    } else if (isVw.value) {
+      mode.value = 'empty';
+      list.value = [];
     } else {
       mode.value = 'demo';
       list.value = demoList.value;
     }
   } catch {
-    mode.value = 'demo';
-    list.value = demoList.value;
+    if (isVw.value) {
+      mode.value = 'empty';
+      list.value = [];
+    } else {
+      mode.value = 'demo';
+      list.value = demoList.value;
+    }
   } finally {
     loading.value = false;
   }
