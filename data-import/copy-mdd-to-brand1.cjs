@@ -15,6 +15,10 @@
 //   node copy-mdd-to-brand1.cjs --align-date 2026-10-29
 //       # 演示对齐：把各表日期整体刚性平移(保留日内时刻与相对间隔)，使数据截止日=指定日 00:00。
 //       # 冻结快照 + 滑动时间窗(近7天/今日)在演示当天才不会出现尾日/当日归零。
+//   node copy-mdd-to-brand1.cjs --mock-category
+//       # 仅对 brand 1 既有 mock 笔记做品类回填(不重复制)：用 brand 5 的 MddCategoryRule 真实规则
+//       # 按标题>话题>正文归类，回填 category(内容类型效率柱状图) 与 modelTag(提及品类饼图，约72%提及率)。
+//       # 全量复制模式末尾会自动执行本步骤。
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
@@ -36,6 +40,7 @@ const TO = 1;
 const PREFIX = 'b1m_';
 const DRY_RUN = process.argv.includes('--dry-run');
 const CLEAN_ONLY = process.argv.includes('--clean');
+const MOCK_CATEGORY_ONLY = process.argv.includes('--mock-category');
 const BATCH = 500;
 
 // ── 日期对齐(--align-date YYYY-MM-DD)：冻结快照对齐到演示日 ──────────────
@@ -127,6 +132,75 @@ function fmtShift(ms) {
   const d = Math.floor(abs / 86400000);
   const h = Math.round((abs % 86400000) / 3600000);
   return `${ms >= 0 ? '+' : '-'}${d}天${h}小时`;
+}
+
+// ── 品类回填(--mock-category / 全量复制末尾自动)：brand 1 mock 笔记 × brand 5 真实品类规则 ──
+// 内容表现分析页柱状图(内容类型效率)按 KoxNote.category 聚合、饼图(提及车型分布)按 modelTag 聚合；
+// brand 5 工作区的柱状图走 mddCategoryOf(标题规则匹配)，brand 1 走 category 字段——复制来的笔记
+// 这两个字段为空导致全是 未分类/未提及。此处用与后端 classifyNote 完全一致的规则逻辑回填。
+const MDD_UNCLASSIFIED = '未归类';
+function classifyByRulesLocal(text, rules, opts = {}) {
+  const s = String(text ?? '').trim();
+  if (!s) return MDD_UNCLASSIFIED;
+  const lower = s.toLowerCase();
+  for (const r of rules) {
+    if (!r.pattern) continue;
+    if (opts.minPatternLen && r.pattern.trim().length < opts.minPatternLen) continue;
+    if (r.matchType === 'exact') {
+      if (s === r.pattern) return r.category;
+    } else if (lower.includes(r.pattern.toLowerCase())) {
+      return r.category;
+    }
+  }
+  return MDD_UNCLASSIFIED;
+}
+function classifyNoteLocal(title, content, topics, rules) {
+  const byTitle = classifyByRulesLocal(title, rules);
+  if (byTitle !== MDD_UNCLASSIFIED) return byTitle;
+  for (const tp of topics ?? []) {
+    const byTopic = classifyByRulesLocal(tp, rules);
+    if (byTopic !== MDD_UNCLASSIFIED) return byTopic;
+  }
+  if (content) {
+    const byContent = classifyByRulesLocal(content.slice(0, 800), rules, { minPatternLen: 2 });
+    if (byContent !== MDD_UNCLASSIFIED) return byContent;
+  }
+  return MDD_UNCLASSIFIED;
+}
+/** 稳定 hash → 0..99（决定该笔记是否视作「提及了品类」，重跑结果一致） */
+function hashPct(s) {
+  let h = 0;
+  for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % 100;
+}
+async function mockCategoryBackfill() {
+  const rules = (await prisma.mddCategoryRule.findMany({
+    where: { brandId: FROM, enabled: true },
+    orderBy: { priority: 'asc' },
+  })).map((r) => ({ pattern: r.pattern, matchType: r.matchType, category: r.category, priority: r.priority }));
+  if (!rules.length) { console.log('  品类回填: brand 5 无启用规则，跳过'); return; }
+  const notes = await prisma.koxNote.findMany({
+    where: { brandId: TO, noteId: { startsWith: PREFIX } },
+    select: { id: true, noteId: true, title: true, content: true, topics: true, category: true, modelTag: true },
+  });
+  let catSet = 0, modelSet = 0, changed = 0;
+  const dist = new Map();
+  for (const n of notes) {
+    const cat = classifyNoteLocal(n.title, n.content, n.topics, rules);
+    const nextCategory = cat === MDD_UNCLASSIFIED ? null : cat;
+    // 约 72% 命中品类的笔记视作「提及了品类」(modelTag=品类)，其余留空 → 饼图显示 未提及
+    const nextModel = nextCategory && hashPct(n.noteId) < 72 ? nextCategory : null;
+    if (nextCategory !== (n.category ?? null) || nextModel !== (n.modelTag ?? null)) {
+      changed += 1;
+      if (!DRY_RUN) {
+        await prisma.koxNote.update({ where: { id: n.id }, data: { category: nextCategory, modelTag: nextModel } });
+      }
+    }
+    if (nextCategory) { catSet += 1; dist.set(nextCategory, (dist.get(nextCategory) ?? 0) + 1); }
+    if (nextModel) modelSet += 1;
+  }
+  console.log(`  品类回填: ${notes.length} 篇 → category ${catSet} 篇 / modelTag(提及) ${modelSet} 篇，更新 ${changed} 行${DRY_RUN ? '（dry-run 不写）' : ''}`);
+  for (const [c, n] of [...dist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`    ${c}: ${n} 篇`);
 }
 
 const prisma = new PrismaClient();
@@ -403,6 +477,17 @@ async function main() {
     throw new Error('DATABASE_URL 未指向 saas_prod——本脚本仅应在服务器上对 saas_prod 执行');
   }
 
+  if (MOCK_CATEGORY_ONLY) {
+    console.log(`MDD(${FROM}) → marketineok(${TO}) 品类回填模式`);
+    console.log(`目标库: ${dbLabel()}${DRY_RUN ? ' [dry-run 只读]' : ' [将更新 brand 1 mock 笔记]'}`);
+    if (!DRY_RUN && !/\/saas_prod(\?|$)/.test(process.env.DATABASE_URL || '')) {
+      throw new Error('DATABASE_URL 未指向 saas_prod——本脚本仅应在服务器上对 saas_prod 执行');
+    }
+    await mockCategoryBackfill();
+    console.log('\n回填完成');
+    return;
+  }
+
   const before = await snapshotFrom('复制前');
 
   if (ALIGN_ARG && !CLEAN_ONLY) {
@@ -416,7 +501,11 @@ async function main() {
   }
 
   await cleanMock();
-  if (!CLEAN_ONLY) await copyAll();
+  if (!CLEAN_ONLY) {
+    await copyAll();
+    console.log('\n[品类回填]');
+    await mockCategoryBackfill();
+  }
 
   if (!DRY_RUN) {
     const after = await snapshotFrom('复制后');

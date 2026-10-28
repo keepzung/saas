@@ -102,7 +102,7 @@
       <div v-if="wcMode === 'cloud' && !wcWords.length" class="muted mini" style="padding: 20px">暂无数据</div>
       </a-card>
 
-      <a-card v-if="!isDf && !isMdd" :bordered="false" size="small" title="提及车型分布" class="mention-model-card">
+      <a-card v-if="!isDf && !isMdd" :bordered="false" size="small" :title="isBrand1 ? '提及品类分布' : '提及车型分布'" class="mention-model-card">
         <div ref="modelPieEl" class="mention-model-chart" />
       </a-card>
     </div>
@@ -349,6 +349,8 @@ const isDf = [7, 8].includes(Number(auth.currentBrandId));
 // 特斯拉：内容分类 tag 意义有限 + 表单线索无笔记级数据源，按客户要求隐藏
 const isTesla = computed(() => Number(auth.currentBrandId ?? 0) === 6);
 const isMdd = computed(() => Number(auth.currentBrandId ?? 0) === 5);
+// marketineok(1) 演示工作区：mock 的 MDD 数据以「品类」维度回填 modelTag，页面文案随之改品类
+const isBrand1 = computed(() => Number(auth.currentBrandId ?? 0) === 1);
 // 大众(4)：无数据时绝不回退演示（荣威假笔记对客户严重误导），如实空态
 const isVw = computed(() => Number(auth.currentBrandId ?? 0) === 4);
 const PAGE_SIZE = 10;
@@ -458,11 +460,11 @@ const typeOptions = computed(() =>
 const modelOptions = computed(() =>
   mode.value === 'real'
     ? [
-        { value: '全部车型', label: '全部车型' },
+        { value: '全部车型', label: isBrand1.value ? '全部品类' : '全部车型' },
         ...realFacets.value.models.map((m) => ({ value: m, label: m })),
       ]
     : [
-        { value: '全部车型', label: '全部车型' },
+        { value: '全部车型', label: isBrand1.value ? '全部品类' : '全部车型' },
         ...MODELS.map((m) => ({ value: m, label: m })),
       ],
 );
@@ -470,7 +472,7 @@ const modelOptions = computed(() =>
 const columns = computed(() => [
   { key: 'title', title: '标题', width: 200 },
   { title: '发布者', dataIndex: 'author', width: 100, ellipsis: true },
-  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : '内容 / 车型 / 账号类型', width: 140 },
+  { key: 'tags', title: isTesla.value ? '车型 / 账号类型' : isMdd.value ? '内容 / 账号类型' : isBrand1.value ? '内容 / 品类 / 账号类型' : '内容 / 车型 / 账号类型', width: 140 },
   { title: '点赞', dataIndex: 'digg', width: 62, sorter: true },
   { title: '评论', dataIndex: 'comment', width: 62, sorter: true },
   { title: '分享', dataIndex: 'share', width: 62, sorter: true },
