@@ -67,9 +67,10 @@ async function insertMany(model, rows, label) {
   return done;
 }
 
-// ── 需要复制的 brand 5 表清单（含源为 0 的，运行时自动跳过，将来 cron 补数后重跑即生效）──
+// ── 需要复制的 brand 5 表清单（含源为 0 的，运行时自动跳过，将来 cron 补数后重跑即生效）
+// 注意：koxAccountDailyStat 无 brandId 列，不在本清单，由 countAccountDailyStat 按账号归属单独统计 ──
 const SNAPSHOT_TABLES = [
-  'kosAccount', 'kosRosterEntry', 'koxAccountDailyStat', 'koxNote', 'koxNoteDailyStat',
+  'kosAccount', 'kosRosterEntry', 'koxNote', 'koxNoteDailyStat',
   'koxContentNoteDaily', 'koxContentStatDaily', 'koxJuguangNoteDaily', 'koxCampaignDailyStat',
   'sparkAccount', 'sparkStaffBrandDaily', 'sparkStaffUserDaily', 'proKosOverview', 'proKosStaff',
   'laiguLead', 'laiguComment', 'proClueDaily', 'proClueUserDay', 'proClueToolStatDaily',
