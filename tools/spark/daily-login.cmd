@@ -36,8 +36,10 @@ echo [5/6] 东风 MCC ...
 
 set TAG=GREE
 set BRAND=8
+rem 格力 MCC 组织权限未开通, 默认跳过; 权限开通后删除下面这行 set SKIP_GREE=1 即可恢复
+set SKIP_GREE=1
 if defined SKIP_GREE (
-  echo [6/6] 格力 MCC - SKIP_GREE 已设置, 跳过
+  echo [6/6] 格力 MCC - 权限未开通, 跳过
 ) else (
   echo [6/6] 格力 MCC ...
   "%NODE%" login.cjs
