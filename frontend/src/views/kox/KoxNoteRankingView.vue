@@ -1604,6 +1604,11 @@ onBeforeUnmount(() => {
 .wc-model-row.brand1-layout .mention-model-card {
   flex: 1 1 calc(50% - 6px);
 }
+/* brand1：环形图与词云图等高（560px），填满卡片消除底部留白（客户批注 2026-10-29） */
+.wc-model-row.brand1-layout .mention-model-chart {
+  height: 560px;
+  margin-top: 0;
+}
 @media (max-width: 1100px) {
   .wc-model-row {
     flex-direction: column;
