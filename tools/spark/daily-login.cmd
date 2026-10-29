@@ -1,24 +1,25 @@
+rem WARNING: this file MUST stay GBK/ANSI encoded - do NOT resave as UTF-8 (cmd.exe would mangle Chinese lines)
 @echo off
-rem æ¯æ—¥æ‰‹å·¥ç™»å½•ä¾‹ç¨‹ (å»ºè®®æ¯å¤© 21:00 å·¦å³è¿è¡Œ, ç”±å½“å€¼äººå‘˜æ‰§è¡Œ; æ‹‰æ•°åœ¨å‡Œæ™¨ 04:00, æ™šé—´ç™»å½•å¯ä¿ä¼šè¯ 7h é¾„è¦†ç›–æ‹‰æ•°çª—å£)
-rem é¡ºåº: partner -> ä¸“ä¸šå· -> è£å¨ -> MDD -> ä¸œé£ -> æ ¼åŠ›
-rem ä¼šè¯è¿˜æ´»ç€æ—¶å‰ä¸¤æ­¥ä¼šé™é»˜é€šè¿‡; æ­»äº†æ‰å¼¹çª—ç­‰æ»‘å—/æ‰«ç 
-rem MCC å››ä¸ªè´¦å·ä¼šè‡ªåŠ¨å¡«è´¦å¯†, åªéœ€è¦åœ¨å¼¹æ»‘å—æ—¶æ‹–ä¸€ä¸‹; ä¸è¦ä¿®æ”¹é¢„å¡«çš„è´¦å·å¯†ç 
-rem ç™»å½•å®Œæˆåè‡ªåŠ¨æŠŠ cookie æ¨é€ç”Ÿäº§åº“
+rem Ã¿ÈÕÊÖ¹¤µÇÂ¼Àı³Ì (½¨ÒéÃ¿Ìì 21:00 ×óÓÒÔËĞĞ, ÓÉµ±ÖµÈËÔ±Ö´ĞĞ; À­ÊıÔÚÁè³¿ 04:00, Íí¼äµÇÂ¼¿É±£»á»° 7h Áä¸²¸ÇÀ­Êı´°¿Ú)
+rem Ë³Ğò: partner -> ×¨ÒµºÅ -> ÈÙÍş -> MDD -> ¶«·ç -> ¸ñÁ¦
+rem »á»°»¹»î×ÅÊ±Ç°Á½²½»á¾²Ä¬Í¨¹ı; ËÀÁË²Åµ¯´°µÈ»¬¿é/É¨Âë
+rem MCC ËÄ¸öÕËºÅ»á×Ô¶¯ÌîÕËÃÜ, Ö»ĞèÒªÔÚµ¯»¬¿éÊ±ÍÏÒ»ÏÂ; ²»ÒªĞŞ¸ÄÔ¤ÌîµÄÕËºÅÃÜÂë
+rem µÇÂ¼Íê³Éºó×Ô¶¯°Ñ cookie ÍÆËÍÉú²ú¿â
 cd /d "%~dp0"
 set "NODE=C:\Program Files\nodejs\node.exe"
 set HEADLESS=0
 
-echo [1/6] partner (ç‰¹æ–¯æ‹‰ç›¯ç›˜) ...
+echo [1/6] partner (ÌØË¹À­¶¢ÅÌ) ...
 "%NODE%" partner-keepalive-local.cjs
 if errorlevel 2 "%NODE%" partner-keepalive-local.cjs --interactive
 
-echo [2/6] ä¸“ä¸šå· (KOS/çº¿ç´¢) ...
+echo [2/6] ×¨ÒµºÅ (KOS/ÏßË÷) ...
 "%NODE%" pro-keepalive-local.cjs
 if errorlevel 2 "%NODE%" pro-keepalive-local.cjs --interactive
 
 set TAG=RW
 set BRAND=2
-echo [3/6] è£å¨ MCC ...
+echo [3/6] ÈÙÍş MCC ...
 "%NODE%" login.cjs
 "%NODE%" push-state-to-prod.cjs RW 2
 
@@ -30,21 +31,22 @@ echo [4/6] MDD MCC ...
 
 set TAG=DF
 set BRAND=7
-echo [5/6] ä¸œé£ MCC ...
+echo [5/6] ¶«·ç MCC ...
 "%NODE%" login.cjs
 "%NODE%" push-state-to-prod.cjs DF 7
 
 set TAG=GREE
 set BRAND=8
-rem æ ¼åŠ› MCC ç»„ç»‡æƒé™æœªå¼€é€š, é»˜è®¤è·³è¿‡; æƒé™å¼€é€šååˆ é™¤ä¸‹é¢è¿™è¡Œ set SKIP_GREE=1 å³å¯æ¢å¤
+rem ¸ñÁ¦ MCC ×éÖ¯È¨ÏŞÎ´¿ªÍ¨, Ä¬ÈÏÌø¹ı; È¨ÏŞ¿ªÍ¨ºóÉ¾³ıÏÂÃæÕâĞĞ set SKIP_GREE=1 ¼´¿É»Ö¸´
 set SKIP_GREE=1
 if defined SKIP_GREE (
-  echo [6/6] æ ¼åŠ› MCC - æƒé™æœªå¼€é€š, è·³è¿‡
+  echo [6/6] ¸ñÁ¦ MCC - È¨ÏŞÎ´¿ªÍ¨, Ìø¹ı
 ) else (
-  echo [6/6] æ ¼åŠ› MCC ...
+  echo [6/6] ¸ñÁ¦ MCC ...
   "%NODE%" login.cjs
   "%NODE%" push-state-to-prod.cjs GREE 8
 )
 
-echo ===== æ¯æ—¥ç™»å½•ä¾‹ç¨‹å®Œæˆ, cookie å·²è‡ªåŠ¨æ¨é€ç”Ÿäº§åº“ =====
+echo ===== Ã¿ÈÕµÇÂ¼Àı³ÌÍê³É, cookie ÒÑ×Ô¶¯ÍÆËÍÉú²ú¿â =====
 pause
+
