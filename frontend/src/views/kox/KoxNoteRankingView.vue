@@ -69,7 +69,8 @@
       </div>
     </div>
 
-    <div class="wc-model-row">
+    <!-- marketineok(1) 演示：柱状图独占一行，词云+环形图第二行并排（brand1-layout 见样式；其他品牌保持三卡一行） -->
+    <div class="wc-model-row" :class="{ 'brand1-layout': isBrand1 }">
       <a-card v-if="!isDf && !isTesla" :bordered="false" size="small" title="内容类型效率对比分析" class="type-eff-card">
         <div ref="typeEffEl" class="type-efficiency-chart" />
       </a-card>
@@ -1590,6 +1591,18 @@ onBeforeUnmount(() => {
 .wc-model-row > .ant-card {
   flex: 1 1 0;
   min-width: 0;
+}
+/* marketineok(1) 演示排版（客户批注 2026-10-29「三个板块挤」）：柱状图整行，词云+环形第二行并排。
+   仅 brand 1 生效，其他工作区保持三卡一行 */
+.wc-model-row.brand1-layout {
+  flex-wrap: wrap;
+}
+.wc-model-row.brand1-layout .type-eff-card {
+  flex: 1 1 100%;
+}
+.wc-model-row.brand1-layout .wordcloud-card,
+.wc-model-row.brand1-layout .mention-model-card {
+  flex: 1 1 calc(50% - 6px);
 }
 @media (max-width: 1100px) {
   .wc-model-row {
