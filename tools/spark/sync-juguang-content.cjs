@@ -19,7 +19,7 @@ try { ({ chromium } = require('playwright')); } catch {
     for (const base of bases) {
       if (!fs.existsSync(base)) continue;
       const dirs = fs.readdirSync(base).filter((d) => d.startsWith('chromium-')).sort().reverse();
-      for (const d of dirs) for (const sub of ['chrome-linux', 'chrome-win64', 'chrome-win']) {
+      for (const d of dirs) for (const sub of ['chrome-linux64', 'chrome-linux', 'chrome-win64', 'chrome-win']) {
         const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
         if (fs.existsSync(exe)) return exe;
       }

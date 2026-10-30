@@ -34,7 +34,7 @@ try {
       if (!fs.existsSync(base)) continue;
       const dirs = fs.readdirSync(base).filter((d) => d.startsWith('chromium-')).sort().reverse();
       for (const d of dirs) {
-        for (const sub of ['chrome-win64', 'chrome-win', 'chrome-linux']) {
+        for (const sub of ['chrome-win64', 'chrome-win', 'chrome-linux64', 'chrome-linux']) {
           const exe = path.join(base, d, sub, process.platform === 'win32' ? 'chrome.exe' : 'chrome');
           if (fs.existsSync(exe)) return exe;
         }
