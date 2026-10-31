@@ -39,3 +39,10 @@ if (r.status !== 0) {
   process.exit(1);
 }
 console.log(`[${TAG}->brand${BRAND_ID}]`, String(r.stdout || '').trim());
+// 会话新鲜度最高的时刻立即拉数（T+1 口径：手动登录后马上补 D-1/D 缺口，不等凌晨波次）
+const sync = spawnSync(
+  'ssh',
+  ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', SSH_HOST, `cd /opt/saas/tools && node trigger-sync.cjs all ${BRAND_ID}`],
+  { encoding: 'utf8', timeout: 300000 },
+);
+console.log(`[${TAG}->brand${BRAND_ID}] 同步触发:`, sync.status === 0 ? String(sync.stdout || '').trim() || 'ok' : `失败 ${String(sync.stderr || '').slice(0, 120)}`);

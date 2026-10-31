@@ -153,8 +153,8 @@ sources:
       sync_log: [juguang_content, content_stat_daily]
     l4:
       - { label: 曝光, model: KoxContentStatDaily, date_field: day, value_field: impNum }
-      # 逐笔记行 = 账号表现分析「发布数」唯一来源 (05:00 stat-daily 写入) — 10-31 曾停更两天未被发现
-      - { label: 逐笔记行, model: KoxContentNoteDaily, date_field: day }
+      # 逐笔记行 = 账号表现分析「发布数」唯一来源 (05:00 stat-daily 写入, 平台 D-1 数据可能中午才出 → lag 1 天)
+      - { label: 逐笔记行, model: KoxContentNoteDaily, date_field: day, lag_days: 1 }
 
   xhs_pro:                          # 专业号平台 KOS (ProOrgConfig.storageState; shield 反爬无法裸探活)
     label: 专业号KOS

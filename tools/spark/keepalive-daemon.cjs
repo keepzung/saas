@@ -27,6 +27,10 @@ if (fs.existsSync(envPath)) {
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const INTERVAL_MIN = Number(process.env.KEEPALIVE_INTERVAL_MINUTES || 10);
 const RELOGIN_COOLDOWN_MIN = 30;
+// KEEPALIVE_RELOGIN=off → 只探活+留痕（session-watch 告警），不做无头自动重登。
+// 2026-10-31 实验：无头重登成功=产生新会话，疑似顶掉本机人工会话（903「您已登出」），
+// 导致会话寿命骤缩至 1.5~4.5h；关闭后登录唯一来源=本机人工，观察会话寿命是否回稳
+const KEEPALIVE_RELOGIN = process.env.KEEPALIVE_RELOGIN !== 'off';
 const KEEP_BRAND_TIMEOUT_MIN = Number(process.env.KEEP_BRAND_TIMEOUT_MINUTES || 5);
 const LOG_DIR = process.env.KEEPALIVE_LOG_DIR || path.join(ROOT, 'tools/spark/state');
 const STATE_FILE = path.join(LOG_DIR, 'keepalive-state.json');
@@ -325,6 +329,7 @@ async function keepBrand(org) {
     const ACCOUNT = process.env[`SPARK_ACCOUNT_B${brandId}`];
     const PASSWORD = process.env[`SPARK_PASSWORD_B${brandId}`];
     if (!ACCOUNT || !PASSWORD) return; // 无 cookie 无凭据，静默跳过
+    if (!KEEPALIVE_RELOGIN) return; // 检测-only 模式：引导登录也交给本机人工
     const st2 = state[brandId];
     const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
     if (st2.lastReloginAt && Date.now() - st2.lastReloginAt < cooldownMs) return;
@@ -373,6 +378,7 @@ async function keepBrand(org) {
     const cooldownMs = RELOGIN_COOLDOWN_MIN * 60000;
     // reloginMcc 已改 Xvfb 有头 + JS 原生点击（2026-10-13），成功率恢复，MCC 自动重登重新启用
     const canTry =
+      KEEPALIVE_RELOGIN &&
       st.consecutiveFails >= 2 &&
       (!st.lastReloginAt || Date.now() - st.lastReloginAt > cooldownMs);
     if (canTry) {
