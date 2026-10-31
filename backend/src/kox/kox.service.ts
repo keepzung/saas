@@ -1,5 +1,8 @@
 const dayKey08 = (d: Date) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
 
+// 特斯拉聚光子账户「特斯拉KOS项目-8-官号投放」：投放口径剔除官号（客户 2026-10-31 确认）
+const OFFICIAL_VSELLER_ID = '6aa0d6db34bfab0015bec346';
+
 // 词云停用词：虚词/泛词（特斯拉在品牌工作区内全篇出现，无区分度；model 裸词由车型原子化处理）
 const NOTES_WC_STOPWORDS = new Set(
   [
@@ -357,10 +360,17 @@ export class KoxService {
       // 经客户「投放数据源」文件笔记级核对（65,316 行）：原「标准投笔记报表」口径仅为全量的
       // ~34%（10 月底）；历史缺口由 data-import/tesla-adsource-import.cjs 用客户 Excel 回补
       // （virtualSellerId='excel-backfill'）。⚠️ 必须过滤 partner_vseller：表里另有乐允时代
-      // kos_author 旧行（9 月 ~92 行/天），不过滤会双重计数
+      // kos_author 旧行（9 月 ~92 行/天），不过滤会双重计数。
+      // 客户 2026-10-31 确认：投放剔除官号——排除「特斯拉KOS项目-8-官号投放」子账户
+      // （6aa0d6db34bfab0015bec346，占比 ~0.5%）；9-01~10-16 回补聚合行无法拆分子账户，
+      // 仍含官号（客户文件本身无子账户维度，后续文件建议按子账户拆分导出）
       brandId === 6
         ? this.prisma.koxCampaignDailyStat.findMany({
-            where: { ...campaignWhere, accountKind: 'partner_vseller' },
+            where: {
+              ...campaignWhere,
+              accountKind: 'partner_vseller',
+              virtualSellerId: { not: OFFICIAL_VSELLER_ID },
+            },
             orderBy: { statDate: 'asc' },
           })
         : this.prisma.koxCampaignDailyStat.findMany({
