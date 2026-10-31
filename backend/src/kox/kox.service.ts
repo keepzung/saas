@@ -353,14 +353,20 @@ export class KoxService {
         where: accountWhere,
         _count: { _all: true },
       }),
-      // 特斯拉（brand6）2026-10-31 起与其他品牌同源：聚光全渠道投放日表（partner_vseller）。
+      // 特斯拉（brand6）2026-10-31 起改读聚光全渠道投放日表（partner_vseller）。
       // 经客户「投放数据源」文件笔记级核对（65,316 行）：原「标准投笔记报表」口径仅为全量的
-      // ~34%（10 月底），10-17 起全渠道表与客户文件逐日一致（误差<50 元）；历史缺口由
-      // data-import/tesla-adsource-import.cjs 用客户 Excel 回补（virtualSellerId='excel-backfill'）
-      this.prisma.koxCampaignDailyStat.findMany({
-        where: campaignWhere,
-        orderBy: { statDate: 'asc' },
-      }),
+      // ~34%（10 月底）；历史缺口由 data-import/tesla-adsource-import.cjs 用客户 Excel 回补
+      // （virtualSellerId='excel-backfill'）。⚠️ 必须过滤 partner_vseller：表里另有乐允时代
+      // kos_author 旧行（9 月 ~92 行/天），不过滤会双重计数
+      brandId === 6
+        ? this.prisma.koxCampaignDailyStat.findMany({
+            where: { ...campaignWhere, accountKind: 'partner_vseller' },
+            orderBy: { statDate: 'asc' },
+          })
+        : this.prisma.koxCampaignDailyStat.findMany({
+            where: campaignWhere,
+            orderBy: { statDate: 'asc' },
+          }),
       noteRowsP,
     ]);
 
