@@ -334,8 +334,14 @@ await backToList();
           };
         }, { vseller, day, pageNum, pageSize: 100, pubStart, pubEnd }).catch(() => null);
 
+      let skippedDays = 0;
       for (const day of statDays) {
         const dayDate = new Date(`${day}T00:00:00+08:00`);
+        // 幂等跳过：该子账户当天合计行已存在 → 不再拉（catchup 扩窗 T-7 后防止每天白跑全窗口烧会话）
+        const existed = await prisma.koxContentStatDaily
+          .findUnique({ where: { brandId_day_vSellerId: { brandId: BRAND_ID, day: dayDate, vSellerId: vseller } }, select: { id: true } })
+          .catch(() => null);
+        if (existed && !process.env.STAT_FORCE) { skippedDays += 1; continue; }
         let stat = null;
         const noteUpserts = [];
         let totalPages = 1;
@@ -398,7 +404,7 @@ await backToList();
         }
       }
       okAcc += 1;
-      console.log(`[${acc.name}] ${statDays.length} 天合计行+逐笔记行已落库（${okAcc}/${accounts.filter((a) => a.status === 'active').length}）`);
+      console.log(`[${acc.name}] ${statDays.length - skippedDays}/${statDays.length} 天落库，跳过已存在 ${skippedDays} 天（${okAcc}/${accounts.filter((a) => a.status === 'active').length}）`);
       await popup2.close().catch(() => {});
       await backToList();
     }
