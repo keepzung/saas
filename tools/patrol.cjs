@@ -443,7 +443,7 @@ async function main() {
         detail[`昨日${primary.item.label}`] = primary.a.yestVal ?? '—';
         detail['基线日均'] = primary.a.baseAvg === null ? '—' : Math.round(primary.a.baseAvg * 100) / 100;
       }
-      rows.push({ brand: brandName(brandId), source: id, cookie, lastSuccess: shDateTime(lastSuccess), anomalies: [...new Set(anomalies)], detail });
+      rows.push({ brandId, brand: brandName(brandId), source: id, cookie, lastSuccess: shDateTime(lastSuccess), anomalies: [...new Set(anomalies)], detail });
     }
     return rows;
   }
@@ -461,8 +461,21 @@ async function main() {
   }
   await p.$disconnect();
 
+  // ── 静音名单 (manifest.silence: 已知问题不再推告警, 日报仍可见) ─────────
+  // 条目: { brand: <id或名称>, source: <源id>, until?: 'YYYY-MM-DD', reason: '...' }
+  const todayD = todayStr;
+  const silenceRules = (manifest.silence || []).filter((s) => !s.until || s.until >= todayD);
+  const matchSilence = (row) =>
+    silenceRules.find(
+      (s) =>
+        (String(s.brand) === String(row.brandId) || s.brand === row.brand) &&
+        (!s.source || s.source === row.source),
+    );
+  for (const row of rows) row.muted = row.anomalies.length > 0 ? matchSilence(row) || null : null;
+  const badRows = rows.filter((r) => r.anomalies.length > 0 && !r.muted);
+  const mutedCount = rows.filter((r) => r.muted).length;
+
   // ── 报告输出 ─────────────────────────────────────────────────────────────
-  const badRows = rows.filter((r) => r.anomalies.length > 0);
   const disp = (s) => String(s ?? '');
   const width = (s) => [...disp(s)].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
   const pad = (s, n) => disp(s) + ' '.repeat(Math.max(0, n - width(s)));
@@ -479,7 +492,7 @@ async function main() {
     labels[r.source] || r.source,
     disp(r.cookie),
     disp(r.lastSuccess),
-    r.anomalies.length ? disp(r.anomalies.join('；')) : '—',
+    r.anomalies.length ? disp(r.anomalies.join('；') + (r.muted ? `〔已静音: ${r.muted.reason || '无原因'}〕` : '')) : '—',
   ]);
   const detailHeaders = ['品牌', '来源', '最新数据日', '昨日值', '基线日均', '备注'];
   const detailRows = rows.map((r) => {
@@ -492,12 +505,12 @@ async function main() {
   });
 
   const ts = shDateTime(new Date()).replace(/[-: ]/g, '').slice(0, 12);
-  const payload = { at: shDateTime(new Date()), manifest: path.basename(manifestFile), anomalies: badRows.length, rows };
+  const payload = { at: shDateTime(new Date()), manifest: path.basename(manifestFile), anomalies: badRows.length, muted: mutedCount, rows };
 
   if (outJsonOnly) {
     console.log(JSON.stringify(payload, null, 2));
   } else {
-    console.log(`\n小红书数据源巡检报告  ${payload.at}  (清单: ${path.basename(manifestFile)}, 异常行 ${badRows.length}/${rows.length})\n`);
+    console.log(`\n小红书数据源巡检报告  ${payload.at}  (清单: ${path.basename(manifestFile)}, 异常行 ${badRows.length}/${rows.length}${mutedCount ? `, 已静音 ${mutedCount}` : ''})\n`);
     console.log(renderTable(header, tableRows));
     console.log(
       '注: 专业号KOS 的 Cookie状态为 storageState 静态检查 (shield 反爬无法裸探活); 在线验证请触发一次 POST /api/agency-api/pro/sync',

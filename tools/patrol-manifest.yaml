@@ -25,6 +25,12 @@ brands:
   7: 东风奕境
   8: 格力
 
+# 静音名单: 已知问题不再推企微告警/算异常退出码, 日报中仍以〔已静音〕可见
+# until 到期后自动恢复告警; reason 会展示在日报里
+silence:
+  - { brand: 8, source: spark_mcc, until: "2027-01-31", reason: "格力 orgCode 未初始化, 组织权限未开通(已知遗留)" }
+  - { brand: 5, source: spark_mcc, until: "2026-11-15", reason: "MDD 疑似停投, campaign 连续 fetched=0 定性中(勿当同步故障)" }
+
 # ------------------------------------------------------------
 # 数据源定义
 #   judge 判定优先级: dead(失效) → ok(有效) → unknown(未知); 均未命中视为 unknown
