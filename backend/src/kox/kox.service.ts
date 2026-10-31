@@ -353,34 +353,14 @@ export class KoxService {
         where: accountWhere,
         _count: { _all: true },
       }),
-      // 特斯拉（brand6）：投放数据源统一为聚光「标准投笔记报表」（剔官号，与投流总览/周期报表同口径）；
-      // 投放日表（D 快照）降级为官号/对账用途——凌晨快照写 0、快照滚动后无法重试的问题不再影响页面
-      brandId === 6
-        ? this.prisma.koxJuguangNoteDaily
-            .findMany({
-              where: { brandId: 6, day: { gte: start, lte: end } },
-              select: {
-                day: true, fee: true, impression: true, click: true,
-                msgInquiries: true, msgOpenings: true, msgLeads: true,
-              },
-              orderBy: { day: 'asc' },
-            })
-            .then((cRows) =>
-              cRows.map((r) => ({
-                statDate: r.day,
-                fee: Number(r.fee),
-                impression: Number(r.impression),
-                click: Number(r.click),
-                messageConsult: Number(r.msgInquiries),
-                msgChatUserCnt: Number(r.msgOpenings),
-                msgLeadsNum: Number(r.msgLeads),
-                brandUserName: null as string | null,
-              })),
-            )
-        : this.prisma.koxCampaignDailyStat.findMany({
-            where: campaignWhere,
-            orderBy: { statDate: 'asc' },
-          }),
+      // 特斯拉（brand6）2026-10-31 起与其他品牌同源：聚光全渠道投放日表（partner_vseller）。
+      // 经客户「投放数据源」文件笔记级核对（65,316 行）：原「标准投笔记报表」口径仅为全量的
+      // ~34%（10 月底），10-17 起全渠道表与客户文件逐日一致（误差<50 元）；历史缺口由
+      // data-import/tesla-adsource-import.cjs 用客户 Excel 回补（virtualSellerId='excel-backfill'）
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: campaignWhere,
+        orderBy: { statDate: 'asc' },
+      }),
       noteRowsP,
     ]);
 
