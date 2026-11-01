@@ -207,8 +207,20 @@ function monthSegments(start, end) {
     }
     if (FULL) globalStart = FULL_START;
   }
-  const segments = monthSegments(globalStart, end);
-  console.log(`[2] 同步区间: ${globalStart} ~ ${end}（${segments.length} 个月段，${FULL ? '全量' : '增量'}）${DRY ? '（dry-run）' : ''}`);
+  // 近窗逐日 + 远窗月段（2026-11-01 实验定论）：单日拉取实测完整（10-30 三账户 feeSum 与
+  // campaign 全渠道分毫不差），月段深分页历史性缺半（10-30 全窗拉取仅得 ~45% 行/金额）。
+  // 近 10 天逐日保证 T+1 完整；远端历史暂保留月段（深补可后续分批逐日重跑）
+  const PER_DAY_DAYS = Number(process.env.JG_PER_DAY_DAYS ?? 10);
+  const cstKey = (d) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+  const endCst = new Date(`${end}T00:00:00+08:00`);
+  const perDayStartKey = cstKey(new Date(endCst.getTime() - (PER_DAY_DAYS - 1) * 86400000));
+  const segments = [];
+  for (let i = PER_DAY_DAYS - 1; i >= 0; i--) {
+    const d = cstKey(new Date(endCst.getTime() - i * 86400000));
+    segments.push([d, d]);
+  }
+  if (globalStart < perDayStartKey) segments.unshift(...monthSegments(globalStart, perDayStartKey));
+  console.log(`[2] 同步区间: ${globalStart} ~ ${end}（近 ${PER_DAY_DAYS} 天逐日 + ${segments.length - PER_DAY_DAYS} 个月段，${FULL ? '全量' : '增量'}）${DRY ? '（dry-run）' : ''}`);
   if (process.env.JG_INITIAL_WAIT) {
     console.log(`[2] 初始等待 ${process.env.JG_INITIAL_WAIT / 1000}s（限流冷却）...`);
     await sleep(Number(process.env.JG_INITIAL_WAIT));
@@ -355,6 +367,84 @@ function monthSegments(start, end) {
       })
       .catch(() => {});
     await sleep(10000);
+
+    // ── EXPERIMENT=1: 参数矩阵实验 — 找「全渠道笔记级」拉法 ──────────────────
+    // 背景：标准投视图(datareports-basic)只返回全量的一部分(10-30: 352/684 行)，
+    // 缺口=非标准投推广方式+部分账户盲区。对同一天(默认 10-30)试参数矩阵：
+    //   V0 基线(现状) / V1 dataCaliber=1 / V2 dataSource=all / V3 webModule=all_report_page
+    //   V4 creative_center/noteList 且去掉 35 天发布窗(null=不限)
+    // 每组落盘 total/行数/feeSum/笔记ID → state/exp-note-<ts>.json，与客户 Excel 缺失集对交集
+    if (process.env.EXPERIMENT) {
+      const DAY = process.env.EXP_DAY || '2026-10-30';
+      const expOut = {};
+      const callReport = async (body) =>
+        await popup.evaluate(async ({ body }) => {
+          const res = await fetch('https://ad.xiaohongshu.com/api/leona/rtb/common/data/report', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify(body),
+          });
+          const j = await res.json().catch(() => null);
+          const dl = j?.data?.dataList ?? [];
+          const rows = [];
+          for (const item of dl) {
+            let v = {}; try { v = JSON.parse(item.dataValueJson ?? '{}'); } catch {}
+            rows.push({ noteId: String(v.noteId ?? ''), fee: Number(v.fee ?? 0) });
+          }
+          return { code: j?.code, total: j?.data?.page?.totalCount ?? j?.data?.page?.total ?? dl.length, totalPage: j?.data?.page?.totalPage ?? 1, rows };
+        }, { body }).catch((e) => ({ err: String(e).slice(0, 100) }));
+      const base = {
+        pageNum: 1, pageSize: 1000, sorts: [], filters: [], dataCaliber: 0,
+        timeUnit: 'DAY', splitColumns: [], startDate: DAY, endDate: DAY,
+        webModule: 'base_report_page', dataSource: 'note', dataPattern: 'table',
+        columns: ['time', 'noteId', 'fee', 'impression', 'click'],
+      };
+      const variants = [
+        ['V0-baseline', { ...base }],
+        ['V1-caliber1', { ...base, dataCaliber: 1 }],
+        ['V2-dsAll', { ...base, dataSource: 'all' }],
+        ['V3-moduleAll', { ...base, webModule: 'all_report_page' }],
+        ['V4-noteList-nowin', { noteList: true }],
+      ];
+      for (const [name, patch] of variants) {
+        let res;
+        if (patch.noteList) {
+          res = await popup.evaluate(async ({ vseller, day }) => {
+            const res = await fetch('https://ad.xiaohongshu.com/api/leona/creative_center/noteList', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+              body: JSON.stringify({
+                brandUserId: vseller, reportBrandUserId: vseller,
+                noteContentTypeList: [], noteType: 0, spuIdList: [], tagIdList: [], recIdList: [],
+                noteDataStartTime: day, noteDataEndTime: day,
+                notePublishTimeStart: null, notePublishTimeEnd: null,
+                fansNumAccumLower: null, fansNumAccumUpper: null, ownOrderNote: false,
+                staffLabelList: [], staffCountry: [], staffProvince: [], staffCity: [],
+                pageNum: 1, pageSize: 1000, sortDirect: '', sortColumn: '', noteCustomType: 0,
+              }),
+            });
+            const j = await res.json().catch(() => null);
+            const d = j?.data ?? {};
+            const dl = d.noteList ?? [];
+            const rows = [];
+            for (const n of dl) {
+              const nd = n.noteData ?? {};
+              rows.push({ noteId: String(n.noteId ?? ''), fee: Number(nd.fee ?? 0) });
+            }
+            return { code: j?.code, total: d.total ?? dl.length, rows };
+          }, { vseller, day: DAY }).catch((e) => ({ err: String(e).slice(0, 100) }));
+        } else {
+          res = await callReport({ ...base, ...patch });
+        }
+        const rows = res.rows ?? [];
+        expOut[name] = res;
+        console.log(`[exp] ${name}: code=${res.code} total=${res.total ?? '?'} rows=${rows.length} feeSum=${rows.reduce((s, r) => s + r.fee, 0).toFixed(2)} ${res.err ?? ''}`);
+        await sleep(2000);
+      }
+      fs.writeFileSync(path.join(__dirname, 'state', `exp-note-${Date.now()}.json`), JSON.stringify(expOut, null, 1), 'utf8');
+      console.log('[exp] 结果已落盘 state/exp-note-*.json');
+      await popup.close().catch(() => {});
+      process.exit(0);
+    }
+    // ── EXPERIMENT 结束 ─────────────────────────────────────────────────────
 
     let noteRows = 0;
     for (const [segStart, segEnd] of segments) {
