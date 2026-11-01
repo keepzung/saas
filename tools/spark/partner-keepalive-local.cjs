@@ -161,6 +161,19 @@ async function main() {
       { encoding: 'utf8', timeout: 240000 },
     );
     log(`[keepalive-local] 同步触发: ${sync.status === 0 ? 'ok' : `rc=${sync.status}`}`);
+
+    // 登录即拉数（完整版）：partner 会话寿命短（实测 ~1-2h），趁活把浏览器型管道一口气跑完——
+    // 标准投笔记报表（sync-juguang）+ 商业内容逐日统计（stat-daily T-7，已存在天自动跳过）。
+    // 服务器 nohup 顺序执行，本脚本不等结果直接退出
+    const pull = spawnSync(
+      'ssh',
+      [
+        '-o', 'BatchMode=yes', SSH_HOST,
+        `nohup bash -c 'cd /opt/saas/tools/spark && /usr/local/bin/node sync-juguang.cjs >> /opt/saas/logs/juguang-sync.log 2>&1; /usr/local/bin/node sync-juguang-content.cjs --stat-daily --start \$(date -d "7 days ago" +%F) --end \$(date +%F) >> /opt/saas/logs/juguang-content-stat.log 2>&1' >/dev/null 2>&1 & echo pull-launched`,
+      ],
+      { encoding: 'utf8', timeout: 30000 },
+    );
+    log(`[keepalive-local] 登录即拉数(标准投+发布数): ${/pull-launched/.test(String(pull.stdout)) ? '已启动' : `启动失败 ${String(pull.stderr || '').slice(0, 100)}`}`);
     await ctx.close();
     process.exit(0);
   } catch (e) {

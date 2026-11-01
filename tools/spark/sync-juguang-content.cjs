@@ -337,11 +337,13 @@ await backToList();
       let skippedDays = 0;
       for (const day of statDays) {
         const dayDate = new Date(`${day}T00:00:00+08:00`);
-        // 幂等跳过：该子账户当天合计行已存在 → 不再拉（catchup 扩窗 T-7 后防止每天白跑全窗口烧会话）
+        // 幂等跳过：历史天合计行已存在 → 不再拉（catchup 扩窗 T-7 后防止每天白跑全窗口烧会话）。
+        // 「今天」不跳过：晚间登录即拉数写入的是当日半日值，后续登录要覆盖成更完整的值
+        const todayCst = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
         const existed = await prisma.koxContentStatDaily
           .findUnique({ where: { brandId_day_vSellerId: { brandId: BRAND_ID, day: dayDate, vSellerId: vseller } }, select: { id: true } })
           .catch(() => null);
-        if (existed && !process.env.STAT_FORCE) { skippedDays += 1; continue; }
+        if (existed && day !== todayCst && !process.env.STAT_FORCE) { skippedDays += 1; continue; }
         let stat = null;
         const noteUpserts = [];
         let totalPages = 1;
