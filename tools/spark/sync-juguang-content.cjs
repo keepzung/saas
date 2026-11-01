@@ -337,13 +337,15 @@ await backToList();
       let skippedDays = 0;
       for (const day of statDays) {
         const dayDate = new Date(`${day}T00:00:00+08:00`);
-        // 幂等跳过：历史天合计行已存在 → 不再拉（catchup 扩窗 T-7 后防止每天白跑全窗口烧会话）。
-        // 「今天」不跳过：晚间登录即拉数写入的是当日半日值，后续登录要覆盖成更完整的值
+        // 幂等跳过：历史天合计行已存在且有真实数据（impNum/noteNum > 0）→ 不再拉。
+        // 「今天」与「早产零行」（平台未出数时返回空 stat 写下的 0 行，10-31 实例）都不跳过，
+        // 否则 0 会永久冻结；真 0 投放的天在 T-7 窗口内每天多拉一次，代价可接受
         const todayCst = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
         const existed = await prisma.koxContentStatDaily
-          .findUnique({ where: { brandId_day_vSellerId: { brandId: BRAND_ID, day: dayDate, vSellerId: vseller } }, select: { id: true } })
+          .findUnique({ where: { brandId_day_vSellerId: { brandId: BRAND_ID, day: dayDate, vSellerId: vseller } }, select: { impNum: true, noteNum: true } })
           .catch(() => null);
-        if (existed && day !== todayCst && !process.env.STAT_FORCE) { skippedDays += 1; continue; }
+        const hasRealData = existed && (Number(existed.impNum) > 0 || Number(existed.noteNum) > 0);
+        if (hasRealData && day !== todayCst && !process.env.STAT_FORCE) { skippedDays += 1; continue; }
         let stat = null;
         const noteUpserts = [];
         let totalPages = 1;
