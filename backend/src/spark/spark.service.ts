@@ -13,6 +13,8 @@ import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './sp
 const OFFICIAL_BRAND_USER_KEYWORD = '官号';
 const isOfficialCampaignRow = (brandUserName: string | null | undefined) =>
   !!brandUserName && brandUserName.includes(OFFICIAL_BRAND_USER_KEYWORD);
+// 特斯拉聚光子账户「特斯拉KOS项目-8-官号投放」：投放口径剔除官号（客户 2026-10-31 确认）
+const OFFICIAL_VSELLER_ID = '6aa0d6db34bfab0015bec346';
 
 const RTB_PAGE_SIZE = 500;
 // 东八区日键：statDate 多以 +08:00 零点存储，toISOString（UTC）会提前一天
@@ -2400,11 +2402,25 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
    *  与账号类型页签完全同源——四标签相加 = 全部投流；当天数据 T+1 次日上午同步后可见。
    *  投流账号数 = 被投流的 KOS 基线账号数；官号投流单独在官号页签/区域汇总官号行（D 口径） */
   private async campaignSummaryJuguangBase(start: Date, end: Date) {
-    const [cRows, { noteAuthor }] = await Promise.all([
+    const [cRows, { noteAuthor }, campRows] = await Promise.all([
       this.prisma.koxJuguangNoteDaily.findMany({
         where: { brandId: 6, day: { gte: start, lte: end } },
       }),
       this.teslaNoteAccountMaps(),
+      // 2026-11-01 客户口径：投流情况总览的消耗/曝光/点击/私信三数 = 每个子账户加总的全渠道
+      // （partner_vseller，剔除官号投放子账户）；投流内容数/账号数仍取标准投笔记报表（无全渠道笔记级）
+      this.prisma.koxCampaignDailyStat.findMany({
+        where: {
+          brandId: 6,
+          accountKind: 'partner_vseller',
+          virtualSellerId: { not: OFFICIAL_VSELLER_ID },
+          statDate: { gte: start, lte: end },
+        },
+        select: {
+          statDate: true, fee: true, impression: true, click: true, interaction: true,
+          messageConsult: true, msgChatUserCnt: true, msgLeadsNum: true,
+        },
+      }),
     ]);
 
     type DayAgg = {
@@ -2415,6 +2431,23 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const dayMap = new Map<string, DayAgg>();
     let totalFee = 0;
     let matched = 0;
+    // 全渠道口径（2026-11-01 客户确认）：fee/曝光/点击/私信三数以 partner 账户日报加总为准
+    const campDayMap = new Map<string, DayAgg>();
+    for (const r of campRows) {
+      const key = dayKey08(r.statDate);
+      const cur = campDayMap.get(key) ?? {
+        fee: 0, impression: 0, click: 0, interaction: 0, consult: 0, open: 0, leads: 0,
+        notes: new Set<string>(), creators: new Set<string>(),
+      };
+      cur.fee += Number(r.fee);
+      cur.impression += r.impression;
+      cur.click += r.click;
+      cur.interaction += r.interaction;
+      cur.consult += r.messageConsult;
+      cur.open += r.msgChatUserCnt;
+      cur.leads += r.msgLeadsNum;
+      campDayMap.set(key, cur);
+    }
     for (const r of cRows) {
       const meta = noteAuthor.get(r.noteId);
       const creator = (meta?.authorName ?? r.creator ?? '').trim();
@@ -2423,17 +2456,9 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         fee: 0, impression: 0, click: 0, interaction: 0, consult: 0, open: 0, leads: 0,
         notes: new Set<string>(), creators: new Set<string>(),
       };
-      cur.fee += Number(r.fee);
-      cur.impression += Number(r.impression);
-      cur.click += Number(r.click);
-      cur.interaction += Number(r.interaction);
-      cur.consult += Number(r.msgInquiries);
-      cur.open += Number(r.msgOpenings);
-      cur.leads += Number(r.msgLeads);
       cur.notes.add(r.noteId);
       if (creator) cur.creators.add(creator);
       dayMap.set(key, cur);
-      totalFee += Number(r.fee);
       matched += 1;
     }
     const r2v = (v: number) => Math.round(v * 100) / 100;
@@ -2444,7 +2469,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     let totalLeads = 0;
     let totalInteraction = 0;
     let consumeDays = 0;
-    for (const v of dayMap.values()) {
+    for (const v of campDayMap.values()) {
+      totalFee += v.fee;
       totalImpression += v.impression;
       totalClick += v.click;
       totalConsult += v.consult;
@@ -2500,7 +2526,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const trend: { date: string; fee: number; impression: number; click: number; msg_inquiries: number; msg_openings: number; msg_leads: number; active_accounts: number }[] = [];
     for (let guard = 0; guard < 366; guard++) {
       const key = keyOf(startDay);
-      const v = dayMap.get(key);
+      const v = campDayMap.get(key);
+      const noteDay = dayMap.get(key);
       trend.push({
         date: key,
         fee: v ? r2v(v.fee) : 0,
@@ -2509,7 +2536,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         msg_inquiries: v?.consult ?? 0,
         msg_openings: v?.open ?? 0,
         msg_leads: v?.leads ?? 0,
-        active_accounts: v?.creators.size ?? 0,
+        active_accounts: noteDay?.creators.size ?? 0,
       });
       if (key === endKey) break;
       startDay.setDate(startDay.getDate() + 1);
@@ -2523,7 +2550,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       platform,
       coverage,
       metric_note:
-        '全部投流=聚光「标准投笔记报表」逐笔记按日汇总（剔官号），与账号类型页签同源；投流账号数=被投流的 KOS 账号数；当天数据 T+1 次日上午同步后可见；官号投流单独在官号页签/区域汇总官号行（投放日表口径）',
+        '全部投流消耗/曝光/点击/私信三数=聚光全渠道账户日报加总（partner_vseller，剔除官号投放子账户，2026-11-01 客户口径；9-01~10-16 部分历史日为客户数据源回补聚合行，含官号无法拆分）；投流内容数/投流账号数=标准投笔记报表口径；当天数据 T+1 次日上午同步后可见',
       summary: {
         promo_note_cnt: promoNoteCnt,
         consume_days: consumeDays,
