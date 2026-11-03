@@ -3,6 +3,7 @@
 # sync-juguang-content --stat-daily 对已存在的 (day,子账户) 行自动跳过，窗口虽宽但只拉缺失天；
 # 周末/漏登数天的缺口在下一次登录后的本任务中自愈；幂等 upsert）
 set -u
+export NO_RELOGIN=1
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:$PATH"
 LOCK=/tmp/juguang-content-stat-catchup.lock
 LOG=/opt/saas/logs/juguang-content-stat.log

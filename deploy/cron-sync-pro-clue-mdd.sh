@@ -2,6 +2,7 @@
 # MDD(brand5) 专业号「线索经营」每日同步（进线/开口/留资权威口径）—— deploy 用户 crontab 调用
 # 前置：ProOrgConfig brandId=5 已推送 storageState（MCC 数据→经营分析→进入专业号 登录后导出）
 set -u
+export NO_RELOGIN=1
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:$PATH"
 export PLAYWRIGHT_BROWSERS_PATH=/home/deploy/.cache/ms-playwright
 LOCK=/tmp/pro-clue-sync-mdd.lock

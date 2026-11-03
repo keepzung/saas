@@ -65,6 +65,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.goto('https://partner.xiaohongshu.com/partner/watch-dashboard', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await sleep(6000);
     if (!/login|signin/i.test(page.url())) return { ok: true, page };
+    if (process.env.NO_RELOGIN) {
+      console.log('[login] NO_RELOGIN=1，禁止账密自动重登（登录只允许人工例程）');
+      return { ok: false, page };
+    }
     console.log('[login] partner 会话失效，账密自动重登 ...');
     const ACCOUNT = process.env.PARTNER_LOGIN_USER;
     const PASSWORD = process.env.PARTNER_LOGIN_PASS;
@@ -333,6 +337,17 @@ await backToList();
             })),
           };
         }, { vseller, day, pageNum, pageSize: 100, pubStart, pubEnd }).catch(() => null);
+
+      // 轻探针模式（pull-t1 编排器用）：只取 T-1 第一页的 total/noteNum，单请求判定平台是否已出数
+      if (process.env.STAT_PROBE_ONLY) {
+        const probeDay = statDays[0];
+        const r0 = await noteRowsCall(probeDay, 1);
+        console.log(`PROBE_RESULT day=${probeDay} total=${r0 ? r0.total : 'null'} noteNum=${r0 && r0.stat ? r0.stat.noteNum : 'null'}`);
+        await popup2.close().catch(() => {});
+        await browser.close();
+        await prisma.$disconnect();
+        process.exit(0);
+      }
 
       let skippedDays = 0;
       for (const day of statDays) {

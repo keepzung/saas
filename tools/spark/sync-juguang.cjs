@@ -118,6 +118,10 @@ function monthSegments(start, end) {
     await page.goto('https://partner.xiaohongshu.com/partner/watch-dashboard', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await sleep(6000);
     if (!/login|signin/i.test(page.url())) return { ok: true, page };
+    if (process.env.NO_RELOGIN) {
+      console.log('[login] NO_RELOGIN=1，禁止账密自动重登（登录只允许人工例程）');
+      return { ok: false, page };
+    }
     console.log('[login] partner 会话失效，账密自动重登 ...');
     const ACCOUNT = process.env.PARTNER_LOGIN_USER;
     const PASSWORD = process.env.PARTNER_LOGIN_PASS;

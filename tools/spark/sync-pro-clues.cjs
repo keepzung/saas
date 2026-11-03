@@ -213,6 +213,11 @@ async function bootstrapViaMccJump(browser, brandId, prisma) {
   }
   if (/login|passport/i.test(page.url())) {
     console.log('[login] 账密登录 ...');
+    if (process.env.NO_RELOGIN) {
+      console.error('NO_RELOGIN=1，禁止账密自动登录（等待人工例程）');
+      await browser.close();
+      process.exit(1);
+    }
     // 品牌凭据：优先 PRO_ACCOUNT_B{brand}/PRO_PASSWORD_B{brand}（多品牌并存），否则共用 PRO_ACCOUNT/PRO_PASSWORD
     const USER = process.env[`PRO_ACCOUNT_B${BRAND_ID}`] || process.env.PRO_ACCOUNT || process.env.SPARK_ACCOUNT_TESLA2;
     const PASS = process.env[`PRO_PASSWORD_B${BRAND_ID}`] || process.env.PRO_PASSWORD || process.env.SPARK_PASSWORD_TESLA2;

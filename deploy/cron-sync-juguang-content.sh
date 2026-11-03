@@ -1,6 +1,7 @@
 #!/bin/bash
 # 商业内容管理每日增量同步（近 7 天发布的新笔记：元数据 + 赞/藏/评/分享/关注/私信指标叠加）
 set -u
+export NO_RELOGIN=1
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:$PATH"
 LOCK=/tmp/juguang-content-inc.lock
 LOG=/opt/saas/logs/juguang-content-sync.log
