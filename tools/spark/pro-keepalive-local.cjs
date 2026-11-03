@@ -36,18 +36,39 @@ function extractStorage(cookies) {
   return cookies.filter((c) => /xiaohongshu\.com$/.test(c.domain));
 }
 
-// 本机直连探活: 线索页未登录会 302 到 /login; 200 即视为活
+// 本机直连探活 v2 (2026-11-03): 旧法探线索页状态码, 但该页改前端渲染登录墙后死会话也返回 200
+// (11-03 全天服务端专业号全死而探活恒 200 的假阳性事故), 已改探「获客工具统计」API——
+// 与留资同步链路同源同鉴权: code=0 即活; 非零 code / 登录重定向 / 非 JSON(登录墙 HTML) 即死
+const PROBE_API = 'https://pro.xiaohongshu.com/api/edith/ads/pro/clue_manager/statistical/list';
 async function probeAlive(cookieStr) {
   try {
-    const res = await fetch(TARGET_URL, {
-      headers: { Cookie: cookieStr, 'User-Agent': UA },
+    const day = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const res = await fetch(PROBE_API, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieStr,
+        'Content-Type': 'application/json',
+        Referer: TARGET_URL,
+        Origin: 'https://pro.xiaohongshu.com',
+        'User-Agent': UA,
+      },
+      body: JSON.stringify({ startTime: day + ' 00:00:00', endTime: day + ' 23:59:59', belongUserId: '', pageNum: 1, pageSize: 1 }),
       redirect: 'manual',
     });
     const loc = res.headers.get('location') || '';
     if (res.status >= 300 && res.status < 400 && /login|passport/i.test(loc)) {
       return { alive: false, brief: `redirect ${res.status} -> ${loc.slice(0, 60)}` };
     }
-    return { alive: true, brief: `http=${res.status}` };
+    const text = await res.text();
+    let j = null;
+    try { j = JSON.parse(text); } catch {}
+    if (j && j.code === 0) {
+      return { alive: true, brief: `api code=0 (${(j.data?.userStatisticalDatas ?? []).length} 行)` };
+    }
+    if (j) {
+      return { alive: false, brief: `api code=${j.code} ${String(j.msg ?? '').slice(0, 40)}` };
+    }
+    return { alive: false, brief: `http=${res.status} 非JSON(疑似登录墙)` };
   } catch (e) {
     return { alive: null, brief: `network ${String(e.message).slice(0, 60)}` };
   }
