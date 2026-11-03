@@ -52,6 +52,17 @@
           :options="regionOptions"
           @change="onFilterChange"
         />
+        <a-select
+          v-model:value="tagFilter"
+          mode="multiple"
+          size="small"
+          style="width: 170px"
+          placeholder="账号标签"
+          :max-tag-count="1"
+          :options="tagOptions"
+          allow-clear
+          @change="onFilterChange"
+        />
       </FilterTopbar>
     </template>
 
@@ -403,6 +414,8 @@ const keyword = ref('');
 const authorKw = ref('');
 const regionFilter = ref('全部大区');
 const regionFacets = ref([]);
+const tagFilter = ref([]);
+const tagOptions = ref([]);
 const regionOptions = computed(() => [
   { value: '全部大区', label: '全部大区' },
   ...regionFacets.value.map((r) => ({ value: r, label: r })),
@@ -415,8 +428,10 @@ async function loadRegionFacets() {
       page_size: 1,
     });
     regionFacets.value = res.region_facets ?? [];
+    tagOptions.value = (res.tag_facets ?? []).filter(Boolean).map((t) => ({ label: t, value: t }));
   } catch {
     regionFacets.value = [];
+    tagOptions.value = [];
   }
 }
 const metric = ref('views');
@@ -823,6 +838,7 @@ function realParams(extra = {}) {
     ...(keyword.value ? { keyword: keyword.value } : {}),
     ...(authorKw.value ? { author: authorKw.value } : {}),
     ...(regionFilter.value !== '全部大区' ? { regionName: regionFilter.value } : {}),
+    ...(tagFilter.value.length ? { accountTag: tagFilter.value.join(',') } : {}),
     ...extra,
   };
 }
