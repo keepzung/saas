@@ -28,10 +28,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const kw = await j(await fetch(`${BASE}/hotspot/keywords`, { method: 'POST', headers: H, body: JSON.stringify({ brandId: BRAND, keyword: KEYWORD }) }));
   console.log('[1] keyword:', kw.code === 100 ? 'added' : `code=${kw.code}(${kw.msg === 'success' ? '已存在' : kw.msg})`);
 
-  // 2) 真实抓取
-  const run = await j(await fetch(`${BASE}/hotspot/scrape/run`, { method: 'POST', headers: H, body: JSON.stringify({ brandId: BRAND, platform: PLATFORM, keyword: KEYWORD }) }));
-  console.log('[2] scrape:', JSON.stringify(run.data ?? run));
-  if (run.code !== 100) process.exit(1);
+  // 2) 真实抓取（--no-scrape 跳过：XHS 等平台抓取只在本机跑，这里只验拆解）
+  if (!process.argv.includes('--no-scrape')) {
+    const run = await j(await fetch(`${BASE}/hotspot/scrape/run`, { method: 'POST', headers: H, body: JSON.stringify({ brandId: BRAND, platform: PLATFORM, keyword: KEYWORD }) }));
+    console.log('[2] scrape:', JSON.stringify(run.data ?? run));
+    if (run.code !== 100) process.exit(1);
+  } else {
+    console.log('[2] scrape: skipped (--no-scrape)');
+  }
 
   // 3) 播放最高的一条触发拆解
   const list = await j(await fetch(`${BASE}/hotspot/contents?brandId=${BRAND}&platform=${PLATFORM}&sort=views&pageSize=3`, { headers: { token } }));

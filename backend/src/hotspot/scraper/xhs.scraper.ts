@@ -3,7 +3,8 @@ import type { Page } from 'playwright-core';
 import { PlatformBlockedError, ScrapedItem, parseCount, normalizeUrl } from './types';
 import { sleep } from './browser.util';
 
-const SEARCH_API = '/api/sns/web/v1/search/notes';
+// 搜索接口已迁 v2（so.xiaohongshu.com/api/sns/web/v2/search/notes），按路径尾匹配兼容新旧
+const SEARCH_API = 'search/notes';
 const HOMEFEED_API = '/api/sns/web/v1/homefeed';
 
 interface XhsCard {
