@@ -1841,6 +1841,7 @@ model VideoGenTask {
   script       Json? // [{index, durSec, voiceover, subtitle, mediaQuery, mediaType, mediaUrl}]
   engine       String           @default("mixcut")
   status       String           @default("queued") // queued | scripting | rendering | done | failed
+  voice        String? // 用户挑选的 TTS 音色；空则用 TTS_VOICE 全局默认
   audioUrl     String?
   videoUrl     String?
   coverUrl     String?

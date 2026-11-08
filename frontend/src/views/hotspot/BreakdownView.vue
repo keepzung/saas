@@ -67,7 +67,7 @@
         </template>
         <a-alert v-else type="info" :message="`状态：${statusText(cur.status)}${cur.errorMsg ? `，错误：${cur.errorMsg}` : ''}`" />
         <div class="ops">
-          <ProductPickModal v-model:open="pickOpen" :title="pickMode === 'video' ? '生成同款视频·选择产品' : '爆款复刻·选择产品'" :with-strategy="pickMode === 'article'" @picked="onPicked" />
+          <ProductPickModal v-model:open="pickOpen" :title="pickMode === 'video' ? '生成同款视频·选择产品' : '爆款复刻·选择产品'" :with-strategy="pickMode === 'article'" :show-voice="pickMode === 'video'" @picked="onPicked" />
           <a-button type="primary" @click="startPick('article')">生成复刻文案</a-button>
           <a-button @click="startPick('video')">生成同款视频</a-button>
         </div>
@@ -133,7 +133,7 @@ const startPick = (mode) => {
   pickOpen.value = true;
 };
 
-const onPicked = async ({ productId, strategyId }) => {
+const onPicked = async ({ productId, strategyId, voice }) => {
   pickOpen.value = false;
   if (pickMode.value === 'article') {
     try {
@@ -148,7 +148,7 @@ const onPicked = async ({ productId, strategyId }) => {
   } else {
     try {
       await generateVideo(
-        { brandId: brandId.value, productId, breakdownId: cur.value.id },
+        { brandId: brandId.value, productId, breakdownId: cur.value.id, voice: voice ?? undefined },
         { brandId: brandId.value },
       );
       message.success('视频任务已创建，可到「视频工坊」查看进度');

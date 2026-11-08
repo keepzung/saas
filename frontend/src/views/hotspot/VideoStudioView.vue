@@ -28,6 +28,7 @@
               <a-tag color="blue">{{ t.product || '未关联产品' }}</a-tag>
               <a-tag :color="statusColor(t.status)">{{ statusText(t.status) }}</a-tag>
               <a-tag v-if="t.duration_sec">{{ t.duration_sec }}s</a-tag>
+              <a-tag v-if="t.voice" color="geekblue">🎙 {{ voiceNames[t.voice] ?? t.voice }}</a-tag>
               <a-tag v-if="t.breakdown?.style_tags?.length" color="purple">{{ t.breakdown.style_tags[0] }}</a-tag>
             </div>
             <div v-if="t.error_msg" class="err">{{ t.error_msg }}</div>
@@ -55,7 +56,7 @@
       </div>
     </a-spin>
 
-    <ProductPickModal v-model:open="pickOpen" title="新建混剪视频·选择产品" @picked="create" />
+    <ProductPickModal v-model:open="pickOpen" title="新建混剪视频·选择产品" show-voice @picked="create" />
   </PageWrapper>
 </template>
 
@@ -67,7 +68,7 @@ import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getVideoTasks, generateVideo, retryVideo } from '../../api/hotspot';
+import { getVideoTasks, generateVideo, retryVideo, getVoices } from '../../api/hotspot';
 
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
@@ -78,6 +79,7 @@ const page = ref(1);
 const pageSize = ref(12);
 const loading = ref(false);
 const pickOpen = ref(false);
+const voiceNames = ref({});
 let timer = null;
 
 const statusColor = (s) => ({ done: 'green', rendering: 'orange', scripting: 'orange', queued: 'orange', failed: 'red' }[s] ?? 'default');
@@ -99,10 +101,10 @@ const load = async () => {
   }
 };
 
-const create = async ({ productId }) => {
+const create = async ({ productId, voice }) => {
   pickOpen.value = false;
   try {
-    await generateVideo({ brandId: brandId.value, productId }, { brandId: brandId.value });
+    await generateVideo({ brandId: brandId.value, productId, voice: voice ?? undefined }, { brandId: brandId.value });
     message.success('任务已创建，正在生成分镜与合成');
     load();
   } catch (e) {
@@ -120,7 +122,11 @@ const retry = async (t) => {
   }
 };
 
-onMounted(load);
+onMounted(async () => {
+  load();
+  const vs = await getVoices().catch(() => null);
+  if (vs) voiceNames.value = Object.fromEntries((vs.items ?? []).map((v) => [v.id, v.name]));
+});
 onUnmounted(() => clearTimeout(timer));
 </script>
 

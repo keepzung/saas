@@ -186,11 +186,21 @@ export class HotspotController {
   }
 
   // ─── 视频工坊 ───────────────────────────────────────────────────────
+  @Get('voices')
+  voices() {
+    return this.video.voices();
+  }
+
+  @Post('videos/voice-preview')
+  voicePreview(@Body() body: { voice?: string; text?: string }) {
+    return this.video.voicePreview(body.voice, body.text);
+  }
+
   @Post('videos/generate')
   generateVideo(
     @Req() req: Request,
     @Body()
-    body: { brandId?: number; productId: number; breakdownId?: number; hotContentId?: number; title?: string },
+    body: { brandId?: number; productId: number; breakdownId?: number; hotContentId?: number; title?: string; voice?: string },
   ) {
     return this.video.createTask({
       brandId: Number(body.brandId ?? 1),
@@ -199,6 +209,7 @@ export class HotspotController {
       breakdownId: body.breakdownId,
       hotContentId: body.hotContentId,
       title: body.title,
+      voice: body.voice,
     });
   }
 

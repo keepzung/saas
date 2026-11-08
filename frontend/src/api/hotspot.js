@@ -44,6 +44,10 @@ export const generateFromBreakdown = (data, params) =>
   request.post('/hotspot/creation/article', data, { params, timeout: 180000 });
 
 // ─── 视频工坊 ───────────────────────────────────────────────────────
+export const getVoices = (params) => request.get('/hotspot/voices', { params });
+
+export const previewVoice = (data) => request.post('/hotspot/videos/voice-preview', data, { timeout: 30000 });
+
 export const generateVideo = (data, params) => request.post('/hotspot/videos/generate', data, { params });
 
 export const getVideoTasks = (params) => request.get('/hotspot/videos', { params });

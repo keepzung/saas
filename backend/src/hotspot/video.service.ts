@@ -16,6 +16,19 @@ const WIDTH = 720;
 const HEIGHT = 1280;
 const FPS = 30;
 
+/** 可挑选的 TTS 音色（edge-tts）；TTS_VOICE 仍是全局兜底默认 */
+export const TTS_VOICES = [
+  { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓', gender: '女', style: '温暖亲切' },
+  { id: 'zh-CN-XiaoyiNeural', name: '晓伊', gender: '女', style: '活泼甜美' },
+  { id: 'zh-CN-YunxiNeural', name: '云希', gender: '男', style: '阳光年轻' },
+  { id: 'zh-CN-YunjianNeural', name: '云健', gender: '男', style: '成熟浑厚' },
+  { id: 'zh-CN-YunyangNeural', name: '云扬', gender: '男', style: '专业播报' },
+  { id: 'zh-CN-YunxiaNeural', name: '云夏', gender: '男', style: '少年音' },
+  { id: 'zh-CN-liaoning-XiaobeiNeural', name: '小北', gender: '女', style: '东北话' },
+  { id: 'zh-HK-HiuMaanNeural', name: '曼怡', gender: '女', style: '粤语' },
+];
+const VOICE_IDS = new Set(TTS_VOICES.map((v) => v.id));
+
 interface Shot {
   durSec: number;
   voiceover: string;
@@ -41,7 +54,7 @@ export class VideoService {
     private quota: QuotaService,
   ) {}
 
-  /** 创建混剪任务：预检并扣算力 → 入队 */
+  /** 创建混剪任务：预检并扣算力 → 入队；voice 由用户挑选（缺省用 TTS_VOICE） */
   async createTask(input: {
     brandId: number;
     userId: number;
@@ -49,12 +62,14 @@ export class VideoService {
     breakdownId?: number;
     hotContentId?: number;
     title?: string;
+    voice?: string;
   }) {
     if (!llmEnabled()) throw new BadRequestException('LLM_API_KEY 未配置，无法生成分镜');
     const product = await this.prisma.product.findFirst({
       where: { id: input.productId, brandId: input.brandId },
     });
     if (!product) throw new NotFoundException('产品不存在');
+    if (input.voice && !VOICE_IDS.has(input.voice)) throw new BadRequestException('不支持的音色');
     await this.quota.assertEnough(input.brandId, VIDEO_COST);
     await this.quota.consume(input.brandId, VIDEO_COST, input.userId, '视频混剪');
     const task = await this.prisma.videoGenTask.create({
@@ -64,12 +79,34 @@ export class VideoService {
         breakdownId: input.breakdownId ?? null,
         hotContentId: input.hotContentId ?? null,
         title: input.title ?? null,
+        voice: input.voice ?? null,
         engine: 'mixcut',
         status: 'queued',
       },
     });
     this.enqueue(task.id);
     return { id: task.id, status: task.status, cost: VIDEO_COST };
+  }
+
+  /** 音色清单（前端下拉） */
+  voices() {
+    return { default: process.env.TTS_VOICE ?? 'zh-CN-XiaoxiaoNeural', items: TTS_VOICES };
+  }
+
+  /** 音色试听：生成一句短音频（同音色覆盖写，不堆积文件） */
+  async voicePreview(voice?: string, text?: string) {
+    const v = voice && VOICE_IDS.has(voice) ? voice : process.env.TTS_VOICE ?? 'zh-CN-XiaoxiaoNeural';
+    const line = (text ?? '大家好，今天给大家带来一款超值好物，喜欢的记得看到最后。').slice(0, 60);
+    const { EdgeTTS } = (await import('node-edge-tts')) as {
+      EdgeTTS: new (o?: Record<string, unknown>) => { ttsPromise: (t: string, p: string) => Promise<void> };
+    };
+    const outDir = path.join(uploadRoot(), 'hotspot', 'previews');
+    fs.mkdirSync(outDir, { recursive: true });
+    const fileName = `preview_${v}.mp3`;
+    const outPath = path.join(outDir, fileName);
+    const tts = new EdgeTTS({ voice: v, lang: 'zh-CN', rate: process.env.TTS_RATE ?? 'default' });
+    await tts.ttsPromise(line, outPath);
+    return { url: `/uploads/hotspot/previews/${fileName}`, voice: v };
   }
 
   async tasks(brandId: number, q: { status?: string; page?: number; pageSize?: number }) {
@@ -106,6 +143,7 @@ export class VideoService {
         title: r.title ?? p?.displayName ?? p?.name ?? '',
         product: p ? p.displayName ?? p.name : '',
         engine: r.engine,
+        voice: r.voice,
         status: r.status,
         script: r.script,
         audio_url: r.audioUrl,
@@ -177,8 +215,8 @@ export class VideoService {
       await this.prisma.videoGenTask.update({ where: { id }, data: { status: 'rendering', script: board as object } });
       const assigned = await this.assignMedia(task.brandId, board.shots, task.productId);
 
-      // ── 3. TTS 配音 ──
-      const voice = process.env.TTS_VOICE ?? 'zh-CN-XiaoxiaoNeural';
+      // ── 3. TTS 配音（任务级音色优先，缺省全局 TTS_VOICE）──
+      const voice = task.voice || process.env.TTS_VOICE || 'zh-CN-XiaoxiaoNeural';
       const rate = process.env.TTS_RATE ?? 'default';
       const { EdgeTTS } = (await import('node-edge-tts')) as { EdgeTTS: new (o?: Record<string, unknown>) => { ttsPromise: (t: string, p: string) => Promise<void> } };
       const audioFiles: string[] = [];

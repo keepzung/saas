@@ -142,7 +142,7 @@
       </template>
     </a-drawer>
 
-    <ProductPickModal v-model:open="pickOpen" :title="pickTitle" :with-strategy="pickMode === 'article'" @picked="onPicked" />
+    <ProductPickModal v-model:open="pickOpen" :title="pickTitle" :with-strategy="pickMode === 'article'" :show-voice="pickMode === 'video'" @picked="onPicked" />
   </PageWrapper>
 </template>
 
@@ -301,7 +301,7 @@ const createVideo = (detailRow) => {
   pickOpen.value = true;
 };
 
-const onPicked = async ({ productId, strategyId }) => {
+const onPicked = async ({ productId, strategyId, voice }) => {
   const c = pickContent.value;
   pickOpen.value = false;
   if (!c || !productId) return;
@@ -309,7 +309,7 @@ const onPicked = async ({ productId, strategyId }) => {
     const res = await generateFromBreakdownSafe(c.breakdown?.id, productId, strategyId);
     if (res) message.success('文案已生成并进入「历史记录」，可去审核发布');
   } else {
-    await createVideoSafe(c.breakdown?.id ?? null, c.id, productId);
+    await createVideoSafe(c.breakdown?.id ?? null, c.id, productId, voice);
     message.success('视频任务已创建，可到「视频工坊」查看进度');
   }
 };
@@ -331,11 +331,11 @@ const generateFromBreakdownSafe = async (breakdownId, productId, strategyId) => 
   }
 };
 
-const createVideoSafe = async (breakdownId, hotContentId, productId) => {
+const createVideoSafe = async (breakdownId, hotContentId, productId, voice) => {
   try {
     const { generateVideo } = await import('../../api/hotspot');
     await generateVideo(
-      { brandId: brandId.value, productId, breakdownId: breakdownId ?? undefined, hotContentId },
+      { brandId: brandId.value, productId, breakdownId: breakdownId ?? undefined, hotContentId, voice: voice ?? undefined },
       { brandId: brandId.value },
     );
   } catch (e) {
