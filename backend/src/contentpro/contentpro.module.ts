@@ -10,5 +10,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [ContentproController],
   providers: [ContentproService, AiService, QuotaService, BrandAccessGuard],
+  exports: [QuotaService],
 })
 export class ContentproModule {}

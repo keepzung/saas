@@ -335,6 +335,31 @@ const routes = [
         component: () => import('../views/laigu/LaiguLeadView.vue'),
         meta: { title: '私信线索' },
       },
+      {
+        path: '/hotspot/radar',
+        component: () => import('../views/hotspot/HotspotRadarView.vue'),
+        meta: { title: '热点雷达' },
+      },
+      {
+        path: '/hotspot/competitors',
+        component: () => import('../views/hotspot/CompetitorView.vue'),
+        meta: { title: '竞品分析' },
+      },
+      {
+        path: '/hotspot/breakdown',
+        component: () => import('../views/hotspot/BreakdownView.vue'),
+        meta: { title: '爆款拆解' },
+      },
+      {
+        path: '/hotspot/studio',
+        component: () => import('../views/hotspot/VideoStudioView.vue'),
+        meta: { title: '视频工坊' },
+      },
+      {
+        path: '/hotspot/match',
+        component: () => import('../views/hotspot/KolMatchView.vue'),
+        meta: { title: '达人匹配' },
+      },
     ],
   },
   {

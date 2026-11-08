@@ -297,7 +297,7 @@ model ProjectStats {
 
 model KolCreator {
   id                Int      @id @default(autoincrement())
-  authorId          String   @unique
+  authorId          String
   platform          String   @default("xhs")
   platformId        Int      @default(1)
   nickname          String
@@ -324,6 +324,9 @@ model KolCreator {
   cooperationForm   String?
   homePage          String?
 
+  goodsCategories  String[] @default([])
+  hotHits          Int      @default(0)
+
   inLibrary      Boolean  @default(false)
   contactStatus  String   @default("pending")
   contactPhone   String?
@@ -339,7 +342,9 @@ model KolCreator {
   updatedAt      DateTime @updatedAt
 
   reviews KolReview[]
+  matches KolMatch[] @relation("KolMatchCreator")
 
+  @@unique([platform, authorId])
   @@index([inLibrary])
   @@index([mcn])
   @@index([fans])
@@ -1688,4 +1693,179 @@ model KoxNoteDailyStat {
   @@unique([brandId, noteId, day])
   @@index([brandId, day])
   @@index([brandId, isRtbAdver, day])
+}
+
+// ── 灵感引擎：跨平台热点抓取 / 竞品分析 / 爆款拆解 / 视频生成 / 达人匹配 ──────
+
+// 跨平台登录态（通用化 SparkOrgConfig 模式）：本机有头扫码登录后推送 storageState，服务器只读使用、永不主动登录
+model PlatformSession {
+  id           Int       @id @default(autoincrement())
+  platform     String // xhs | bilibili | douyin | zhihu | channels
+  label        String    @default("默认")
+  brandId      Int       @default(1)
+  storageState Json?
+  cookie       String?
+  status       String    @default("unknown") // active | expired | manual_required
+  lastCheckAt  DateTime?
+  lastOkAt     DateTime?
+  note         String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([platform, label])
+}
+
+// 各工作区的抓取关键词配置
+model HotspotKeyword {
+  id            Int       @id @default(autoincrement())
+  brandId       Int       @default(1)
+  keyword       String
+  platforms     String[]  @default(["xhs", "bilibili"])
+  enabled       Boolean   @default(true)
+  lastScrapedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([brandId, keyword])
+  @@index([brandId, enabled])
+}
+
+// 跨平台内容池：公共热点（isPublic）全工作区可见，竞品内容按 brandId 隔离
+model HotContent {
+  id              Int       @id @default(autoincrement())
+  platform        String // xhs | bilibili | douyin | zhihu | channels
+  contentId       String
+  kind            String    @default("note") // note | video | article
+  title           String    @default("")
+  content         String?   @db.Text
+  coverUrl        String?
+  videoUrl        String?
+  durationSec     Int?
+  authorId        String    @default("")
+  authorName      String    @default("")
+  authorAvatar    String?
+  authorFans      Int?
+  topics          String[]  @default([])
+  publishTime     DateTime?
+  viewCount       Int       @default(0)
+  likeCount       Int       @default(0)
+  commentCount    Int       @default(0)
+  shareCount      Int       @default(0)
+  collectCount    Int       @default(0)
+  sourceType      String    @default("search") // hot_list | search | competitor
+  sourceKeyword   String?
+  brandId         Int       @default(1)
+  isPublic        Boolean   @default(true)
+  breakdownStatus String    @default("none") // none | pending | processing | done | failed
+  firstSeenAt     DateTime  @default(now())
+  scrapedAt       DateTime  @default(now()) @updatedAt
+  rawJson         Json? // 平台原始卡片载荷（xsec_token / bvid 等拆解上下文）
+
+  breakdown ContentBreakdown?
+
+  @@unique([platform, contentId])
+  @@index([brandId, sourceType])
+  @@index([platform, sourceType, scrapedAt])
+}
+
+// 竞品账号跟踪
+model CompetitorAccount {
+  id         Int       @id @default(autoincrement())
+  brandId    Int
+  platform   String
+  authorId   String
+  nickname   String    @default("")
+  avatar     String?
+  homeUrl    String?
+  alias      String?
+  note       String?   @db.Text
+  enabled    Boolean   @default(true)
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([brandId, platform, authorId])
+  @@index([brandId])
+}
+
+// 爆款拆解结果
+model ContentBreakdown {
+  id            Int        @id @default(autoincrement())
+  hotContentId  Int        @unique
+  hotContent    HotContent @relation(fields: [hotContentId], references: [id], onDelete: Cascade)
+  brandId       Int        @default(1)
+  status        String     @default("pending") // pending | processing | done | failed
+  partial       Boolean    @default(false) // 视频直链不可得等场景的降级拆解
+  hook          String?    @db.Text
+  structure     Json? // [{stage, summary, voiceover?}]
+  sellingPoints Json?
+  cta           String?    @db.Text
+  styleTags     String[]   @default([])
+  scriptText    String?    @db.Text
+  replicateTips String?    @db.Text
+  aiModel       String?
+  rawAnalysis   Json?
+  errorMsg      String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  videoTasks VideoGenTask[]
+
+  @@index([brandId, status])
+}
+
+// 品牌自有视频素材（混剪用；为空时回落 MaterialImage 图片 + KenBurns 动效）
+model MaterialVideo {
+  id            Int      @id @default(autoincrement())
+  brandId       Int      @default(1)
+  url           String
+  thumbUrl      String?
+  durationSec   Int?
+  tags          String[] @default([])
+  productNodeId Int?
+  setId         Int?
+  createdAt     DateTime @default(now())
+
+  @@index([brandId])
+}
+
+// 视频生成任务（一期 mixcut 智能混剪；cogvideox 为二期预留 engine 值）
+model VideoGenTask {
+  id           Int              @id @default(autoincrement())
+  brandId      Int              @default(1)
+  breakdownId  Int?
+  breakdown    ContentBreakdown? @relation(fields: [breakdownId], references: [id], onDelete: SetNull)
+  hotContentId Int?
+  productId    Int
+  title        String?          @db.Text
+  script       Json? // [{index, durSec, voiceover, subtitle, mediaQuery, mediaType, mediaUrl}]
+  engine       String           @default("mixcut")
+  status       String           @default("queued") // queued | scripting | rendering | done | failed
+  audioUrl     String?
+  videoUrl     String?
+  coverUrl     String?
+  durationSec  Int?
+  errorMsg     String?
+  historyId    Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([brandId, status])
+}
+
+// 产品↔达人匹配结果
+model KolMatch {
+  id        Int        @id @default(autoincrement())
+  brandId   Int        @default(1)
+  productId Int
+  creatorId Int
+  creator   KolCreator @relation("KolMatchCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  score     Int?
+  rationale String?    @db.Text
+  status    String     @default("candidate") // candidate | contacted | cooperating | rejected
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([productId, creatorId])
+  @@index([brandId, status])
 }
