@@ -60,6 +60,18 @@ export class HotspotController {
     return this.hotspot.contentDetail(num(brandId, 1)!, id!);
   }
 
+  /** 本机抓取结果导入（小红书等平台在服务器 IP 会被风控，抓取只在本机执行后推送） */
+  @Post('contents/import')
+  importContents(@Req() req: Request, @Body() body: { brandId?: number; sourceType?: string; sourceKeyword?: string; items: Record<string, unknown>[] }) {
+    if (this.me(req).role !== 'ADMIN') throw new ForbiddenException('仅超级管理员可导入抓取结果');
+    return this.hotspot.importContents({
+      brandId: Number(body.brandId ?? 1),
+      sourceType: body.sourceType ?? 'search',
+      sourceKeyword: body.sourceKeyword,
+      items: (body.items ?? []) as never[],
+    });
+  }
+
   // ─── 抓取触发 ────────────────────────────────────────────────────────
   @Post('scrape/run')
   scrapeRun(@Body() body: { brandId: number; platform: string; keyword: string }) {

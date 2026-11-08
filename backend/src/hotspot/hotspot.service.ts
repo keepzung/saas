@@ -251,6 +251,18 @@ export class HotspotService {
     return this.prisma.competitorAccount.update({ where: { id }, data: { enabled } });
   }
 
+  /** 本机抓取结果导入（与 scrapeNow 的 upsert 同管道；items 已是 ScrapedItem 形状） */
+  async importContents(input: { brandId: number; sourceType: string; sourceKeyword?: string; items: ScrapedItem[] }) {
+    const r = await this.upsertContents(input.items, {
+      brandId: input.brandId,
+      sourceType: input.sourceType,
+      sourceKeyword: input.sourceKeyword,
+      isPublic: input.sourceType !== 'competitor',
+    });
+    this.logger.log(`导入抓取结果 brand=${input.brandId} ${input.sourceType}/${input.sourceKeyword ?? ''}: 新增 ${r.inserted}，更新 ${r.updated}`);
+    return r;
+  }
+
   // ─── 内容池 upsert（含达人自动入池）──────────────────────────────────
   async upsertContents(
     items: ScrapedItem[],
