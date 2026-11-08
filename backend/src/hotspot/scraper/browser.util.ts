@@ -25,10 +25,13 @@ export function resolveChromium(): string | null {
     try {
       const dirs = fs.readdirSync(base).filter((d) => d.startsWith('chromium-'));
       for (const d of dirs) {
-        const inner = path.join(base, d, 'chrome-win', 'chrome.exe');
-        if (fs.existsSync(inner)) return inner;
-        const linux = path.join(base, d, 'chrome-linux', 'chrome');
-        if (fs.existsSync(linux)) return linux;
+        // 新版布局 chrome-linux64/chrome（1208+），旧版 chrome-linux/chrome，Windows chrome-win/chrome.exe
+        const candidates = [
+          path.join(base, d, 'chrome-linux64', 'chrome'),
+          path.join(base, d, 'chrome-linux', 'chrome'),
+          path.join(base, d, 'chrome-win', 'chrome.exe'),
+        ];
+        for (const c of candidates) if (fs.existsSync(c)) return c;
       }
     } catch {
       /* ignore */
