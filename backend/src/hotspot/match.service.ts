@@ -27,11 +27,12 @@ export class MatchService {
     if (!product) throw new NotFoundException('产品不存在');
     const topK = Math.min(50, Math.max(5, input.topK ?? 20));
 
-    // 召回：活跃达人池（热点入池/收藏/手工导入），按 hotHits+粉丝排序
+    // 召回：活跃达人池（热点入池/收藏/手工导入）；粉丝数 0 = 未知（热点抓取入池时平台不提供），同样参与匹配
+    const poolTotal = await this.prisma.kolCreator.count({ where: { resourceStatus: 1 } });
     const candidates = await this.prisma.kolCreator.findMany({
       where: {
         resourceStatus: 1,
-        fans: { gte: 500, lte: 5000000 },
+        fans: { lte: 5000000 },
       },
       orderBy: [{ hotHits: 'desc' }, { fans: 'desc' }],
       take: RECALL_LIMIT,
@@ -55,7 +56,13 @@ export class MatchService {
         hotHits: true,
       },
     });
-    if (!candidates.length) throw new BadRequestException('达人池为空，请先在达人广场收藏或通过热点抓取积累达人');
+    if (!candidates.length) {
+      throw new BadRequestException(
+        poolTotal > 0
+          ? `达人池共 ${poolTotal} 位，但召回为 0：可能全部被状态过滤，请检查达人的资源状态`
+          : '达人池为空：先在热点雷达跑几轮抓取积累达人（爆款作者自动入池），或在达人管理页导入/收藏达人',
+      );
+    }
 
     // LLM 分批评分（glm-4-flash 对长列表会偷懒漏人：批内强制条数 + 空结果重试一次 + 序号兜底）
     const productBrief = [
@@ -92,6 +99,7 @@ export class MatchService {
       const sys = [
         '你是达人匹配评分官。给定产品和一批达人资料，为每位达人输出与产品带货契合度的评分与理由。',
         '评分 0-100：90+ 强推（类目/人群高度契合且有带货痕迹），70-89 推荐（人群/风格契合），40-69 可考虑（泛匹配），<40 不推荐。',
+        '注意：粉丝数为 0 表示未知（来自热点抓取，平台未提供），不要因为粉丝未知直接打低分，结合昵称等类目信号判断；信息不足时给 40-60 并在理由中注明「信息不足」。',
         '理由 ≤40 字，指出契合点或风险。',
         `达人列表共 ${batch.length} 位，scores 数组必须恰好包含 ${batch.length} 条，每位达人一条，id 用行首的 id=N 原样输出，不能省略、不能合并。`,
         '输出严格 JSON：{"scores":[{"id":N,"score":85,"rationale":"..."}]}',
