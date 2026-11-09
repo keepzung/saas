@@ -32,6 +32,7 @@ cd "$APP_DIR"
 echo "==> [1/7] 拉取最新代码（${BRANCH}）"
 git fetch origin "$BRANCH"
 git reset --hard "origin/${BRANCH}"
+chmod 755 /opt/saas/deploy/*.sh 2>/dev/null || true
 
 echo "==> [2/7] 后端依赖"
 cd "$APP_DIR/backend"
