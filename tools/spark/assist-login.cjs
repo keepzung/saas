@@ -232,6 +232,16 @@ async function waitAnswer(timeoutMs) {
           if (el) el.click();
         }).catch(() => {});
         await sleep(3500);
+        // partner：验证通过后弹窗关闭回到登录表单，需再点一次「登录」提交
+        if (channel === 'partner') {
+          for (let w = 0; w < 8; w++) {
+            await sleep(1000);
+            const t2 = await page.locator('body').innerText().catch(() => '');
+            if (!/安全验证/.test(t2)) break;
+          }
+          await page.mouse.click(1129, 503).catch(() => {});
+          await sleep(1000);
+        }
         continue;
       }
       await sleep(2000);
