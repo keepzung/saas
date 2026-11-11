@@ -105,7 +105,7 @@ async function scrapeKeyword(page, keyword) {
       `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_explore_feed`,
       { waitUntil: 'domcontentloaded', timeout: 30000 },
     );
-    await sleep(4500);
+    await sleep(8000); // 搜索接口水合较慢，等待过短会空手而归
     if (page.url().includes('login') || page.url().includes('passport')) {
       console.error(`[xhs-local] 「${keyword}」跳转登录页，会话已过期 —— 重跑 login-xhs.cjs 扫码`);
       return { items: [], blocked: false, expired: true };
