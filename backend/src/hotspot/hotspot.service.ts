@@ -1,10 +1,13 @@
 // 灵感引擎主编排：内容池读写、关键词/竞品管理、抓取执行与调度
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionStore } from './scraper/session.store';
-import { launchBrowser, newAuthedContext, sleep } from './scraper/browser.util';
+import { DESKTOP_UA, launchBrowser, newAuthedContext, sleep } from './scraper/browser.util';
 import { PlatformBlockedError, ScrapedItem, SessionMissingError, parseCount, stripHtml } from './scraper/types';
+import { uploadRoot } from './media.util';
 import { scrapeXhsHot, scrapeXhsSearch } from './scraper/xhs.scraper';
 import { scrapeBiliAuthor, scrapeBiliHot, scrapeBiliSearch } from './scraper/bilibili.scraper';
 
@@ -308,6 +311,8 @@ export class HotspotService {
           shareCount: data.shareCount,
           collectCount: data.collectCount,
           authorFans: data.authorFans,
+          // 小红书封面直链带时效签名会过期，重复抓到同一内容时用新直链刷新
+          ...(data.coverUrl ? { coverUrl: data.coverUrl } : {}),
           rawJson: data.rawJson,
         },
       });
@@ -315,7 +320,42 @@ export class HotspotService {
       else updated += 1;
       if (it.authorId && it.authorName) await this.upsertCreator(it);
     }
+    // 封面本地化（后台执行，不阻塞入库）：平台 CDN 直链数小时即失效
+    void this.localizeCovers(items).catch((e) => this.logger.warn(`封面本地化异常: ${(e as Error).message?.split('\n')[0]}`));
     return { inserted, updated };
+  }
+
+  /** 封面本地化：下载到 /uploads/hotspot/covers 并改写 coverUrl；失败保留原直链（下次抓取重试） */
+  private async localizeCovers(items: ScrapedItem[]) {
+    for (const it of items) {
+      if (!it.coverUrl || !it.contentId || !/^https?:\/\//.test(it.coverUrl)) continue;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(it.coverUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': DESKTOP_UA,
+            Referer: it.platform === 'bilibili' ? 'https://www.bilibili.com/' : 'https://www.xiaohongshu.com/',
+          },
+        });
+        clearTimeout(timer);
+        if (!res.ok) continue;
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 1024) continue;
+        const ext = (it.coverUrl.match(/\.(jpe?g|png|webp)/i)?.[1] ?? 'jpg').toLowerCase();
+        const dir = path.join(uploadRoot(), 'hotspot', 'covers');
+        fs.mkdirSync(dir, { recursive: true });
+        const name = `${it.platform}_${it.contentId}.${ext}`;
+        fs.writeFileSync(path.join(dir, name), buf);
+        await this.prisma.hotContent.update({
+          where: { platform_contentId: { platform: it.platform, contentId: it.contentId } },
+          data: { coverUrl: `/uploads/hotspot/covers/${name}` },
+        });
+      } catch {
+        /* 单张失败忽略，保留原直链 */
+      }
+    }
   }
 
   /** 热点作者自动入池 KolCreator（跨平台达人库，hotHits 累计） */
