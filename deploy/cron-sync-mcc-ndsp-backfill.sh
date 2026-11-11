@@ -18,9 +18,11 @@ flock -xn "$LOCK" -c "cd /opt/saas/tools && \
   /usr/local/bin/node trigger-sync.cjs notes_daily 5 >> $LOG 2>&1; \
   /usr/local/bin/node trigger-sync.cjs notes_daily 7 >> $LOG 2>&1; \
   /usr/local/bin/node trigger-sync.cjs notes_daily 2 >> $LOG 2>&1; \
+  /usr/local/bin/node trigger-sync.cjs notes_daily 8 >> $LOG 2>&1; \
   /usr/local/bin/node trigger-sync.cjs staff_matrix 5 --date=$Y1 >> $LOG 2>&1; \
   /usr/local/bin/node trigger-sync.cjs staff_matrix 7 --date=$Y1 >> $LOG 2>&1; \
   /usr/local/bin/node trigger-sync.cjs staff_matrix 2 --date=$Y1 >> $LOG 2>&1; \
+  /usr/local/bin/node trigger-sync.cjs staff_matrix 8 --date=$Y1 >> $LOG 2>&1; \
   echo '===== ndsp backfill done' >> $LOG"
 echo "===== $(date '+%F %T') mcc ndsp backfill done =====" >> "$LOG"
 tail -n 2000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
