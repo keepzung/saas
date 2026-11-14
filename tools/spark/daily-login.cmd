@@ -37,7 +37,7 @@ echo [5/6] ╤╚╥Г MCC ...
 
 set TAG=GREE
 set BRAND=8
-rem ╦Яа╕ MCC вИж╞х╗очн╢©╙м╗, д╛холЬ╧Щ; х╗оч©╙м╗╨Си╬ЁЩобцФуБпп set SKIP_GREE=1 ╪╢©и╩ж╦╢
+rem ╦Яа╕ MCC вИж╞х╗очн╢©╙м╗, д╛холЬ╧Щ; х╗оч©╙м╗╨Си╬ЁЩобцФуБпп rem set SKIP_GREE=1и╩ж╦╢
 set SKIP_GREE=1
 if defined SKIP_GREE (
   echo [6/6] ╦Яа╕ MCC - х╗очн╢©╙м╗, лЬ╧Щ
