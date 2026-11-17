@@ -303,7 +303,12 @@ export class AiService {
     let script: VideoScript | null = null;
     if (ctx.form === 'video_script') {
       const raw = (parsed as { script?: unknown }).script as VideoScript | undefined;
-      if (raw && Array.isArray(raw.shots) && raw.shots.length) script = raw;
+      if (raw && Array.isArray(raw.shots) && raw.shots.length) {
+        script = raw;
+      } else {
+        // LLM 未按结构返回分镜时降级兜底（口播稿已在 content）
+        script = this.fallbackScript(ctx.productName, ctx.sellingPoints);
+      }
     }
     return { titles: parsed.titles, content: parsed.content, tags: parsed.tags, source: 'llm', script };
   }

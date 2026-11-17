@@ -212,10 +212,11 @@ const TEMPLATES = [
 ];
 
 // 合规红线规则 ×4（动作：block=出厂拦截 / flag=强制重写；与生成预审、私信拦截共用）
+// pattern 支持 /正则/ 或逗号分隔关键词；绝对化用语用正则排除「第一次/第一名次序」类无害用法
 const COMPLIANCE_RULES = [
   {
     name: '广告法绝对化用语',
-    pattern: '最好,最佳,第一,顶级,绝对,百分百,全网最低,史上最,无人能比',
+    pattern: '/(最好|最佳|最优|最强|第一(?!次|性|步|时间|人称|季度|个月)|顶级|绝对|百分百|全网最低|史上最|无人能比)/',
     action: 'block',
     replyHint: '',
   },
@@ -227,7 +228,7 @@ const COMPLIANCE_RULES = [
   },
   {
     name: '夸大承诺',
-    pattern: '稳赚,必买,闭眼入, guaranteed, 无条件退款',
+    pattern: '稳赚,必买,闭眼入,无条件退款',
     action: 'flag',
     replyHint: '',
   },
@@ -395,11 +396,19 @@ async function main() {
   }
   console.log(`品牌模板: 新建 ${tpNew} 个，同名跳过 ${tpSkip} 个（共 ${TEMPLATES.length}）`);
 
-  // ── 9. 合规红线规则 ×4（按 name 幂等）───────────────────────────
-  let ruleNew = 0, ruleSkip = 0;
+  // ── 9. 合规红线规则 ×4（按 name 幂等；已存在则刷新 pattern/action）──
+  let ruleNew = 0, ruleSkip = 0, ruleUpd = 0;
   for (const r of COMPLIANCE_RULES) {
     const exist = await prisma.knowledgeRule.findFirst({ where: { brandId: BRAND_ID, category: 'compliance', name: r.name } });
-    if (exist) { ruleSkip += 1; continue; }
+    if (exist) {
+      if (!DRY_RUN && (exist.pattern !== r.pattern || exist.action !== r.action)) {
+        await prisma.knowledgeRule.update({ where: { id: exist.id }, data: { pattern: r.pattern, action: r.action, replyHint: r.replyHint || null } });
+        ruleUpd += 1;
+      } else {
+        ruleSkip += 1;
+      }
+      continue;
+    }
     if (!DRY_RUN) {
       await prisma.knowledgeRule.create({
         data: { brandId: BRAND_ID, category: 'compliance', name: r.name, pattern: r.pattern, action: r.action, replyHint: r.replyHint || null, enabled: true },
@@ -407,7 +416,7 @@ async function main() {
     }
     ruleNew += 1;
   }
-  console.log(`合规规则: 新建 ${ruleNew} 条，同名跳过 ${ruleSkip} 条（共 ${COMPLIANCE_RULES.length}）`);
+  console.log(`合规规则: 新建 ${ruleNew} 条，刷新 ${ruleUpd} 条，未变跳过 ${ruleSkip} 条（共 ${COMPLIANCE_RULES.length}）`);
 
   console.log(DRY_RUN ? 'dry-run 完成，未写库' : '启用完成');
 }
