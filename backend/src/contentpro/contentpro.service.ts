@@ -502,15 +502,23 @@ export class ContentproService {
     await this.quota.consume(input.brandId, 1, userId, '单篇生成');
     try {
       const result = await this.ai.generateArticle(input);
-      // AI 预审：rewrite 自动带问题清单重写一次；reject 不重写（进人工终审队列由人工把关）
+      // AI 预审闸门：非 pass 一律带问题清单自动改写一次（含违禁词命中），改不掉才进人工终审
       let audit = await this.ai.preReview({
         brandId: input.brandId,
         title: result.titles[0] ?? '',
         content: result.content,
         noteKind: input.noteKind,
       });
-      if (audit.verdict === 'rewrite') {
-        const retryExtra = [input.extra, `上一版质检问题（务必规避）：${audit.issues.join('；')}`]
+      if (audit.verdict !== 'pass') {
+        const blockedWords = audit.ruleHits.filter((h) => h.action === 'block').map((h) => h.matched);
+        const avoidHint = blockedWords.length
+          ? `以下词语禁止出现（命中会被拦截）：${blockedWords.join('、')}；请换用合规表述`
+          : '';
+        const retryExtra = [
+          input.extra,
+          avoidHint,
+          `上一版质检问题（务必规避）：${audit.issues.join('；')}`,
+        ]
           .filter(Boolean)
           .join('\n');
         try {
@@ -521,7 +529,7 @@ export class ContentproService {
             content: retry.content,
             noteKind: input.noteKind,
           });
-          if (retryAudit.score >= audit.score) {
+          if (retryAudit.score > audit.score) {
             return { ...retry, aiScore: retryAudit.score, aiAudit: retryAudit as unknown as Prisma.JsonObject };
           }
         } catch {
