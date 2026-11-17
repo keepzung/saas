@@ -1,4 +1,5 @@
 // AI 文章生成服务：GLM API 优先（LLM_API_KEY），未配置 key 时回退模板拼装（source=template）
+// 2026-11-17 建设项：品牌模板注入 + 四类笔记×双风格×图文/短视频 prompt 矩阵 + AI 预审评分（有效率≥70%三道闸门之二）
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -7,7 +8,42 @@ export interface GenerateResult {
   content: string;
   tags: string[];
   source: 'llm' | 'template';
+  /** 短视频口播脚本（form=video_script 时返回），落 XhsHistory.scriptJson */
+  script?: VideoScript | null;
 }
+
+export interface VideoScript {
+  hook: string;
+  shots: { visual: string; voiceover: string }[];
+  cta: string;
+}
+
+export interface PreReviewResult {
+  score: number; // 0-100 总分
+  verdict: 'pass' | 'rewrite' | 'reject';
+  dims: {
+    brandFit: number; // 品牌调性符合度
+    sellingAccuracy: number; // 卖点准确性
+    compliance: number; // 合规性
+    originality: number; // 原创度
+    platformFit: number; // 平台适配度
+  };
+  issues: string[];
+  suggestion?: string;
+  ruleHits: { ruleId: number; name: string; action: string; matched: string }[];
+}
+
+export const NOTE_KINDS: Record<string, { label: string; guidance: string }> = {
+  seeding: { label: '种草笔记', guidance: '围绕车型卖点种草，激发购买兴趣；讲清「为什么值得买」，用体验感与对比强化种草效果。' },
+  scene: { label: '场景笔记', guidance: '从真实用车场景切入（家庭出行/日常通勤/节假日自驾/周末近郊），让读者代入「这就是我的生活」，自然带出车型价值。' },
+  life: { label: '生活笔记', guidance: '门店真实日常（交车仪式/店长日常/员工故事/车主活动），塑造真人销售人设，弱化推销感，重在真实与温度。' },
+  policy: { label: '政策钩子笔记', guidance: '以购车政策/金融方案/限时权益/节点促销为钩子，制造紧迫感促进行动，但必须合规表述，不夸大不虚假承诺。' },
+};
+
+const STYLE_GUIDANCE: Record<string, string> = {
+  brand: '品牌模版风格：结构完整、卖点准确、表述规范专业，可适度活泼但信息密度优先。',
+  kos: 'KOS 真人风格：门店销售第一人称口语化叙事，融入门店真实细节与个人表达习惯，像朋友圈/真实分享，不要官方腔。',
+};
 
 const asArr = (v: unknown): string[] => {
   if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
@@ -38,6 +74,46 @@ export class AiService {
     return { llm: this.enabled(), model: this.llmModel(), base_url: this.llmBase() };
   }
 
+  /** 通用 chatJson：LLM 输出严格 JSON 并解析（预审/评分等共用） */
+  async chatJson<T>(system: string, user: string, temperature = 0.3): Promise<T> {
+    const res = await fetch(`${this.llmBase()}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: this.llmModel(),
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        temperature,
+      }),
+    });
+    if (!res.ok) throw new Error(`LLM http ${res.status}`);
+    const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const text = j.choices?.[0]?.message?.content ?? '';
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('LLM 输出解析失败');
+    return JSON.parse(m[0]) as T;
+  }
+
+  /** 品牌模板注入材料：话术规范(全局) + 车型模板(按产品优先回退全局) + 合规模板 */
+  private async loadTemplates(brandId: number, productId?: number) {
+    const rows = await this.prisma.brandTemplate.findMany({
+      where: { brandId, status: 1, kind: { in: ['script_spec', 'vehicle_template', 'compliance_template'] } },
+      orderBy: { id: 'asc' },
+    });
+    const spec = rows.find((r) => r.kind === 'script_spec') ?? null;
+    const vehicle =
+      rows.find((r) => r.kind === 'vehicle_template' && r.productId === productId) ??
+      rows.find((r) => r.kind === 'vehicle_template' && r.productId == null) ??
+      null;
+    const complianceTpl = rows.find((r) => r.kind === 'compliance_template') ?? null;
+    return { spec, vehicle, complianceTpl };
+  }
+
   async generateArticle(input: {
     brandId: number;
     productId: number;
@@ -45,6 +121,9 @@ export class AiService {
     extra?: string;
     directionName?: string | null;
     wordCount?: string | null;
+    noteKind?: string | null;
+    style?: string | null;
+    form?: string | null;
   }): Promise<GenerateResult> {
     let product = await this.prisma.product.findUnique({ where: { id: input.productId } });
     if (!product) {
@@ -58,6 +137,7 @@ export class AiService {
     const strategy = input.strategyId
       ? await this.prisma.writingStrategy.findUnique({ where: { id: input.strategyId } })
       : null;
+    const templates = await this.loadTemplates(input.brandId, product.id);
     const productName = product?.displayName ?? product?.name ?? '产品';
     const knowledge = [product?.knowledge, product?.salesPolicy, product?.faq]
       .filter(Boolean)
@@ -70,6 +150,9 @@ export class AiService {
       | { name: string; description?: string }[]
       | null;
     const directionName = input.directionName ?? directions?.[0]?.name ?? '';
+    const noteKind = input.noteKind && NOTE_KINDS[input.noteKind] ? input.noteKind : null;
+    const style = input.style === 'brand' ? 'brand' : input.style === 'kos' ? 'kos' : null;
+    const form = input.form === 'video_script' ? 'video_script' : 'image_text';
 
     if (this.enabled()) {
       try {
@@ -86,12 +169,16 @@ export class AiService {
             : undefined,
           wordCount: input.wordCount ?? undefined,
           extra: input.extra,
+          noteKind,
+          style,
+          form,
+          templates,
         });
       } catch (e) {
         this.logger.warn(`LLM 生成失败回退模板: ${e?.message ?? e}`);
       }
     }
-    return this.templateCompose({
+    const fallback = this.templateCompose({
       productName,
       strategyName: strategy?.name,
       persona,
@@ -101,6 +188,10 @@ export class AiService {
       knowledge,
       extra: input.extra,
     });
+    if (form === 'video_script') {
+      fallback.script = this.fallbackScript(productName, sellingPoints);
+    }
+    return fallback;
   }
 
   // ── GLM 调用 ────────────────────────────────────────────────────────
@@ -115,26 +206,77 @@ export class AiService {
     directionDescription?: string;
     wordCount?: string;
     extra?: string;
+    noteKind?: string | null;
+    style?: string | null;
+    form?: string | null;
+    templates: { spec: { content: unknown } | null; vehicle: { content: unknown } | null; complianceTpl: { content: unknown } | null };
   }): Promise<GenerateResult> {
     const wc = ctx.wordCount ?? '300-600';
-    const sys = [
-      '你是小红书 KOS 笔记写手，用门店销售第一人称口语化写作。',
-      '输出严格 JSON：{"titles":["标题1","标题2","标题3"],"content":"正文","tags":["标签1",...]}',
-      `要求：标题 ≤20 字；正文 ${wc} 字，分段自然，可用 emoji 列卖点，结尾引导私信/到店；`,
-      '标签 4-6 个，# 后接关键词。',
-    ].join('\n');
-    const user = [
-      `产品：${ctx.productName}`,
-      ctx.strategyName ? `创作策略（人设）：${ctx.strategyName}` : '',
-      ctx.persona.length ? `人设：${ctx.persona.join('；')}` : '',
-      ctx.sellingPoints.length ? `必须覆盖的卖点：\n- ${ctx.sellingPoints.join('\n- ')}` : '',
-      ctx.audience.length ? `目标受众：${ctx.audience.join('、')}` : '',
-      ctx.directionName ? `内容方向：${ctx.directionName}${ctx.directionDescription ? `（${ctx.directionDescription}）` : ''}` : '',
-      ctx.knowledge ? `产品知识（节选）：\n${ctx.knowledge}` : '',
-      ctx.extra ? `额外写作要求：${ctx.extra}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const kindInfo = ctx.noteKind ? NOTE_KINDS[ctx.noteKind] : null;
+
+    const sys: string[] = [];
+    if (ctx.form === 'video_script') {
+      sys.push('你是汽车门店短视频编导兼 KOS 销售写手，写抖音/小红书竖屏短视频口播脚本。');
+      sys.push(
+        '输出严格 JSON：{"titles":["标题1","标题2","标题3"],"content":"完整口播文稿","script":{"hook":"前3秒钩子台词","shots":[{"visual":"画面描述","voiceover":"该镜头口播台词"}],"cta":"结尾引导台词"},"tags":["标签1"]}',
+      );
+      sys.push(`要求：3-6 个镜头，总时长对应 ${wc} 字口播；hook 必须前 3 秒抓住人；`);
+      sys.push('标签 4-6 个，# 后接关键词。');
+    } else {
+      sys.push('你是小红书 KOS 笔记写手，用门店销售第一人称口语化写作。');
+      sys.push('输出严格 JSON：{"titles":["标题1","标题2","标题3"],"content":"正文","tags":["标签1",...]}');
+      sys.push(`要求：标题 ≤20 字；正文 ${wc} 字，分段自然，可用 emoji 列卖点，结尾引导私信/到店；`);
+      sys.push('标签 4-6 个，# 后接关键词。');
+    }
+    if (kindInfo) sys.push(`本篇是「${kindInfo.label}」：${kindInfo.guidance}`);
+    if (ctx.style) sys.push(STYLE_GUIDANCE[ctx.style]);
+
+    // 品牌话术规范（全局约束）
+    const spec = ctx.templates.spec?.content as
+      | { tone?: string; dos?: string[]; donts?: string[]; vocabulary?: string[] }
+      | null
+      | undefined;
+    if (spec) {
+      const lines: string[] = ['【品牌话术规范（必须遵守）】'];
+      if (spec.tone) lines.push(`语气基调：${spec.tone}`);
+      if (spec.dos?.length) lines.push(`必须做到：${spec.dos.join('；')}`);
+      if (spec.donts?.length) lines.push(`禁止出现：${spec.donts.join('；')}`);
+      if (spec.vocabulary?.length) lines.push(`优先用语：${spec.vocabulary.join('、')}`);
+      sys.push(lines.join('\n'));
+    }
+
+    const user: string[] = [];
+    user.push(`产品：${ctx.productName}`);
+    if (ctx.strategyName) user.push(`创作策略（人设）：${ctx.strategyName}`);
+    if (ctx.persona.length) user.push(`人设：${ctx.persona.join('；')}`);
+    if (ctx.sellingPoints.length) user.push(`必须覆盖的卖点：\n- ${ctx.sellingPoints.join('\n- ')}`);
+    if (ctx.audience.length) user.push(`目标受众：${ctx.audience.join('、')}`);
+    if (ctx.directionName) {
+      user.push(
+        `内容方向：${ctx.directionName}${ctx.directionDescription ? `（${ctx.directionDescription}）` : ''}`,
+      );
+    }
+    if (ctx.knowledge) user.push(`产品知识（节选）：\n${ctx.knowledge}`);
+
+    // 车型内容模板（结构约束）
+    const vehicle = ctx.templates.vehicle?.content as
+      | { titlePatterns?: string[]; sections?: { name: string; requirement?: string }[]; cta?: string }
+      | null
+      | undefined;
+    if (vehicle) {
+      const lines: string[] = ['【车型内容模板（按此结构组织内容）】'];
+      if (vehicle.titlePatterns?.length) lines.push(`标题参考句式：${vehicle.titlePatterns.join(' / ')}`);
+      if (vehicle.sections?.length) {
+        lines.push(
+          `内容结构：${vehicle.sections
+            .map((s) => `${s.name}${s.requirement ? `（${s.requirement}）` : ''}`)
+            .join(' → ')}`,
+        );
+      }
+      if (vehicle.cta) lines.push(`行动引导：${vehicle.cta}`);
+      user.push(lines.join('\n'));
+    }
+    if (ctx.extra) user.push(`额外写作要求：${ctx.extra}`);
 
     const res = await fetch(`${this.llmBase()}/chat/completions`, {
       method: 'POST',
@@ -145,8 +287,8 @@ export class AiService {
       body: JSON.stringify({
         model: this.llmModel(),
         messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: user },
+          { role: 'system', content: sys.join('\n') },
+          { role: 'user', content: user.join('\n') },
         ],
         temperature: 0.8,
       }),
@@ -158,10 +300,15 @@ export class AiService {
     const text = j.choices?.[0]?.message?.content ?? '';
     const parsed = this.parseLlmJson(text);
     if (!parsed) throw new Error('LLM 输出解析失败');
-    return { ...parsed, source: 'llm' };
+    let script: VideoScript | null = null;
+    if (ctx.form === 'video_script') {
+      const raw = (parsed as { script?: unknown }).script as VideoScript | undefined;
+      if (raw && Array.isArray(raw.shots) && raw.shots.length) script = raw;
+    }
+    return { titles: parsed.titles, content: parsed.content, tags: parsed.tags, source: 'llm', script };
   }
 
-  private parseLlmJson(text: string): Omit<GenerateResult, 'source'> | null {
+  private parseLlmJson(text: string): { titles: string[]; content: string; tags: string[] } | null {
     if (!text) return null;
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) return null;
@@ -179,6 +326,18 @@ export class AiService {
     } catch {
       return null;
     }
+  }
+
+  private fallbackScript(productName: string, sellingPoints: string[]): VideoScript {
+    const shots = sellingPoints.slice(0, 4).map((s, i) => ({
+      visual: `${productName} ${i === 0 ? '外观环绕展示' : '细节/内饰特写'}`,
+      voiceover: s,
+    }));
+    return {
+      hook: `${productName}到底值不值？看完这条你再决定`,
+      shots: shots.length ? shots : [{ visual: `${productName} 外观展示`, voiceover: '这台车卖点很多，到店我给你讲' }],
+      cta: '想了解的评论区扣「看车」，或者直接私信我',
+    };
   }
 
   // ── 模板回退 ────────────────────────────────────────────────────────
@@ -241,6 +400,138 @@ export class AiService {
     ).slice(0, 6);
 
     return { titles, content, tags, source: 'template' };
+  }
+
+  // ── 合规扫描 + AI 预审评分（有效率≥70%保障：出厂前闸门）────────────
+  /**
+   * 合规词库扫描：KnowledgeRule(category=compliance, enabled) 关键词/正则匹配。
+   * pattern 支持两种写法：逗号或换行分隔的关键词组；或 /.../ 包裹的正则。
+   */
+  async scanCompliance(brandId: number, texts: string[]): Promise<PreReviewResult['ruleHits']> {
+    const rules = await this.prisma.knowledgeRule.findMany({
+      where: { brandId, category: 'compliance', enabled: true },
+    });
+    const target = texts.filter(Boolean).join('\n');
+    const hits: PreReviewResult['ruleHits'] = [];
+    for (const rule of rules) {
+      let matched = '';
+      const slash = rule.pattern.match(/^\/(.+)\/$/s);
+      if (slash) {
+        try {
+          const re = new RegExp(slash[1], 'i');
+          const m = target.match(re);
+          if (m) matched = m[0];
+        } catch {
+          this.logger.warn(`合规规则正则非法: ${rule.name}`);
+        }
+      } else {
+        const words = rule.pattern.split(/[,，\n]/).map((w) => w.trim()).filter(Boolean);
+        matched = words.find((w) => target.includes(w)) ?? '';
+      }
+      if (matched) hits.push({ ruleId: rule.id, name: rule.name, action: rule.action, matched });
+    }
+    return hits;
+  }
+
+  /**
+   * AI 预审评分：五维打分 + 合规规则扫描 → pass(≥75) / rewrite(60-74) / reject(<60)。
+   * block 级规则命中直接 reject；flag 级命中封顶 74（强制重写）。
+   */
+  async preReview(input: {
+    brandId: number;
+    title: string;
+    content: string;
+    productName?: string;
+    sellingPoints?: string[];
+    noteKind?: string | null;
+  }): Promise<PreReviewResult> {
+    const ruleHits = await this.scanCompliance(input.brandId, [input.title, input.content]);
+    const blocked = ruleHits.some((h) => h.action === 'block');
+    const flagged = ruleHits.filter((h) => h.action !== 'block');
+
+    let result: PreReviewResult;
+    if (!this.enabled()) {
+      // 无 LLM key：仅按规则扫描给结果（不阻塞生成主流程）
+      result = {
+        score: blocked ? 40 : flagged.length ? 70 : 80,
+        verdict: blocked ? 'reject' : flagged.length ? 'rewrite' : 'pass',
+        dims: { brandFit: 75, sellingAccuracy: 75, compliance: blocked ? 30 : flagged.length ? 60 : 85, originality: 75, platformFit: 75 },
+        issues: flagged.map((h) => `命中合规规则「${h.name}」：${h.matched}`),
+        suggestion: blocked ? '内容命中拦截级违禁词，已阻断，请修改后重试' : undefined,
+        ruleHits,
+      };
+      return result;
+    }
+    try {
+      const kindInfo = input.noteKind ? NOTE_KINDS[input.noteKind] : null;
+      const sys = [
+        '你是汽车品牌新媒体内容质检官，对 KOS 笔记做五维评分（各维 0-100 整数）：',
+        'brandFit 品牌调性符合度（贴合品牌定调与话术规范）、sellingAccuracy 卖点准确性（无虚构夸大，卖点覆盖合理）、',
+        'compliance 合规性（广告法/平台规则：绝对化用语、虚假承诺、价格违规表述等）、originality 原创度（非模板套话）、platformFit 平台适配度（小红书/抖音内容形态）。',
+        '输出严格 JSON：{"total":0-100,"brandFit":0,"sellingAccuracy":0,"compliance":0,"originality":0,"platformFit":0,"issues":["问题1"],"suggestion":"改进建议"}',
+      ].join('\n');
+      type PreReviewLlmJson = {
+        total?: unknown;
+        brandFit?: unknown;
+        sellingAccuracy?: unknown;
+        compliance?: unknown;
+        originality?: unknown;
+        platformFit?: unknown;
+        issues?: unknown;
+        suggestion?: unknown;
+      };
+      const user = [
+        input.productName ? `产品：${input.productName}` : '',
+        kindInfo ? `笔记类型：${kindInfo.label}` : '',
+        input.sellingPoints?.length ? `应覆盖卖点：${input.sellingPoints.join('；')}` : '',
+        `标题：${input.title}`,
+        `正文：\n${input.content.slice(0, 1600)}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const j = await this.chatJson<PreReviewLlmJson>(
+        sys,
+        user,
+        0.2,
+      );
+      const clamp = (n: unknown) => Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
+      const dims = {
+        brandFit: clamp(j.brandFit),
+        sellingAccuracy: clamp(j.sellingAccuracy),
+        compliance: clamp(j.compliance),
+        originality: clamp(j.originality),
+        platformFit: clamp(j.platformFit),
+      };
+      let score = clamp(j.total) || Math.round((dims.brandFit + dims.sellingAccuracy + dims.compliance + dims.originality + dims.platformFit) / 5);
+      const issues: string[] = Array.isArray(j.issues) ? j.issues.map(String).slice(0, 8) : [];
+      for (const h of flagged) issues.unshift(`命中合规规则「${h.name}」：${h.matched}`);
+      if (flagged.length) score = Math.min(score, 74);
+      if (blocked) {
+        score = Math.min(score, 40);
+        issues.unshift('命中拦截级违禁词');
+      }
+      const verdict: PreReviewResult['verdict'] = blocked || score < 60 ? 'reject' : score < 75 ? 'rewrite' : 'pass';
+      result = {
+        score,
+        verdict,
+        dims,
+        issues,
+        suggestion: String(j.suggestion ?? ''),
+        ruleHits,
+      };
+    } catch (e) {
+      // 预审失败不阻塞生成：按规则扫描结果降级给出
+      this.logger.warn(`AI 预审失败降级: ${e?.message ?? e}`);
+      result = {
+        score: blocked ? 40 : flagged.length ? 70 : 78,
+        verdict: blocked ? 'reject' : flagged.length ? 'rewrite' : 'pass',
+        dims: { brandFit: 78, sellingAccuracy: 78, compliance: blocked ? 30 : flagged.length ? 60 : 85, originality: 78, platformFit: 78 },
+        issues: flagged.map((h) => `命中合规规则「${h.name}」：${h.matched}`),
+        suggestion: 'AI 预审暂不可用，已按合规词库扫描，请人工终审把关',
+        ruleHits,
+      };
+    }
+    return result;
   }
 
   // ── 智能配图：按产品节点 → 品牌（东风/格力素材池小，先品牌内随机）────

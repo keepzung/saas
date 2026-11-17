@@ -70,6 +70,21 @@
             <div v-if="!currentDirections.length" class="dir-empty">选择创作策略后展示内容方向</div>
           </div>
         </div>
+        <div class="sec-title" style="margin-top: 18px"><span class="bar" /> 内容类型与风格</div>
+        <div class="kind-row">
+          <div class="kind-item">
+            <span class="kind-label">笔记类型</span>
+            <a-select v-model:value="noteKind" :options="NOTE_KIND_OPTIONS" />
+          </div>
+          <div class="kind-item">
+            <span class="kind-label">输出风格</span>
+            <a-select v-model:value="style" :options="STYLE_OPTIONS" />
+          </div>
+          <div class="kind-item">
+            <span class="kind-label">内容形态</span>
+            <a-select v-model:value="contentForm" :options="FORM_OPTIONS" />
+          </div>
+        </div>
         <div class="sec-title" style="margin-top: 18px"><span class="bar" /> 额外写作要求</div>
         <a-textarea
           v-model:value="extra"
@@ -94,6 +109,14 @@
           <div class="article-card">
             <div class="ac-head">
               <span class="ac-badge">已完成写作思考</span>
+              <span
+                v-if="aiScore != null"
+                class="ai-score-badge"
+                :style="{ color: scoreColor(aiScore), borderColor: scoreColor(aiScore) }"
+                :title="aiAuditTitle(aiAudit)"
+              >
+                AI 预审 {{ aiScore }} 分
+              </span>
               <a v-if="titles.length > 1" @click="titlesExpanded = !titlesExpanded">{{ titlesExpanded ? '收起' : '展开' }}</a>
             </div>
             <div class="title-row" v-if="titlesExpanded">
@@ -378,6 +401,35 @@ const strategyId = ref(null);
 const directionIndex = ref(0);
 const extra = ref('');
 const generating = ref(false);
+// 智能内容四分类 + 双风格 + 形态（东风日产建设项）
+const noteKind = ref('');
+const style = ref('kos');
+const contentForm = ref('image_text');
+const aiScore = ref(null);
+const aiAudit = ref(null);
+const NOTE_KIND_OPTIONS = [
+  { value: '', label: '不限（通用）' },
+  { value: 'seeding', label: '种草笔记' },
+  { value: 'scene', label: '场景笔记' },
+  { value: 'life', label: '生活笔记' },
+  { value: 'policy', label: '政策钩子笔记' },
+];
+const STYLE_OPTIONS = [
+  { value: 'kos', label: 'KOS 真人风格' },
+  { value: 'brand', label: '品牌模版风格' },
+];
+const FORM_OPTIONS = [
+  { value: 'image_text', label: '图文笔记' },
+  { value: 'video_script', label: '短视频文案' },
+];
+const scoreColor = (s) => (s >= 75 ? '#52c41a' : s >= 60 ? '#faad14' : '#f5222d');
+const aiAuditTitle = (audit) => {
+  if (!audit?.dims) return 'AI 预审评分';
+  const d = audit.dims;
+  const parts = `调性 ${d.brandFit ?? '-'} / 卖点 ${d.sellingAccuracy ?? '-'} / 合规 ${d.compliance ?? '-'} / 原创 ${d.originality ?? '-'} / 平台 ${d.platformFit ?? '-'}`;
+  const issues = audit.issues?.length ? `；问题：${audit.issues.join('；')}` : '';
+  return `${parts}${issues}`;
+};
 const regenPrompt = ref('');
 
 // step2/3
@@ -483,6 +535,9 @@ const generate = async () => {
         directionName: dir?.name ?? null,
         wordCount: '300-600',
         extra: extra.value || undefined,
+        noteKind: noteKind.value || null,
+        style: style.value || null,
+        form: contentForm.value || null,
       },
       { brandId: brandId.value },
     );
@@ -491,6 +546,8 @@ const generate = async () => {
     titlesExpanded.value = true;
     content.value = res?.content ?? '';
     tags.value = res?.tags ?? [];
+    aiScore.value = res?.aiScore ?? null;
+    aiAudit.value = res?.aiAudit ?? null;
     if (res?.source === 'template') {
       message.info('当前为内置模板生成，配置 LLM_API_KEY 后自动切换大模型');
     }
@@ -515,6 +572,9 @@ const regenerate = async () => {
         directionName: dir?.name ?? null,
         wordCount: '300-600',
         extra: [extra.value, regenPrompt.value].filter(Boolean).join('；'),
+        noteKind: noteKind.value || null,
+        style: style.value || null,
+        form: contentForm.value || null,
       },
       { brandId: brandId.value },
     );
@@ -522,6 +582,8 @@ const regenerate = async () => {
     selectedTitle.value = 0;
     content.value = res?.content ?? content.value;
     tags.value = res?.tags ?? tags.value;
+    aiScore.value = res?.aiScore ?? aiScore.value;
+    aiAudit.value = res?.aiAudit ?? aiAudit.value;
     regenPrompt.value = '';
     refreshQuota();
   } finally {
@@ -651,6 +713,11 @@ const publish = async () => {
         coverUrl: images.value[0]?.url ?? null,
         status: 0,
         source: health.value.llm ? 'ai' : 'template',
+        noteKind: noteKind.value || null,
+        style: style.value || null,
+        aiScore: aiScore.value,
+        aiAudit: aiAudit.value,
+        scriptJson: null,
       },
       { brandId: brandId.value },
     );
@@ -1450,5 +1517,32 @@ onMounted(async () => {
     border-left: none;
     padding-left: 0;
   }
+}
+
+/* 智能内容四分类 + 双风格 + 形态选择（东风日产建设项） */
+.kind-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+}
+.kind-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kind-label {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+.ai-score-badge {
+  display: inline-block;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  cursor: default;
 }
 </style>

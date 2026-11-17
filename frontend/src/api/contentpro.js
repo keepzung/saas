@@ -208,3 +208,54 @@ export const uploadTaskDoc = (file, brandId) => {
     timeout: 120000,
   });
 };
+
+// ─── 品牌模板库（话术规范/车型内容模板/合规模板/门店人设）────────────
+export const getTemplates = (params) =>
+  request.get('/content-pro/templates', { params });
+
+export const createTemplate = (data, params) =>
+  request.post('/content-pro/templates', data, { params });
+
+export const updateTemplate = (id, data) =>
+  request.put(`/content-pro/templates/${id}`, data);
+
+export const deleteTemplates = (ids) =>
+  request.post('/content-pro/templates/batch-delete', { ids });
+
+// ─── 知识库规则（评论/私信/分流/合规红线）───────────────────────────
+export const getKnowledgeRules = (params) =>
+  request.get('/content-pro/knowledge-rules', { params });
+
+export const createKnowledgeRule = (data, params) =>
+  request.post('/content-pro/knowledge-rules', data, { params });
+
+export const updateKnowledgeRule = (id, data) =>
+  request.put(`/content-pro/knowledge-rules/${id}`, data);
+
+export const deleteKnowledgeRules = (ids) =>
+  request.post('/content-pro/knowledge-rules/batch-delete', { ids });
+
+// ─── 案例库（爆款/拆解/竞品）────────────────────────────────────────
+export const getKnowledgeCases = (params) =>
+  request.get('/content-pro/knowledge-cases', { params });
+
+export const createKnowledgeCase = (data, params) =>
+  request.post('/content-pro/knowledge-cases', data, { params });
+
+export const favoriteKnowledgeCase = (hotContentId, params) =>
+  request.post('/content-pro/knowledge-cases/favorite', { hotContentId }, { params });
+
+export const updateKnowledgeCase = (id, data) =>
+  request.put(`/content-pro/knowledge-cases/${id}`, data);
+
+export const deleteKnowledgeCases = (ids) =>
+  request.post('/content-pro/knowledge-cases/batch-delete', { ids });
+
+// ─── AI 预审 / 运营报表 ─────────────────────────────────────────────
+export const preReviewHistory = (historyId, params) =>
+  request.post(`/content-pro/ai/pre-review/${historyId}`, {}, { params });
+
+export const getReports = (params) => request.get('/report/list', { params });
+
+export const getReportDetail = (id, params) =>
+  request.get(`/report/${id}`, { params });

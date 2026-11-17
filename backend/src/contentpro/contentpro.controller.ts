@@ -25,6 +25,7 @@ import { BrandAccessGuard } from './brand-access.guard';
 import { ContentproService } from './contentpro.service';
 import {
   BatchGenerateDto,
+  CaseDto,
   ClaimDto,
   ContentTaskDto,
   ChuangkitImportDto,
@@ -39,8 +40,10 @@ import {
   PackageDto,
   QuotaGrantDto,
   RejectDto,
+  RuleDto,
   SaveArticleDto,
   StrategyDto,
+  TemplateDto,
   UpdateContentTaskDto,
   UpdateHistoryContentDto,
 } from './dto/contentpro.dto';
@@ -517,5 +520,80 @@ export class ContentproController {
   ) {
     const user = req.user as { id: number; role: string };
     return this.service.voidContentTask(Number(brandId ?? 1), id, user.role);
+  }
+
+  // ─── 品牌模板库（话术规范/车型内容模板/合规模板/门店人设）──────────
+  @Get('content-pro/templates')
+  templateList(@Query('brandId') brandId?: string, @Query('kind') kind?: string) {
+    return this.service.templateList(Number(brandId ?? 1), kind);
+  }
+
+  @Post('content-pro/templates')
+  createTemplate(@Body() dto: TemplateDto, @Query('brandId') brandId?: string) {
+    return this.service.createTemplate(Number(brandId ?? 1), dto);
+  }
+
+  @Put('content-pro/templates/:id')
+  updateTemplate(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<TemplateDto>) {
+    return this.service.updateTemplate(id, dto);
+  }
+
+  @Post('content-pro/templates/batch-delete')
+  deleteTemplates(@Body() body: { ids: number[] }) {
+    return this.service.deleteTemplates(body.ids ?? []);
+  }
+
+  // ─── 知识库规则（评论/私信/分流/合规红线）──────────────────────────
+  @Get('content-pro/knowledge-rules')
+  ruleList(@Query('brandId') brandId?: string, @Query('category') category?: string) {
+    return this.service.ruleList(Number(brandId ?? 1), category);
+  }
+
+  @Post('content-pro/knowledge-rules')
+  createRule(@Body() dto: RuleDto, @Query('brandId') brandId?: string) {
+    return this.service.createRule(Number(brandId ?? 1), dto);
+  }
+
+  @Put('content-pro/knowledge-rules/:id')
+  updateRule(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<RuleDto>) {
+    return this.service.updateRule(id, dto);
+  }
+
+  @Post('content-pro/knowledge-rules/batch-delete')
+  deleteRules(@Body() body: { ids: number[] }) {
+    return this.service.deleteRules(body.ids ?? []);
+  }
+
+  // ─── 案例库（爆款/拆解/竞品）───────────────────────────────────────
+  @Get('content-pro/knowledge-cases')
+  caseList(@Query('brandId') brandId?: string, @Query('category') category?: string) {
+    return this.service.caseList(Number(brandId ?? 1), category);
+  }
+
+  @Post('content-pro/knowledge-cases')
+  createCase(@Body() dto: CaseDto, @Query('brandId') brandId?: string) {
+    return this.service.createCase(Number(brandId ?? 1), dto);
+  }
+
+  /** 从灵感引擎 HotContent 一键收藏入案例库 */
+  @Post('content-pro/knowledge-cases/favorite')
+  favoriteCase(@Body() body: { hotContentId: number }, @Query('brandId') brandId?: string) {
+    return this.service.favoriteCaseFromHotspot(Number(brandId ?? 1), Number(body.hotContentId));
+  }
+
+  @Put('content-pro/knowledge-cases/:id')
+  updateCase(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<CaseDto>) {
+    return this.service.updateCase(id, dto);
+  }
+
+  @Post('content-pro/knowledge-cases/batch-delete')
+  deleteCases(@Body() body: { ids: number[] }) {
+    return this.service.deleteCases(body.ids ?? []);
+  }
+
+  /** 手动重审：对已落库历史重新跑 AI 预审 */
+  @Post('content-pro/ai/pre-review/:historyId')
+  preReviewHistory(@Param('historyId', ParseIntPipe) historyId: number, @Query('brandId') brandId?: string) {
+    return this.service.preReviewHistory(Number(brandId ?? 1), historyId);
   }
 }

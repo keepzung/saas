@@ -18,6 +18,7 @@ import { ContentproModule } from './contentpro/contentpro.module';
 import { ProModule } from './pro/pro.module';
 import { OrgModule } from './org/org.module';
 import { HotspotModule } from './hotspot/hotspot.module';
+import { ReportModule } from './report/report.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { HotspotModule } from './hotspot/hotspot.module';
     ProModule,
     OrgModule,
     HotspotModule,
+    ReportModule,
   ],
 })
 export class AppModule {}

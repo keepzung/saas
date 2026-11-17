@@ -35,7 +35,17 @@
             <span style="flex: 1" class="au-content">
               <img :src="item.img_list?.[0] ?? item.cover_url" class="au-thumb" @error="$event.target.style.visibility = 'hidden'" />
               <div class="au-ct">
-                <div class="au-title">{{ item.title }}</div>
+                <div class="au-title">
+                  {{ item.title }}
+                  <span
+                    v-if="item.ai_score != null"
+                    class="au-score"
+                    :class="{ ok: item.ai_score >= 75, warn: item.ai_score >= 60 && item.ai_score < 75, bad: item.ai_score < 60 }"
+                    :title="aiAuditTitle(item.ai_audit)"
+                  >
+                    AI {{ item.ai_score }}
+                  </span>
+                </div>
                 <div class="au-brief">{{ item.content?.slice(0, 60) }}…</div>
               </div>
             </span>
@@ -43,6 +53,7 @@
             <span style="width: 150px" class="au-muted">{{ fmtTime(item.upload_time) }}</span>
             <span style="width: 120px" class="au-ops">
               <a @click="preview = item">查看</a>
+              <a @click="reReview(item)">重审</a>
               <a class="ok" @click="doApprove([item.id])">通过</a>
               <a class="danger" @click="openReject([item.id])">驳回</a>
             </span>
@@ -82,7 +93,7 @@ import { message, Empty } from 'ant-design-vue';
 import { CheckOutlined, CloseOutlined, FolderOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getAuditList, approveHistory, rejectHistory, getPackagesPro } from '../../api/contentpro';
+import { getAuditList, approveHistory, rejectHistory, getPackagesPro, preReviewHistory } from '../../api/contentpro';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -130,6 +141,26 @@ const toggleAll = () => {
 };
 
 const fmtTime = (t) => (t ? new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+
+// AI 预审评分悬浮明细（五维 + 问题清单）
+const aiAuditTitle = (audit) => {
+  if (!audit?.dims) return 'AI 预审评分';
+  const d = audit.dims;
+  const parts = `调性 ${d.brandFit ?? '-'} / 卖点 ${d.sellingAccuracy ?? '-'} / 合规 ${d.compliance ?? '-'} / 原创 ${d.originality ?? '-'} / 平台 ${d.platformFit ?? '-'}`;
+  const issues = audit.issues?.length ? `；问题：${audit.issues.join('；')}` : '';
+  return `${parts}${issues}`;
+};
+
+const reReview = async (item) => {
+  try {
+    const audit = await preReviewHistory(item.id, { brandId: brandId.value });
+    item.ai_score = audit?.score ?? null;
+    item.ai_audit = audit ?? null;
+    message.success(`重审完成：${audit?.verdict === 'pass' ? '通过' : audit?.verdict === 'rewrite' ? '建议重写' : '不合格'}（${audit?.score} 分）`);
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '重审失败');
+  }
+};
 
 const doApprove = async (ids) => {
   acting.value = true;
@@ -189,6 +220,10 @@ onMounted(async () => {
 .au-thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: #f1f5f9; flex-shrink: 0; }
 .au-ct { min-width: 0; }
 .au-title { font-size: 13px; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.au-score { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: default; }
+.au-score.ok { color: #16a34a; background: #f0fdf4; }
+.au-score.warn { color: #d97706; background: #fffbeb; }
+.au-score.bad { color: #dc2626; background: #fef2f2; }
 .au-brief { font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .au-pkg { font-size: 12px; color: #475569; display: flex; align-items: center; gap: 6px; }
 .au-muted { color: #94a3b8; font-size: 12px; }

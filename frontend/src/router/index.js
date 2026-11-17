@@ -261,6 +261,26 @@ const routes = [
         meta: { title: '创作策略Pro' },
       },
       {
+        path: '/content-pro/config/templates',
+        component: () => import('../views/factory/TemplateLibraryView.vue'),
+        meta: { title: '模板库' },
+      },
+      {
+        path: '/content-pro/config/rules',
+        component: () => import('../views/factory/RuleLibraryView.vue'),
+        meta: { title: '知识库规则' },
+      },
+      {
+        path: '/content-pro/config/cases',
+        component: () => import('../views/factory/CaseLibraryView.vue'),
+        meta: { title: '案例库' },
+      },
+      {
+        path: '/content-pro/reports',
+        component: () => import('../views/factory/ReportView.vue'),
+        meta: { title: '运营报表' },
+      },
+      {
         path: '/content-pro/content-factory/xhs-image-text-single',
         component: () => import('../views/factory/XhsSingleView.vue'),
         meta: { title: '小红书图文' },

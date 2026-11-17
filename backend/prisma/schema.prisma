@@ -1106,6 +1106,12 @@ model XhsHistory {
   dispatchedToId Int?
   dispatchedAt   DateTime?
   claims         PackageClaim[]  @relation("PackageClaimHistory")
+  // 智能内容四分类 + 双风格 + AI 预审（东风日产投标建设项，2026-11-17）
+  noteKind       String? // seeding 种草 | scene 场景 | life 生活 | policy 政策钩子
+  style          String? // brand 品牌模版 | kos KOS真人
+  aiScore        Int? // AI 预审总分 0-100
+  aiAudit        Json? // 五维评分明细 + 命中合规规则
+  scriptJson     Json? // 短视频口播/分镜脚本（contentForm=video_script 时）
 
   @@index([brandId, uploadTime])
   @@index([contentTaskId])
@@ -1869,4 +1875,72 @@ model KolMatch {
 
   @@unique([productId, creatorId])
   @@index([brandId, status])
+}
+
+// ─── 品牌知识库：模板体系 / 规则库 / 案例库 / 报表（东风日产建设项，2026-11-17）───
+
+// 品牌专属模板：话术规范 / 车型内容模板 / 合规审核模板 / 门店人设模板
+model BrandTemplate {
+  id        Int      @id @default(autoincrement())
+  brandId   Int
+  kind      String // script_spec | vehicle_template | compliance_template | persona
+  productId Int?
+  name      String
+  summary   String? @db.Text
+  content   Json // 结构化内容（按 kind 约定：segments/sections/checklist/personaCard 等）
+  status    Int      @default(1) // 1 启用 0 停用
+  remark    String? @db.Text // 版本备注
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId, kind])
+}
+
+// 知识库规则：评论运营 / 私信接待 / 分流转接 / 合规红线（条件→动作）
+model KnowledgeRule {
+  id        Int      @id @default(autoincrement())
+  brandId   Int
+  category  String // comment | dm | routing | compliance
+  name      String
+  pattern   String @db.Text // 关键词（逗号/换行分隔）或正则
+  action    String  @default("flag") // flag 标记 | block 拦截 | route_human 转人工
+  replyHint String? @db.Text // 命中后的引导话术建议
+  enabled   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId, category])
+}
+
+// 案例库：爆款案例 / 优质内容拆解 / 竞品动态（可从灵感引擎 HotContent 收藏）
+model KnowledgeCase {
+  id            Int      @id @default(autoincrement())
+  brandId       Int
+  title         String
+  category      String   @default("hot") // hot 爆款案例 | breakdown 拆解 | competitor 竞品动态
+  platform      String?
+  summary       String? @db.Text
+  structureJson Json? // 拆解结构：hook/structure/sellingPoints/cta
+  hotContentId  Int? // 关联灵感引擎 HotContent
+  tags          String[] @default([])
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([brandId, category])
+}
+
+// 运营报表：日报 / 周报 / 月报（含月度维护与策略迭代报告）
+model BrandReport {
+  id        Int      @id @default(autoincrement())
+  brandId   Int
+  type      String // daily | weekly | monthly
+  period    String // YYYY-MM-DD | YYYY-Www | YYYY-MM
+  title     String
+  contentMd String @db.Text
+  meta      Json? // 聚合指标快照
+  createdAt DateTime @default(now())
+
+  @@unique([brandId, type, period])
+  @@index([brandId, type])
 }

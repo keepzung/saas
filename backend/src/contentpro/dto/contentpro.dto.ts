@@ -53,6 +53,12 @@ export class GenerateArticleDto {
   @IsOptional() @IsInt() strategyDirectionIndex?: number | null;
   @IsOptional() @IsString() directionName?: string | null;
   @IsOptional() @IsString() wordCount?: string | null;
+  /** 笔记四分类：seeding 种草 | scene 场景 | life 生活 | policy 政策钩子 */
+  @IsOptional() @IsString() noteKind?: string | null;
+  /** 风格：brand 品牌模版 | kos KOS真人 */
+  @IsOptional() @IsString() style?: string | null;
+  /** 形态：image_text 图文（默认）| video_script 短视频口播脚本 */
+  @IsOptional() @IsString() form?: string | null;
 }
 
 export class SaveArticleDto {
@@ -66,6 +72,11 @@ export class SaveArticleDto {
   @IsOptional() @IsInt() status?: number;
   @IsOptional() @IsInt() contentTaskId?: number | null;
   @IsOptional() batchTaskId?: number | null;
+  @IsOptional() @IsString() noteKind?: string | null;
+  @IsOptional() @IsString() style?: string | null;
+  @IsOptional() @IsInt() aiScore?: number | null;
+  @IsOptional() aiAudit?: Record<string, unknown> | null;
+  @IsOptional() scriptJson?: Record<string, unknown> | null;
 }
 
 export class BatchGenerateDto {
@@ -75,6 +86,9 @@ export class BatchGenerateDto {
   @IsOptional() @IsString() taskName?: string;
   @IsOptional() @IsString() extra?: string;
   @IsOptional() @IsString() imageMode?: string;
+  @IsOptional() @IsString() noteKind?: string | null;
+  @IsOptional() @IsString() style?: string | null;
+  @IsOptional() @IsString() form?: string | null;
   @IsOptional() items?: BatchGenerateItemDto[];
 }
 
@@ -83,6 +97,41 @@ export class BatchGenerateItemDto {
   @IsOptional() @IsString() directionName?: string | null;
   @IsInt() count: number;
   @IsOptional() @IsString() wordCount?: string | null;
+}
+
+// ─── 品牌模板库 / 规则库 / 案例库 ────────────────────────────────────
+export class TemplateDto {
+  /** script_spec 话术规范 | vehicle_template 车型内容模板 | compliance_template 合规模板 | persona 门店人设 */
+  @IsString() kind: string;
+  @IsString() @MaxLength(80) name: string;
+  @IsOptional() @IsInt() productId?: number | null;
+  @IsOptional() @IsString() summary?: string;
+  content: Record<string, unknown>;
+  @IsOptional() @IsInt() status?: number;
+  @IsOptional() @IsString() remark?: string;
+}
+
+export class RuleDto {
+  /** comment 评论 | dm 私信 | routing 分流 | compliance 合规红线 */
+  @IsString() category: string;
+  @IsString() @MaxLength(80) name: string;
+  @IsString() pattern: string;
+  /** flag 标记 | block 拦截 | route_human 转人工 */
+  @IsOptional() @IsString() action?: string;
+  @IsOptional() @IsString() replyHint?: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+}
+
+export class CaseDto {
+  @IsString() @MaxLength(120) title: string;
+  /** hot 爆款案例 | breakdown 拆解 | competitor 竞品动态 */
+  @IsOptional() @IsString() category?: string;
+  @IsOptional() @IsString() platform?: string;
+  @IsOptional() @IsString() summary?: string;
+  @IsOptional() structureJson?: Record<string, unknown> | null;
+  @IsOptional() @IsInt() hotContentId?: number | null;
+  @IsOptional() tags?: string[];
+  @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
 // ─── 内容包 Pro ──────────────────────────────────────────────────────

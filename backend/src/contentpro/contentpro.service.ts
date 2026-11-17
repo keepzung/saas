@@ -10,6 +10,7 @@ import { ZipArchive } from 'archiver';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
+import { CaseDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
 
 @Injectable()
 export class ContentproService {
@@ -366,6 +367,11 @@ export class ContentproService {
       contentForm: string;
       strategyId: number | null;
       directionName: string | null;
+      noteKind: string | null;
+      style: string | null;
+      aiScore: number | null;
+      aiAudit: Prisma.JsonValue | null;
+      scriptJson: Prisma.JsonValue | null;
       packageId: number | null;
       reviewStatus: string;
       rejectReason: string | null;
@@ -391,6 +397,11 @@ export class ContentproService {
       content_form: h.contentForm,
       strategy_id: h.strategyId,
       direction_name: h.directionName,
+      note_kind: h.noteKind,
+      style: h.style,
+      ai_score: h.aiScore,
+      ai_audit: h.aiAudit,
+      script_json: h.scriptJson,
       package_id: h.packageId,
       package_name: packageName ?? null,
       review_status: h.reviewStatus,
@@ -420,6 +431,11 @@ export class ContentproService {
     status?: number;
     contentTaskId?: number | null;
     batchTaskId?: number | null;
+    noteKind?: string | null;
+    style?: string | null;
+    aiScore?: number | null;
+    aiAudit?: Record<string, unknown> | null;
+    scriptJson?: Record<string, unknown> | null;
   }, userId: number) {
     // 任务归属校验（同品牌）
     let contentTaskId: number | null = null;
@@ -438,6 +454,11 @@ export class ContentproService {
       source: dto.source ?? 'ai',
       status: dto.status ?? 0,
       contentTaskId,
+      noteKind: dto.noteKind ?? null,
+      style: dto.style ?? null,
+      aiScore: dto.aiScore ?? null,
+      aiAudit: (dto.aiAudit as Prisma.InputJsonValue) ?? null,
+      scriptJson: (dto.scriptJson as Prisma.InputJsonValue) ?? null,
     };
     // 带 id = 更新（H5 接力发布回写草稿）
     if (dto.id) {
@@ -466,12 +487,48 @@ export class ContentproService {
   }
 
   // ─── AI 生成 ───────────────────────────────────────────────────────
-  async generate(input: { brandId: number; productId: number; strategyId?: number | null; extra?: string; directionName?: string | null; wordCount?: string | null }, userId?: number) {
+  async generate(input: {
+    brandId: number;
+    productId: number;
+    strategyId?: number | null;
+    extra?: string;
+    directionName?: string | null;
+    wordCount?: string | null;
+    noteKind?: string | null;
+    style?: string | null;
+    form?: string | null;
+  }, userId?: number) {
     await this.quota.assertEnough(input.brandId, 1);
     await this.quota.consume(input.brandId, 1, userId, '单篇生成');
     try {
       const result = await this.ai.generateArticle(input);
-      return result;
+      // AI 预审：rewrite 自动带问题清单重写一次；reject 不重写（进人工终审队列由人工把关）
+      let audit = await this.ai.preReview({
+        brandId: input.brandId,
+        title: result.titles[0] ?? '',
+        content: result.content,
+        noteKind: input.noteKind,
+      });
+      if (audit.verdict === 'rewrite') {
+        const retryExtra = [input.extra, `上一版质检问题（务必规避）：${audit.issues.join('；')}`]
+          .filter(Boolean)
+          .join('\n');
+        try {
+          const retry = await this.ai.generateArticle({ ...input, extra: retryExtra });
+          const retryAudit = await this.ai.preReview({
+            brandId: input.brandId,
+            title: retry.titles[0] ?? '',
+            content: retry.content,
+            noteKind: input.noteKind,
+          });
+          if (retryAudit.score >= audit.score) {
+            return { ...retry, aiScore: retryAudit.score, aiAudit: retryAudit as unknown as Prisma.JsonObject };
+          }
+        } catch {
+          // 重写失败保留首版
+        }
+      }
+      return { ...result, aiScore: audit.score, aiAudit: audit as unknown as Prisma.JsonObject };
     } catch (e) {
       await this.quota.refund(input.brandId, 1, userId, '单篇生成失败退回');
       throw e;
@@ -543,6 +600,9 @@ export class ContentproService {
     taskName?: string;
     extra?: string;
     imageMode?: string;
+    noteKind?: string | null;
+    style?: string | null;
+    form?: string | null;
     items?: { strategyId?: number | null; directionName?: string | null; count: number; wordCount?: string | null }[];
   }, userId: number) {
     let product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
@@ -616,6 +676,9 @@ export class ContentproService {
     productId: number;
     strategyId?: number | null;
     extra?: string;
+    noteKind?: string | null;
+    style?: string | null;
+    form?: string | null;
     items?: { strategyId?: number | null; directionName?: string | null; count: number; wordCount?: string | null }[];
   }, userId: number) {
     await this.prisma.batchTask.update({ where: { id: taskId }, data: { status: 'running' } });
@@ -634,7 +697,17 @@ export class ContentproService {
             directionName: item.directionName ?? undefined,
             wordCount: item.wordCount ?? undefined,
             extra: dto.extra,
+            noteKind: dto.noteKind,
+            style: dto.style,
+            form: dto.form,
           });
+          // AI 预审（出厂闸门）：失败不影响落库
+          const audit = await this.ai.preReview({
+            brandId,
+            title: result.titles[i % result.titles.length] ?? result.titles[0],
+            content: result.content,
+            noteKind: dto.noteKind,
+          }).catch(() => null);
           const imgs = await this.ai.randomImages(brandId, dto.productId, 4);
           await this.quota.consume(brandId, 1, userId, `批量生成 #${taskId}`);
           await this.prisma.xhsHistory.create({
@@ -650,6 +723,11 @@ export class ContentproService {
               directionName: item.directionName ?? null,
               reviewStatus: 'draft',
               createdById: userId,
+              noteKind: dto.noteKind ?? null,
+              style: dto.style ?? null,
+              aiScore: audit?.score ?? null,
+              aiAudit: (audit as unknown as Prisma.InputJsonValue) ?? null,
+              scriptJson: (result.script as unknown as Prisma.InputJsonValue) ?? null,
             },
           });
           done += 1;
@@ -1735,5 +1813,188 @@ export class ContentproService {
     if (t.status === 'voided') throw new BadRequestException('任务已作废');
     await this.prisma.contentTask.update({ where: { id }, data: { status: 'voided' } });
     return { id, status: 'voided' };
+  }
+
+  // ─── 品牌模板库（话术规范/车型内容模板/合规模板/门店人设）──────────
+  async templateList(brandId: number, kind?: string) {
+    const where: Prisma.BrandTemplateWhereInput = { brandId, ...(kind ? { kind } : {}) };
+    const [list, total] = await Promise.all([
+      this.prisma.brandTemplate.findMany({ where, orderBy: [{ kind: 'asc' }, { id: 'desc' }] }),
+      this.prisma.brandTemplate.count({ where }),
+    ]);
+    return { list, total };
+  }
+
+  async createTemplate(brandId: number, dto: TemplateDto) {
+    return this.prisma.brandTemplate.create({
+      data: {
+        brandId,
+        kind: dto.kind,
+        productId: dto.productId ?? null,
+        name: dto.name,
+        summary: dto.summary ?? null,
+        content: dto.content as Prisma.InputJsonValue,
+        status: dto.status ?? 1,
+        remark: dto.remark ?? null,
+      },
+    });
+  }
+
+  async updateTemplate(id: number, dto: Partial<TemplateDto>) {
+    const data: Prisma.BrandTemplateUpdateInput = {};
+    if (dto.kind !== undefined) data.kind = dto.kind;
+    if (dto.productId !== undefined) data.productId = dto.productId;
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.summary !== undefined) data.summary = dto.summary;
+    if (dto.content !== undefined) data.content = dto.content as Prisma.InputJsonValue;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.remark !== undefined) data.remark = dto.remark;
+    await this.prisma.brandTemplate.update({ where: { id }, data });
+    return { id };
+  }
+
+  async deleteTemplates(ids: number[]) {
+    await this.prisma.brandTemplate.deleteMany({ where: { id: { in: ids } } });
+    return { deleted: ids.length };
+  }
+
+  // ─── 知识库规则（评论/私信/分流/合规红线）──────────────────────────
+  async ruleList(brandId: number, category?: string) {
+    const where: Prisma.KnowledgeRuleWhereInput = { brandId, ...(category ? { category } : {}) };
+    const [list, total] = await Promise.all([
+      this.prisma.knowledgeRule.findMany({ where, orderBy: [{ category: 'asc' }, { id: 'desc' }] }),
+      this.prisma.knowledgeRule.count({ where }),
+    ]);
+    return { list, total };
+  }
+
+  async createRule(brandId: number, dto: RuleDto) {
+    return this.prisma.knowledgeRule.create({
+      data: {
+        brandId,
+        category: dto.category,
+        name: dto.name,
+        pattern: dto.pattern,
+        action: dto.action ?? 'flag',
+        replyHint: dto.replyHint ?? null,
+        enabled: dto.enabled ?? true,
+      },
+    });
+  }
+
+  async updateRule(id: number, dto: Partial<RuleDto>) {
+    const data: Prisma.KnowledgeRuleUpdateInput = {};
+    if (dto.category !== undefined) data.category = dto.category;
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.pattern !== undefined) data.pattern = dto.pattern;
+    if (dto.action !== undefined) data.action = dto.action;
+    if (dto.replyHint !== undefined) data.replyHint = dto.replyHint;
+    if (dto.enabled !== undefined) data.enabled = dto.enabled;
+    await this.prisma.knowledgeRule.update({ where: { id }, data });
+    return { id };
+  }
+
+  async deleteRules(ids: number[]) {
+    await this.prisma.knowledgeRule.deleteMany({ where: { id: { in: ids } } });
+    return { deleted: ids.length };
+  }
+
+  // ─── 案例库（爆款/拆解/竞品，可从灵感引擎一键收藏）────────────────
+  async caseList(brandId: number, category?: string) {
+    const where: Prisma.KnowledgeCaseWhereInput = { brandId, ...(category ? { category } : {}) };
+    const [list, total] = await Promise.all([
+      this.prisma.knowledgeCase.findMany({ where, orderBy: { id: 'desc' } }),
+      this.prisma.knowledgeCase.count({ where }),
+    ]);
+    return { list, total };
+  }
+
+  async createCase(brandId: number, dto: CaseDto) {
+    return this.prisma.knowledgeCase.create({
+      data: {
+        brandId,
+        title: dto.title,
+        category: dto.category ?? 'hot',
+        platform: dto.platform ?? null,
+        summary: dto.summary ?? null,
+        structureJson: (dto.structureJson as Prisma.InputJsonValue) ?? null,
+        hotContentId: dto.hotContentId ?? null,
+        tags: dto.tags ?? [],
+        enabled: dto.enabled ?? true,
+      },
+    });
+  }
+
+  /** 从灵感引擎 HotContent（含拆解结果）一键收藏入案例库 */
+  async favoriteCaseFromHotspot(brandId: number, hotContentId: number) {
+    const hc = await this.prisma.hotContent.findUnique({ where: { id: hotContentId } });
+    if (!hc) throw new NotFoundException('灵感引擎内容不存在');
+    const breakdown = await this.prisma.contentBreakdown.findFirst({
+      where: { hotContentId },
+    });
+    const exist = await this.prisma.knowledgeCase.findFirst({
+      where: { brandId, hotContentId },
+    });
+    if (exist) return exist;
+    const summaryLines: string[] = [];
+    if (breakdown?.hook) summaryLines.push(`钩子：${breakdown.hook.slice(0, 160)}`);
+    const meta = [hc.authorName ? `作者：${hc.authorName}` : '', `${hc.likeCount ?? 0} 赞`].filter(Boolean).join(' / ');
+    if (meta) summaryLines.push(meta);
+    return this.prisma.knowledgeCase.create({
+      data: {
+        brandId,
+        title: hc.title?.slice(0, 120) ?? `案例 #${hotContentId}`,
+        category: breakdown ? 'breakdown' : 'hot',
+        platform: hc.platform,
+        summary: summaryLines.join('\n').slice(0, 500) || null,
+        structureJson: (breakdown
+          ? {
+              hook: breakdown.hook ?? null,
+              structure: breakdown.structure ?? null,
+              sellingPoints: breakdown.sellingPoints ?? null,
+              cta: breakdown.cta ?? null,
+              styleTags: breakdown.styleTags ?? null,
+            }
+          : null) as Prisma.InputJsonValue,
+        hotContentId,
+        tags: [],
+        enabled: true,
+      },
+    });
+  }
+
+  async updateCase(id: number, dto: Partial<CaseDto>) {
+    const data: Prisma.KnowledgeCaseUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.category !== undefined) data.category = dto.category;
+    if (dto.platform !== undefined) data.platform = dto.platform;
+    if (dto.summary !== undefined) data.summary = dto.summary;
+    if (dto.structureJson !== undefined) data.structureJson = dto.structureJson as Prisma.InputJsonValue;
+    if (dto.tags !== undefined) data.tags = dto.tags;
+    if (dto.enabled !== undefined) data.enabled = dto.enabled;
+    await this.prisma.knowledgeCase.update({ where: { id }, data });
+    return { id };
+  }
+
+  async deleteCases(ids: number[]) {
+    await this.prisma.knowledgeCase.deleteMany({ where: { id: { in: ids } } });
+    return { deleted: ids.length };
+  }
+
+  /** 手动重审：对已落库的历史重新跑 AI 预审（审核页用） */
+  async preReviewHistory(brandId: number, historyId: number) {
+    const h = await this.prisma.xhsHistory.findUnique({ where: { id: historyId } });
+    if (!h || h.brandId !== brandId) throw new NotFoundException('记录不存在');
+    const audit = await this.ai.preReview({
+      brandId,
+      title: h.title,
+      content: h.content,
+      noteKind: h.noteKind,
+    });
+    await this.prisma.xhsHistory.update({
+      where: { id: historyId },
+      data: { aiScore: audit.score, aiAudit: audit as unknown as Prisma.InputJsonValue },
+    });
+    return audit;
   }
 }
