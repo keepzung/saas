@@ -30,7 +30,7 @@ export interface PreReviewResult {
   };
   issues: string[];
   suggestion?: string;
-  ruleHits: { ruleId: number; name: string; action: string; matched: string }[];
+  ruleHits: { ruleId: number; name: string; action: string; matched: string; replyHint?: string }[];
 }
 
 export const NOTE_KINDS: Record<string, { label: string; guidance: string }> = {
@@ -433,7 +433,7 @@ export class AiService {
         const words = rule.pattern.split(/[,，\n]/).map((w) => w.trim()).filter(Boolean);
         matched = words.find((w) => target.includes(w)) ?? '';
       }
-      if (matched) hits.push({ ruleId: rule.id, name: rule.name, action: rule.action, matched });
+      if (matched) hits.push({ ruleId: rule.id, name: rule.name, action: rule.action, matched, replyHint: rule.replyHint ?? '' });
     }
     return hits;
   }
