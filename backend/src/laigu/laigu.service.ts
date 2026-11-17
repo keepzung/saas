@@ -10,7 +10,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { extractKeywords } from '../common/text-keywords';
-import { LaiguApiClient, LaiguSession } from './laigu-api.client';
+import { LaiguApiClient, LaiguSession, LaiguSessionMessage } from './laigu-api.client';
+import { DmBotService } from './dm-bot.service';
 
 const MAX_PAGES_PER_SYNC = 100;
 const SYNC_OVERLAP_SECONDS = 3600;
@@ -34,6 +35,7 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly api: LaiguApiClient,
     private readonly configService: ConfigService,
+    private readonly dmBot: DmBotService,
   ) {}
 
   onModuleInit() {
@@ -81,6 +83,12 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`来鼓增量同步完成：拉取 ${result.fetched} 条`);
     } catch (error) {
       this.logger.warn(`来鼓定时同步失败: ${(error as Error).message}`);
+    }
+    // 智能私信处理（仅 DmConfig.enabled 的品牌；dry-run 默认只记录不外发）
+    try {
+      await this.dmBot.processEnabledBrands();
+    } catch (error) {
+      this.logger.warn(`智能私信处理失败: ${(error as Error).message}`);
     }
   }
 
@@ -350,6 +358,75 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  // ─── 评论维护（东风日产建设项）：评论明细 + 情感/主题分类 + 一键回复（dry-run）───
+  /** 轻量规则分类（与反馈分析页口径一致的正负面/咨询词表） */
+  private classifyComment(text: string): { sentiment: string; topic: string } {
+    const t = text ?? '';
+    if (/价格|多少钱|落地|优惠|报价|油耗|配置|试驾|分期|免息/.test(t)) return { sentiment: 'consult', topic: '购车咨询' };
+    if (/垃圾|骗子|差评|太差|不行|后悔|坑|投诉/.test(t)) return { sentiment: 'negative', topic: '负面反馈' };
+    if (/不错|喜欢|棒|赞|好看|真香|期待|支持/.test(t)) return { sentiment: 'positive', topic: '正面互动' };
+    return { sentiment: 'neutral', topic: '一般评论' };
+  }
+
+  async commentList(brandId: number, query: { page?: string; pageSize?: string; keyword?: string; sentiment?: string }) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSize = Math.min(50, Number(query.pageSize ?? 20) || 20);
+    const where: Prisma.LaiguCommentWhereInput = {
+      brandId,
+      ...(query.keyword ? { content: { contains: query.keyword } } : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.laiguComment.count({ where }),
+      this.prisma.laiguComment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    let list = rows.map((r) => ({
+      id: r.id,
+      comment_id: r.commentId,
+      content: r.content,
+      note_title: r.noteTitle,
+      note_cover: r.noteCover,
+      comment_user: r.commentUserName,
+      ent_open_name: r.entOpenName,
+      reply_state: r.replyState,
+      created_at: r.createdAt,
+      ...this.classifyComment(r.content ?? ''),
+    }));
+    if (query.sentiment) list = list.filter((x) => x.sentiment === query.sentiment);
+    // 情感分布（当前页口径，供顶部统计卡）
+    const summary: { total: number; positive: number; negative: number; consult: number; neutral: number } = {
+      total, positive: 0, negative: 0, consult: 0, neutral: 0,
+    };
+    for (const x of list) {
+      if (x.sentiment in summary) summary[x.sentiment as keyof typeof summary] += 1;
+    }
+    return { list, total, page, page_size: pageSize, summary };
+  }
+
+  /** 一键回复（dry-run：只记录意图与话术，待评论回复通道接入后真实发送） */
+  async replyComment(brandId: number, commentDbId: number, content: string) {
+    const row = await this.prisma.laiguComment.findFirst({ where: { id: commentDbId, brandId } });
+    if (!row) throw new Error('评论不存在');
+    const log = await this.prisma.dmReplyLog.create({
+      data: {
+        brandId,
+        sessionId: `comment:${row.commentId}`,
+        draft: content.slice(0, 2000),
+        finalContent: content.slice(0, 2000),
+        status: 'dry_run',
+        intent: '评论区回复',
+        leadLevel: null,
+        aiMeta: { commentId: row.commentId, noteTitle: row.noteTitle ?? null } as Prisma.InputJsonValue,
+      },
+    });
+    return { ok: true, log_id: log.id, dry_run: true };
+  }
+
+
   /** 从来鼓拉取会话并幂等入库；fromTm/toTm 缺省为「上次最新时间-重叠 → 现在」 */
   async syncLeads(opts?: { fromTm?: number; toTm?: number }) {
     if (this.syncing) throw new Error('同步进行中，请稍后再试');
@@ -502,7 +579,71 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         sessionEndedAt: data.sessionEndedAt,
         rawJson: data.rawJson,
       },
+    }).then(async (lead) => {
+      // 规范化消息提取 + SLA 起点回填（失败不阻断同步）
+      await this.extractMessages(data.brandId ?? LAIGU_BRAND_ID, data.sessionId, messages).catch((e) =>
+        this.logger.warn(`消息提取失败 ${data.sessionId}: ${(e as Error).message}`),
+      );
+      return lead;
     });
+  }
+
+  /** rawJson.messages → 规范化消息表增量提取（按 sessionId+msgId 幂等）；回填 SLA 起点/人工首响（仅首次，不覆盖） */
+  private async extractMessages(brandId: number, sessionId: string, messages: LaiguSessionMessage[]) {
+    let seq = 0;
+    let firstClientAt: Date | null = null;
+    let firstHumanReplyAt: Date | null = null;
+    for (const m of messages) {
+      const sentAt = typeof m.created_at === 'number' ? new Date(m.created_at * 1000) : null;
+      if (m.role === 'client' && sentAt && (!firstClientAt || sentAt < firstClientAt)) firstClientAt = sentAt;
+      if (m.role !== 'client' && sentAt && (!firstHumanReplyAt || sentAt < firstHumanReplyAt)) firstHumanReplyAt = sentAt;
+      if (m.id === undefined || m.id === null) continue;
+      const isCard = Boolean(m.type && m.type !== 'text');
+      let contentText: string | null;
+      if (!isCard) {
+        contentText = (m.content ?? '').slice(0, 1000);
+      } else {
+        try {
+          const o = JSON.parse(m.content ?? '{}') as { title?: string; note_title?: string; name?: string };
+          contentText = (o.title ?? o.note_title ?? o.name ?? '[卡片]').slice(0, 120);
+        } catch {
+          contentText = '[卡片]';
+        }
+      }
+      const data = {
+        brandId,
+        sessionId,
+        msgId: String(m.id),
+        seq,
+        role: m.role ?? 'client',
+        senderName: (m.name ?? '').trim().slice(0, 60) || null,
+        contentType: m.type ?? 'text',
+        content: (m.content ?? '').slice(0, 2000),
+        contentText,
+        sentAt,
+      };
+      await this.prisma.laiguMessage.upsert({
+        where: { sessionId_msgId: { sessionId, msgId: data.msgId } },
+        create: data,
+        update: { content: data.content, contentText: data.contentText, sentAt: data.sentAt, seq: data.seq },
+      });
+      seq += 1;
+    }
+    if (!firstClientAt && !firstHumanReplyAt) return;
+    const lead = await this.prisma.laiguLead.findUnique({
+      where: { sessionId },
+      select: { firstClientAt: true, firstReplyAt: true, replyBy: true },
+    });
+    if (!lead) return;
+    const patch: Prisma.LaiguLeadUpdateInput = {};
+    if (!lead.firstClientAt && firstClientAt) patch.firstClientAt = firstClientAt;
+    if (!lead.firstReplyAt && firstHumanReplyAt) {
+      patch.firstReplyAt = firstHumanReplyAt;
+      patch.replyBy = 'human';
+    }
+    if (Object.keys(patch).length) {
+      await this.prisma.laiguLead.update({ where: { sessionId }, data: patch });
+    }
   }
 
   async leads(query: {
@@ -593,6 +734,10 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
           sessionEndedAt: true,
           fetchedAt: true,
           tags: true,
+          intentLevel: true,
+          intentTags: true,
+          humanTakenOver: true,
+          firstReplyAt: true,
         },
       }),
     ]);
@@ -618,6 +763,10 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
         session_ended_at: row.sessionEndedAt,
         fetched_at: row.fetchedAt,
         tags: Array.isArray(row.tags) ? row.tags : [],
+        intent_level: row.intentLevel,
+        intent_tags: row.intentTags,
+        human_taken_over: row.humanTakenOver,
+        first_reply_at: row.firstReplyAt,
       })),
       total,
       page,
@@ -684,6 +833,16 @@ export class LaiguService implements OnModuleInit, OnModuleDestroy {
       where: { id },
       data: { tags: clean },
       select: { id: true, tags: true },
+    });
+    return row;
+  }
+
+  /** 人工接管开关：接管后智能私信 bot 不再处理该会话 */
+  async setTakeover(id: number, takeover: boolean) {
+    const row = await this.prisma.laiguLead.update({
+      where: { id },
+      data: { humanTakenOver: takeover },
+      select: { id: true, sessionId: true, humanTakenOver: true },
     });
     return row;
   }

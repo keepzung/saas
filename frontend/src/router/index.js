@@ -281,6 +281,16 @@ const routes = [
         meta: { title: '运营报表' },
       },
       {
+        path: '/dm/settings',
+        component: () => import('../views/dm/DmSettingsView.vue'),
+        meta: { title: '智能私信设置' },
+      },
+      {
+        path: '/dm/sla',
+        component: () => import('../views/dm/DmSettingsView.vue'),
+        meta: { title: 'SLA 看板' },
+      },
+      {
         path: '/content-pro/content-factory/xhs-image-text-single',
         component: () => import('../views/factory/XhsSingleView.vue'),
         meta: { title: '小红书图文' },

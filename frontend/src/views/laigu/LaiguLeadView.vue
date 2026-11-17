@@ -244,6 +244,10 @@
                   <span class="conv-preview">{{ item.last_client_content || '（无文字内容）' }}</span>
                   <span v-if="pendingCount(item)" class="unread-badge">{{ Math.min(pendingCount(item), 99) }}</span>
                   <a-tag v-if="item.is_resource" color="green" class="conv-tag">留资</a-tag>
+                  <a-tag v-if="item.intent_level" :color="intentColor(item.intent_level)" class="conv-tag">
+                    {{ item.intent_level }} 意向
+                  </a-tag>
+                  <a-tag v-if="item.human_taken_over" color="purple" class="conv-tag">人工接管</a-tag>
                 </div>
               </div>
             </div>
@@ -265,9 +269,20 @@
                 <a-tag :color="selected.is_resource ? 'green' : 'default'">
                   {{ selected.is_resource ? '已留资' : '未留资' }}
                 </a-tag>
+                <a-tag v-if="selected.intent_level" :color="intentColor(selected.intent_level)">
+                  {{ selected.intent_level }} 意向{{ intentLabel(selected) }}
+                </a-tag>
                 <span v-if="chatSourceAccount(selected)" class="muted mini">{{ chatSourceAccount(selected) }}</span>
               </div>
               <div class="ch-actions">
+                <a-button
+                  size="small"
+                  :type="selected.human_taken_over ? 'default' : 'primary'"
+                  :danger="!selected.human_taken_over"
+                  @click="toggleTakeover(selected)"
+                >
+                  {{ selected.human_taken_over ? '已接管 · 恢复 AI' : '人工接管' }}
+                </a-button>
                 <a-tooltip title="只读模式：请到来鼓工作台操作">
                   <a-button size="small" disabled><SwapOutlined /> 转接</a-button>
                 </a-tooltip>
@@ -327,6 +342,20 @@
                         <pre class="msg-json">{{ JSON.stringify(msgCard(block.msg).data, null, 2) }}</pre>
                       </template>
                       <template v-else>{{ msgCard(block.msg).text }}</template>
+                    </div>
+                  </div>
+                </template>
+                <template v-for="log in dmLogs" :key="'dm' + log.id">
+                  <div class="tl-chip tl-day">AI 干预记录（dry-run 预览 · 未发送给客户）</div>
+                  <div class="chat-row self">
+                    <div class="chat-meta"><span class="chat-name">AI 客服</span></div>
+                    <div class="chat-bubble dm-bubble">
+                      <div>{{ log.final_content || log.draft }}</div>
+                      <div class="dm-meta">
+                        <a-tag :color="dmStatusColor(log.status)" class="dm-tag">{{ dmStatusLabel(log.status) }}</a-tag>
+                        <span v-if="log.intent" class="muted mini">{{ log.intent }} · {{ log.lead_level }} 意向</span>
+                        <span class="muted mini">{{ fmtTime2(log.created_at) }}</span>
+                      </div>
                     </div>
                   </div>
                 </template>
@@ -578,7 +607,7 @@ import {
   CopyOutlined,
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
-import { getLaiguKosTree, getLaiguLeadDetail, getLaiguLeads, getLaiguLeadStats, syncLaigu, updateLaiguLeadTags } from '../../api/laigu';
+import { getLaiguKosTree, getLaiguLeadDetail, getLaiguLeads, getLaiguLeadStats, syncLaigu, updateLaiguLeadTags, getLaiguDmReplyLogs, takeoverLaiguLead } from '../../api/laigu';
 import { getKoxAccounts } from '../../api/kox';
 import { useAuthStore } from '../../stores/auth';
 import PageWrapper from '../../components/PageWrapper.vue';
@@ -625,6 +654,57 @@ const kosOptions = ref([]);
 const detailOpen = ref(false);
 const detailLoading = ref(false);
 const detail = ref(null);
+
+// ─── 智能私信（DM bot）：dry-run 干预记录 + 人工接管 ────────────────
+const dmLogs = ref([]);
+
+async function loadDmLogs(sessionId) {
+  dmLogs.value = [];
+  if (!sessionId) return;
+  try {
+    const res = await getLaiguDmReplyLogs({ ...brandParam(), sessionId, pageSize: 10 });
+    dmLogs.value = res.list ?? [];
+  } catch {
+    /* 静默：DM 未启用时无日志 */
+  }
+}
+
+function intentColor(level) {
+  return { H: 'red', A: 'orange', B: 'blue', C: 'default' }[level] ?? 'default';
+}
+function intentLabel(item) {
+  const t = item.intent_tags;
+  if (t && typeof t === 'object' && t.intent) return ` · ${t.intent}`;
+  return '';
+}
+function dmStatusLabel(s) {
+  return {
+    dry_run: 'dry-run 预览',
+    sent: '已发送',
+    blocked: '合规拦截改写',
+    suppressed: '未回复',
+    takeover_skip: '人工接管跳过',
+    channel_missing: '通道未接入',
+  }[s] ?? s;
+}
+function dmStatusColor(s) {
+  return { dry_run: 'purple', sent: 'green', blocked: 'red', suppressed: 'default', takeover_skip: 'blue', channel_missing: 'orange' }[s] ?? 'default';
+}
+function fmtTime2(v) {
+  if (!v) return '';
+  const d = dayjs(v);
+  return d.isValid() ? d.format('MM-DD HH:mm:ss') : '';
+}
+async function toggleTakeover(item) {
+  try {
+    await takeoverLaiguLead(item.id, !item.human_taken_over);
+    item.human_taken_over = !item.human_taken_over;
+    if (selected.value?.id === item.id) selected.value.human_taken_over = item.human_taken_over;
+    message.success(item.human_taken_over ? '已人工接管，AI 不再介入该会话' : '已恢复 AI 接待');
+  } catch (e) {
+    message.error(e.message || '操作失败');
+  }
+}
 
 const pager = computed(() => ({
   current: page.value,
@@ -931,6 +1011,7 @@ async function selectLead(item) {
   selected.value = item;
   detailLoading.value = true;
   detail.value = null;
+  loadDmLogs(item.session_id);
   try {
     detail.value = await getLaiguLeadDetail(item.id);
     await nextTick();
@@ -1697,5 +1778,20 @@ onMounted(() => {
   border-radius: 8px;
   padding: 10px;
   margin: 0;
+}
+
+/* AI 干预记录（dry-run）气泡 */
+.dm-bubble {
+  border: 1px dashed #d2a6f5;
+  background: #faf5ff;
+}
+.dm-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.dm-tag {
+  margin-inline-end: 0;
 }
 </style>

@@ -1331,6 +1331,10 @@ model LaiguOrgConfig {
   active            Boolean   @default(true)
   lastSyncAt        DateTime?
   lastCommentSyncAt DateTime?
+  // OpenAPI 渠道按品牌凭据（东风日产等新品牌接入用；空=回落全局 LAIGU_* 环境变量，即 MDD 现状）
+  apiKey            String?
+  apiSecret         String?
+  apiBaseUrl        String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }
@@ -1364,12 +1368,76 @@ model LaiguLead {
   rawJson            Json
   fetchedAt          DateTime  @updatedAt
   createdAt          DateTime  @default(now())
+  // 智能私信（东风日产建设项）：意图打标 / SLA 计时 / 人工接管
+  intentLevel        String? // H 高意向 | A 中高 | B 中等 | C 低
+  intentTags         Json? // {intent, confidence, reason} 意图分类结果
+  intentAt           DateTime?
+  firstClientAt      DateTime? // 客户首条消息时间（SLA 起点）
+  firstReplyAt       DateTime? // 首次被真实回复时间（人工或 bot 真发送；dry-run 不写）
+  replyBy            String? // bot | human
+  autoRepliedAt      DateTime? // bot 首答时间（真实发送）
+  humanTakenOver     Boolean   @default(false)
 
   @@index([brandId])
   @@index([brandId, sessionEndedAt])
   @@index([brandId, staffName])
   @@index([brandId, isMdd])
+  @@index([brandId, intentLevel])
   @@index([phone])
+}
+
+// 规范化消息表（从 LaiguLead.rawJson 增量提取）：上下文连续对话与 SLA 统计的数据基础
+model LaiguMessage {
+  id          Int       @id @default(autoincrement())
+  brandId     Int       @default(5)
+  sessionId   String
+  msgId       String
+  seq         Int       @default(0)
+  role        String    @default("client") // client | agent | ai_employee
+  senderName  String?
+  contentType String? // text | redbook_note_card | redbook_retain_consult_card | ...
+  content     String?   @db.Text // 原文（卡片为原始 JSON）
+  contentText String?   @db.Text // 卡片的可读摘要
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([sessionId, msgId])
+  @@index([sessionId, sentAt])
+  @@index([brandId, sentAt])
+}
+
+// 智能私信工作区配置（每品牌一行）
+model DmConfig {
+  id                Int      @id @default(autoincrement())
+  brandId           Int      @unique
+  enabled           Boolean  @default(false) // 总开关（含定时处理）
+  autoReply         Boolean  @default(true) // 自动生成回复（dry-run 下仅记录不外发）
+  dryRun            Boolean  @default(true) // true=全部发送仅记录日志（发送通道接入前必须保持 true）
+  slaMinutes        Int      @default(3)
+  contextTurns      Int      @default(10) // 上下文携带轮数
+  personaTemplateId Int? // BrandTemplate(kind=persona) 人设模板
+  personaOverrides  Json? // { subSource(账号UID): templateId } 按账号人设覆盖
+  notifyWecom       Boolean  @default(true) // 高意向线索推企微
+  updatedAt         DateTime @updatedAt
+}
+
+// bot 回复决策日志（dry-run 预览/审计；通道接入后 status=sent 为真实外发）
+model DmReplyLog {
+  id           Int      @id @default(autoincrement())
+  brandId      Int
+  sessionId    String
+  triggerMsgAt DateTime?
+  draft        String   @db.Text // LLM 生成的回复草稿
+  finalContent String?  @db.Text // 实际将发送的内容（合规改写后）
+  status       String   @default("dry_run") // dry_run | sent | blocked | suppressed | takeover_skip | channel_missing
+  intent       String?
+  leadLevel    String?
+  ruleHits     Json?
+  aiMeta       Json? // {model, latencyMs, productName}
+  createdAt    DateTime @default(now())
+
+  @@index([brandId, createdAt])
+  @@index([sessionId, createdAt])
 }
 
 // MDD(5) 小红书渠道销售清单（月度 × 门店 × 品系；数据由 MDD 提供 Excel 导入）

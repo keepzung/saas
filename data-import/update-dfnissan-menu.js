@@ -41,13 +41,35 @@ const DM_CATEGORY = {
       key: 'm_dm_g0',
       name: '私信运营',
       features: [
-        { name: '私信工作台', path: '/dm/workspace' },
+        // 私信工作台复用来鼓线索页（品牌通用，brand9 放开线索中心）
+        { name: '私信工作台', path: '/laigu/leads' },
         { name: '智能私信设置', path: '/dm/settings' },
         { name: 'SLA 看板', path: '/dm/sla' },
       ],
     },
   ],
 };
+
+/** 历史修正：/dm/workspace 占位节点（2026-11-17 建）迁到 /laigu/leads，不另建新节点 */
+async function migrateWorkspaceFeature(prisma, groupId) {
+  const old = await prisma.moduleNode.findFirst({
+    where: { parentId: groupId, path: '/dm/workspace' },
+  });
+  if (!old) return;
+  const dupe = await prisma.moduleNode.findFirst({
+    where: { parentId: groupId, path: '/laigu/leads' },
+  });
+  if (dupe) {
+    await prisma.moduleNode.delete({ where: { id: old.id } });
+    console.log('removed legacy feature: /dm/workspace（已有 /laigu/leads）');
+    return;
+  }
+  await prisma.moduleNode.update({
+    where: { id: old.id },
+    data: { key: 'm_dm_g0_f_leads', path: '/laigu/leads', name: '私信工作台' },
+  });
+  console.log('migrated feature: /dm/workspace -> /laigu/leads');
+}
 
 async function upsertFeature(prisma, groupId, groupKey, f, sort) {
   const key = `${groupKey}_f_${f.path.split('/').pop().replace(/[^a-z0-9]/gi, '_')}`;
@@ -107,6 +129,7 @@ async function main() {
         });
         console.log(`created group: ${g.name}`);
       }
+      await migrateWorkspaceFeature(prisma, group.id);
       let sort = 0;
       for (const f of g.features) {
         await upsertFeature(prisma, group.id, group.key, f, sort);
