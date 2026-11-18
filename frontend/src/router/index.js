@@ -386,6 +386,11 @@ const routes = [
         meta: { title: '视频工坊' },
       },
       {
+        path: '/hotspot/voices',
+        component: () => import('../views/hotspot/VoiceStudioView.vue'),
+        meta: { title: '我的音色' },
+      },
+      {
         path: '/hotspot/match',
         component: () => import('../views/hotspot/KolMatchView.vue'),
         meta: { title: '达人匹配' },

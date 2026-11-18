@@ -1,10 +1,12 @@
-// 灵感引擎路由：内容池 / 关键词 / 竞品 / 拆解 / 复刻文案 / 视频工坊 / 达人匹配 / 会话管理
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards, ForbiddenException } from '@nestjs/common';
+// 灵感引擎路由：内容池 / 关键词 / 竞品 / 拆解 / 复刻文案 / 视频工坊 / 我的音色 / 达人匹配 / 会话管理
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors, ForbiddenException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Request } from 'express';
 import { HotspotService } from './hotspot.service';
 import { BreakdownService } from './breakdown.service';
 import { VideoService } from './video.service';
+import { VoiceService } from './voice.service';
 import { MatchService } from './match.service';
 import { CreationService } from './creation.service';
 import { SessionStore } from './scraper/session.store';
@@ -19,6 +21,7 @@ export class HotspotController {
     private hotspot: HotspotService,
     private breakdown: BreakdownService,
     private video: VideoService,
+    private voice: VoiceService,
     private match: MatchService,
     private creation: CreationService,
     private sessions: SessionStore,
@@ -186,9 +189,47 @@ export class HotspotController {
   }
 
   // ─── 视频工坊 ───────────────────────────────────────────────────────
+  // 我的音色（路由在前，避免被下方 voices 相关段匹配）
+  @Post('voices/sample')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadVoiceSample(
+    @Query('brandId') brandId?: string,
+    @UploadedFile() file?: { originalname?: string; size?: number; buffer?: Buffer },
+  ) {
+    return this.voice.saveSample(num(brandId, 1)!, file);
+  }
+
+  @Post('voices')
+  createCustomVoice(
+    @Req() req: Request,
+    @Body() body: { brandId?: number; name?: string; sampleUrl?: string; consent?: boolean },
+  ) {
+    return this.voice.create(Number(body.brandId ?? 1), this.me(req).id, body);
+  }
+
+  @Get('voices/custom')
+  listCustomVoices(@Query('brandId') brandId?: string) {
+    return this.voice.list(num(brandId, 1)!);
+  }
+
+  @Post('voices/custom/sync')
+  syncVoices(@Query('brandId') brandId?: string) {
+    return this.voice.sync(num(brandId, 1)!);
+  }
+
+  @Post('voices/custom/:id/preview')
+  previewCustomVoice(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.voice.preview(num(brandId, 1)!, id);
+  }
+
+  @Delete('voices/custom/:id')
+  deleteCustomVoice(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.voice.disable(num(brandId, 1)!, id);
+  }
+
   @Get('voices')
-  voices() {
-    return this.video.voices();
+  voices(@Query('brandId') brandId?: string) {
+    return this.video.voices(num(brandId, 1)!);
   }
 
   @Post('videos/voice-preview')
@@ -200,7 +241,7 @@ export class HotspotController {
   generateVideo(
     @Req() req: Request,
     @Body()
-    body: { brandId?: number; productId: number; breakdownId?: number; hotContentId?: number; title?: string; voice?: string },
+    body: { brandId?: number; productId: number; breakdownId?: number; hotContentId?: number; title?: string; voice?: string; engine?: string },
   ) {
     return this.video.createTask({
       brandId: Number(body.brandId ?? 1),
@@ -210,6 +251,7 @@ export class HotspotController {
       hotContentId: body.hotContentId,
       title: body.title,
       voice: body.voice,
+      engine: body.engine,
     });
   }
 
@@ -225,6 +267,11 @@ export class HotspotController {
   @Post('videos/:id/retry')
   retryVideo(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
     return this.video.retry(num(brandId, 1)!, id, this.me(req).id);
+  }
+
+  @Delete('videos/:id')
+  removeVideo(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.video.remove(num(brandId, 1)!, id);
   }
 
   // ─── 达人匹配 ───────────────────────────────────────────────────────

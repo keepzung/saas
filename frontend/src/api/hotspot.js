@@ -63,3 +63,27 @@ export const updateMatchStatus = (id, data) => request.put(`/hotspot/match/${id}
 
 // ─── 平台会话（登录态）──────────────────────────────────────────────
 export const getSessions = (params) => request.get('/hotspot/sessions', { params });
+
+// ─── 我的音色（声音复刻）────────────────────────────────────────────
+export const uploadVoiceSample = (file, brandId) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return request.post('/hotspot/voices/sample', fd, {
+    params: { brandId },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+export const createCustomVoice = (data, params) => request.post('/hotspot/voices', data, { params });
+
+export const getCustomVoices = (params) => request.get('/hotspot/voices/custom', { params });
+
+export const previewCustomVoice = (id, params) =>
+  request.post(`/hotspot/voices/custom/${id}/preview`, {}, { params, timeout: 60000 });
+
+export const deleteCustomVoice = (id, params) => request.delete(`/hotspot/voices/custom/${id}`, { params });
+
+export const syncVoices = (params) => request.post('/hotspot/voices/custom/sync', {}, { params, timeout: 60000 });
+
+export const deleteVideoTask = (id, params) => request.delete(`/hotspot/videos/${id}`, { params });

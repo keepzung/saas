@@ -1928,6 +1928,27 @@ model VideoGenTask {
   @@index([brandId, status])
 }
 
+// 我的音色：用户录音 → 火山引擎声音复刻训练 → 专属 TTS 音色（voiceType=S_xxx）
+// source=platform 为从 spark-hub 平台同步的已训练音色；source=local 为用户上传的待训练样音
+model CustomVoice {
+  id          Int      @id @default(autoincrement())
+  brandId     Int      @default(1)
+  userId      Int?
+  name        String
+  voiceType   String?
+  status      String   @default("waiting") // waiting(待训练) | ready(可用) | failed
+  source      String   @default("platform") // platform | local
+  sampleUrl   String?
+  previewUrl  String?
+  durationSec Int?
+  errorMsg    String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([brandId, status])
+}
+
 // 产品↔达人匹配结果
 model KolMatch {
   id        Int        @id @default(autoincrement())

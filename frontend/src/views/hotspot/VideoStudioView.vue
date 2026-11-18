@@ -2,7 +2,8 @@
   <PageWrapper title="视频工坊">
     <FilterTopbar>
       <a-button type="primary" @click="pickOpen = true"><PlusOutlined /> 新建混剪视频</a-button>
-      <span class="tip">15-30 秒竖版视频：AI 分镜 → 品牌素材智能匹配 → AI 配音 → 字幕合成；每条消耗 {{ 10 }} 算力，失败自动退回</span>
+      <a-button @click="router.push('/hotspot/voices')"><AudioOutlined /> 我的音色</a-button>
+      <span class="tip">15-30 秒竖版视频：AI 分镜 → 品牌素材智能匹配 / CogVideoX 生成画面 → AI 配音（系统音色 / 我的音色）→ 字幕合成；混剪每条 10 算力，AI成片 50 算力，失败自动退回</span>
     </FilterTopbar>
 
     <a-spin :spinning="loading">
@@ -27,6 +28,7 @@
             <div class="meta">
               <a-tag color="blue">{{ t.product || '未关联产品' }}</a-tag>
               <a-tag :color="statusColor(t.status)">{{ statusText(t.status) }}</a-tag>
+              <a-tag v-if="t.engine === 'aigc'" color="volcano">AI成片</a-tag>
               <a-tag v-if="t.duration_sec">{{ t.duration_sec }}s</a-tag>
               <a-tag v-if="t.voice" color="geekblue">🎙 {{ voiceNames[t.voice] ?? t.voice }}</a-tag>
               <a-tag v-if="t.breakdown?.style_tags?.length" color="purple">{{ t.breakdown.style_tags[0] }}</a-tag>
@@ -47,6 +49,7 @@
           <div class="ops">
             <a-button v-if="t.video_url" size="small" :href="t.video_url" download>下载</a-button>
             <a-button v-if="t.status === 'failed'" size="small" @click="retry(t)">重试</a-button>
+            <a-button v-if="!['queued', 'scripting', 'rendering'].includes(t.status)" size="small" danger @click="remove(t)">删除</a-button>
           </div>
         </div>
       </div>
@@ -62,15 +65,17 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { message } from 'ant-design-vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
+import { useRouter } from 'vue-router';
+import { Modal, message } from 'ant-design-vue';
+import { AudioOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getVideoTasks, generateVideo, retryVideo, getVoices } from '../../api/hotspot';
+import { getVideoTasks, generateVideo, retryVideo, deleteVideoTask, getVoices } from '../../api/hotspot';
 
 const auth = useAuthStore();
+const router = useRouter();
 const brandId = computed(() => auth.currentBrandId ?? 1);
 
 const list = ref([]);
@@ -101,11 +106,14 @@ const load = async () => {
   }
 };
 
-const create = async ({ productId, voice }) => {
+const create = async ({ productId, voice, engine }) => {
   pickOpen.value = false;
   try {
-    await generateVideo({ brandId: brandId.value, productId, voice: voice ?? undefined }, { brandId: brandId.value });
-    message.success('任务已创建，正在生成分镜与合成');
+    await generateVideo(
+      { brandId: brandId.value, productId, voice: voice ?? undefined, engine: engine ?? 'mixcut' },
+      { brandId: brandId.value },
+    );
+    message.success(engine === 'aigc' ? 'AI成片任务已创建，逐段生成画面约 5-10 分钟' : '任务已创建，正在生成分镜与合成');
     load();
   } catch (e) {
     message.error(e?.message ?? '创建失败');
@@ -122,9 +130,27 @@ const retry = async (t) => {
   }
 };
 
+const remove = (t) => {
+  Modal.confirm({
+    title: `删除视频任务「${t.title || `#${t.id}`}」？`,
+    content: '仅删除任务记录；已生成的视频文件保留在服务器上。',
+    okType: 'danger',
+    okText: '删除',
+    onOk: async () => {
+      try {
+        await deleteVideoTask(t.id, { brandId: brandId.value });
+        message.success('已删除');
+        load();
+      } catch (e) {
+        message.error(e?.message ?? '删除失败');
+      }
+    },
+  });
+};
+
 onMounted(async () => {
   load();
-  const vs = await getVoices().catch(() => null);
+  const vs = await getVoices({ brandId: brandId.value }).catch(() => null);
   if (vs) voiceNames.value = Object.fromEntries((vs.items ?? []).map((v) => [v.id, v.name]));
 });
 onUnmounted(() => clearTimeout(timer));

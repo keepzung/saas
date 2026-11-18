@@ -5,6 +5,7 @@ import { HotspotController } from './hotspot.controller';
 import { HotspotService } from './hotspot.service';
 import { BreakdownService } from './breakdown.service';
 import { VideoService } from './video.service';
+import { VoiceService } from './voice.service';
 import { MatchService } from './match.service';
 import { CreationService } from './creation.service';
 import { SessionStore } from './scraper/session.store';
@@ -17,6 +18,7 @@ import { HotspotScheduler } from './hotspot.scheduler';
     HotspotService,
     BreakdownService,
     VideoService,
+    VoiceService,
     MatchService,
     CreationService,
     SessionStore,

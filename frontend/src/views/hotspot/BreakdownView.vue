@@ -7,6 +7,7 @@
         <a-radio-button value="bilibili">B站</a-radio-button>
       </a-radio-group>
       <a-select v-model:value="status" style="width: 130px" @change="load">
+        <a-select-option value="">全部状态</a-select-option>
         <a-select-option value="done">已完成</a-select-option>
         <a-select-option value="processing">进行中</a-select-option>
         <a-select-option value="pending">排队中</a-select-option>
@@ -77,7 +78,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
@@ -94,12 +95,13 @@ const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
 const platform = ref('');
-const status = ref('done');
+const status = ref('');
 
 const open_ = ref(false);
 const cur = ref(null);
 const pickOpen = ref(false);
 const pickMode = ref('article');
+let timer = null;
 
 const platformName = (p) => ({ xhs: '小红书', bilibili: 'B站' }[p] ?? p ?? '');
 const statusColor = (s) => ({ done: 'green', processing: 'orange', pending: 'orange', failed: 'red' }[s] ?? 'default');
@@ -118,6 +120,11 @@ const load = async () => {
     });
     list.value = res?.items ?? [];
     total.value = res?.total ?? 0;
+    // 有排队中/拆解中的任务时 5s 轮询刷新状态
+    clearTimeout(timer);
+    if ((res?.items ?? []).some((b) => ['pending', 'processing'].includes(b.status))) {
+      timer = setTimeout(load, 5000);
+    }
   } finally {
     loading.value = false;
   }
@@ -159,6 +166,7 @@ const onPicked = async ({ productId, strategyId, voice }) => {
 };
 
 onMounted(load);
+onUnmounted(() => clearTimeout(timer));
 </script>
 
 <style scoped>
