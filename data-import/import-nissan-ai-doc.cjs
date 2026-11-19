@@ -101,27 +101,35 @@ async function main() {
     if (!brand) { console.log(`brand ${brandId} 不存在，跳过`); continue; }
     console.log(`\n== brand ${brandId} ${brand.name} ==`);
 
-    // 产品知识
-    let product = await prisma.product.findFirst({ where: { brandId, name: '东风日产N7' } });
-    if (!product) {
-      product = await prisma.product.create({
-        data: {
-          brandId,
-          name: '东风日产N7',
-          displayName: '日产N7',
-          description: '东风日产 N7 纯电轿车——合资纯电家轿标杆',
-          knowledge: N7_KNOWLEDGE,
-          salesPolicy: N7_SALES_POLICY,
-          configType: 'product',
-        },
-      });
-      console.log(`  Product 东风日产N7 已创建（brand ${brandId} 缺失）`);
+    // 产品：brand10 建管理完整版「东风日产N7」；brand9 投标区有自己的原版「N7」产品，只挂靠不新建/不覆盖
+    let product = null;
+    if (brandId === 9) {
+      product = (await prisma.product.findFirst({ where: { brandId, name: 'N7' } }))
+        ?? (await prisma.product.findFirst({ where: { brandId, name: '东风日产N7' } }));
+      if (!product) { console.log('  brand9 找不到 N7 产品，策略将不挂产品'); }
+      else console.log(`  Product 挂靠投标原版 #${product.id}`);
     } else {
-      await prisma.product.update({
-        where: { id: product.id },
-        data: { knowledge: N7_KNOWLEDGE, salesPolicy: N7_SALES_POLICY, displayName: product.displayName ?? '日产N7' },
-      });
-      console.log(`  Product 东风日产N7 #${product.id} 已更新：knowledge ${N7_KNOWLEDGE.length} 字 + salesPolicy ${N7_SALES_POLICY.length} 字`);
+      product = await prisma.product.findFirst({ where: { brandId, name: '东风日产N7' } });
+      if (!product) {
+        product = await prisma.product.create({
+          data: {
+            brandId,
+            name: '东风日产N7',
+            displayName: '日产N7',
+            description: '东风日产 N7 纯电轿车——合资纯电家轿标杆',
+            knowledge: N7_KNOWLEDGE,
+            salesPolicy: N7_SALES_POLICY,
+            configType: 'product',
+          },
+        });
+        console.log(`  Product 东风日产N7 已创建（brand ${brandId} 缺失）`);
+      } else {
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { knowledge: N7_KNOWLEDGE, salesPolicy: N7_SALES_POLICY, displayName: product.displayName ?? '日产N7' },
+        });
+        console.log(`  Product 东风日产N7 #${product.id} 已更新：knowledge ${N7_KNOWLEDGE.length} 字 + salesPolicy ${N7_SALES_POLICY.length} 字`);
+      }
     }
 
     // 内容创作策略
