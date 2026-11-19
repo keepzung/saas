@@ -355,17 +355,20 @@ async function main() {
   }
   console.log(`创作策略: 新建 ${stNew} 条，同名跳过 ${stSkip} 条（共 ${STRATEGIES.length}）`);
 
-  // ── 7. 菜单授权：brand 9 全员追加 m_factory + m_kox_g_task2 子树 ──
+  // ── 7. 菜单授权：brand 9 全员追加 m_factory + m_kox_g_task2 + m_hotspot 子树 ──
   const factory = await prisma.moduleNode.findUnique({ where: { key: 'm_factory' } });
   const taskGroup = await prisma.moduleNode.findUnique({ where: { key: 'm_kox_g_task2' } });
+  const hotspot = await prisma.moduleNode.findUnique({ where: { key: 'm_hotspot' } });
   if (!factory || !taskGroup) throw new Error('ModuleNode 缺失：m_factory / m_kox_g_task2');
-  const want = new Set([factory.id, taskGroup.id]);
+  if (!hotspot) throw new Error('ModuleNode 缺失：m_hotspot（先跑 data-import/update-hotspot-menu.js）');
+  const want = new Set([factory.id, taskGroup.id, hotspot.id]);
   const collect = async (parentId) => {
     const kids = await prisma.moduleNode.findMany({ where: { parentId } });
     for (const k of kids) { want.add(k.id); await collect(k.id); }
   };
   await collect(factory.id);
   await collect(taskGroup.id);
+  await collect(hotspot.id);
   const members = await prisma.brandMember.findMany({ where: { brandId: BRAND_ID }, select: { userId: true } });
   let granted = 0;
   for (const m of members) {
