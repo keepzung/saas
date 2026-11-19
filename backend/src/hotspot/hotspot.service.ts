@@ -255,7 +255,7 @@ export class HotspotService {
   }
 
   /** 本机抓取结果导入（与 scrapeNow 的 upsert 同管道；items 已是 ScrapedItem 形状；搜索内容归属推送目标工作区） */
-  async importContents(input: { brandId: number; sourceType: string; sourceKeyword?: string; items: Record<string, unknown>[] }) {
+  async importContents(input: { brandId: number; sourceType: string; sourceKeyword?: string; items: ScrapedItem[] }) {
     const r = await this.upsertContents(input.items, {
       brandId: input.brandId,
       sourceType: input.sourceType,
