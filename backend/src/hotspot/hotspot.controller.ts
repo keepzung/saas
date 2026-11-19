@@ -274,6 +274,15 @@ export class HotspotController {
     return this.video.remove(num(brandId, 1)!, id);
   }
 
+  /** 品牌自有视频素材库（视频工坊预览；混剪/AI成片的素材源，MaterialVideo 表） */
+  @Get('material-videos')
+  materialVideos(@Query() q: { brandId?: string; page?: string; pageSize?: string }) {
+    return this.video.materialVideos(num(brandIdNum(q), 1)!, {
+      page: num(q.page, 1),
+      pageSize: num(q.pageSize, 24),
+    });
+  }
+
   // ─── 达人匹配 ───────────────────────────────────────────────────────
   @Post('match/run')
   matchRun(@Req() req: Request, @Body() body: { brandId?: number; productId: number; topK?: number }) {

@@ -4,7 +4,7 @@
       <a-select
         v-model:value="filterType"
         style="width: 140px"
-        placeholder="按素材类型筛选"
+        :placeholder="`按${typeLabel}筛选`"
         allow-clear
         :options="typeOptions"
       />
@@ -38,7 +38,7 @@
           <DeleteOutlined /> 批量删除
         </a-button>
         <a-button size="small" :disabled="!checked.length" @click="assignOpen = true">
-          批量设置类型/套图
+          批量设置{{ typeLabel }}/套图
         </a-button>
         <div class="mat-toolbar-right">
           <a-upload
@@ -89,9 +89,9 @@
     </div>
 
     <!-- 标签/套图管理 -->
-    <a-modal v-model:open="manageOpen" title="标签/套图管理" :footer="null" width="680px">
+    <a-modal v-model:open="manageOpen" :title="`${typeLabel}/套图管理`" :footer="null" width="680px">
       <a-tabs v-model:activeKey="manageTab">
-        <a-tab-pane key="type" tab="素材类型标签">
+        <a-tab-pane key="type" :tab="`${typeLabel}标签`">
           <div class="manage-row" v-for="t in tags" :key="t.id">
             <a-input v-model:value="t.name" size="small" style="width: 180px" />
             <span class="manage-count">{{ t.image_count }} 张</span>
@@ -99,7 +99,7 @@
             <a-button size="small" type="link" danger @click="removeTag(t)">删除</a-button>
           </div>
           <div class="manage-row">
-            <a-input v-model:value="newTagName" size="small" style="width: 180px" placeholder="新标签名称" />
+            <a-input v-model:value="newTagName" size="small" style="width: 180px" :placeholder="`新${typeLabel}名称`" />
             <a-button size="small" type="primary" @click="addTag">新增标签</a-button>
           </div>
         </a-tab-pane>
@@ -119,9 +119,9 @@
     </a-modal>
 
     <!-- 批量设置 -->
-    <a-modal v-model:open="assignOpen" title="批量设置类型/套图" @ok="doAssign">
+    <a-modal v-model:open="assignOpen" :title="`批量设置${typeLabel}/套图`" @ok="doAssign">
       <div class="assign-row">
-        <span class="assign-label">素材类型</span>
+        <span class="assign-label">{{ typeLabel }}</span>
         <a-select v-model:value="assignType" style="width: 200px" allow-clear placeholder="不修改" :options="typeOptions" />
       </div>
       <div class="assign-row">
@@ -150,6 +150,7 @@ import {
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import { useAuthStore } from '../../stores/auth';
+import { BRAND_MATERIAL_TYPE_LABEL } from '../../config/brands';
 import {
   getMaterialTags,
   createMaterialTag,
@@ -196,6 +197,7 @@ const importText = ref('');
 
 const typeOptions = computed(() => tags.value.map((t) => ({ label: t.name, value: t.id })));
 const setOptions = computed(() => sets.value.map((s) => ({ label: s.name, value: s.id })));
+const typeLabel = computed(() => BRAND_MATERIAL_TYPE_LABEL[Number(brandId.value)] ?? '素材类型');
 const allChecked = computed(() => list.value.length > 0 && checked.value.length === list.value.length);
 
 const loadMeta = async () => {

@@ -247,6 +247,24 @@ export class VideoService {
     return { id, status: 'queued' };
   }
 
+  /** 品牌自有视频素材库列表（视频工坊「品牌素材库」预览；混剪/AI成片的素材源） */
+  async materialVideos(brandId: number, q: { page?: number; pageSize?: number }) {
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 24;
+    const where = { brandId };
+    const [rows, total] = await Promise.all([
+      this.prisma.materialVideo.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: { id: true, url: true, thumbUrl: true, durationSec: true, tags: true, createdAt: true },
+      }),
+      this.prisma.materialVideo.count({ where }),
+    ]);
+    return { total, page, page_size: pageSize, items: rows };
+  }
+
   /** 删除任务（进行中的不允许删；已产出的视频文件保留在磁盘上不回收） */
   async remove(brandId: number, id: number) {
     const task = await this.prisma.videoGenTask.findFirst({ where: { id, brandId } });

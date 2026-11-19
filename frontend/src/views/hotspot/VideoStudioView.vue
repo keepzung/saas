@@ -2,6 +2,7 @@
   <PageWrapper title="视频工坊">
     <FilterTopbar>
       <a-button type="primary" @click="pickOpen = true"><PlusOutlined /> 新建混剪视频</a-button>
+      <a-button @click="openMaterials"><FolderOutlined /> 品牌素材库</a-button>
       <a-button @click="router.push('/hotspot/voices')"><AudioOutlined /> 我的音色</a-button>
       <span class="tip">15-30 秒竖版视频：AI 分镜 → 品牌素材智能匹配 / CogVideoX 生成画面 → AI 配音（系统音色 / 我的音色）→ 字幕合成；混剪每条 10 算力，AI成片 50 算力，失败自动退回</span>
     </FilterTopbar>
@@ -60,6 +61,25 @@
     </a-spin>
 
     <ProductPickModal v-model:open="pickOpen" title="新建混剪视频·选择产品" show-voice @picked="create" />
+
+    <!-- 品牌素材库（混剪/AI成片的素材源） -->
+    <a-drawer v-model:open="matOpen" title="品牌素材库" width="680px">
+      <a-spin :spinning="matLoading">
+        <div v-if="materials.length" class="mat-grid">
+          <div v-for="m in materials" :key="m.id" class="mat-cell">
+            <video :src="m.url" :poster="m.thumbUrl ?? undefined" controls preload="metadata"></video>
+            <div class="mat-meta">
+              <a-tag v-for="t in m.tags ?? []" :key="t" color="blue" class="mat-tag">{{ t }}</a-tag>
+              <span v-if="m.durationSec" class="mat-dur">{{ m.durationSec }}s</span>
+            </div>
+          </div>
+        </div>
+        <a-empty v-else-if="!matLoading" description="素材库为空：上传品牌视频素材后，混剪会自动从这里匹配画面" />
+        <div v-if="matTotal > matPageSize" class="pager">
+          <a-pagination v-model:current="matPage" :total="matTotal" :page-size="matPageSize" @change="loadMaterials" />
+        </div>
+      </a-spin>
+    </a-drawer>
   </PageWrapper>
 </template>
 
@@ -67,12 +87,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
-import { AudioOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { AudioOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getVideoTasks, generateVideo, retryVideo, deleteVideoTask, getVoices } from '../../api/hotspot';
+import { getVideoTasks, generateVideo, retryVideo, deleteVideoTask, getVoices, getMaterialVideos } from '../../api/hotspot';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -86,6 +106,29 @@ const loading = ref(false);
 const pickOpen = ref(false);
 const voiceNames = ref({});
 let timer = null;
+
+const matOpen = ref(false);
+const materials = ref([]);
+const matTotal = ref(0);
+const matPage = ref(1);
+const matPageSize = 24;
+const matLoading = ref(false);
+
+const loadMaterials = async () => {
+  matLoading.value = true;
+  try {
+    const res = await getMaterialVideos({ brandId: brandId.value, page: matPage.value, pageSize: matPageSize });
+    materials.value = res?.items ?? [];
+    matTotal.value = res?.total ?? 0;
+  } finally {
+    matLoading.value = false;
+  }
+};
+
+const openMaterials = () => {
+  matOpen.value = true;
+  loadMaterials();
+};
 
 const statusColor = (s) => ({ done: 'green', rendering: 'orange', scripting: 'orange', queued: 'orange', failed: 'red' }[s] ?? 'default');
 const statusText = (s) => ({ done: '已完成', rendering: '合成中', scripting: '生成分镜', queued: '排队中', failed: '失败' }[s] ?? s);
@@ -175,4 +218,9 @@ onUnmounted(() => clearTimeout(timer));
 .shot .mq { color: #aaa; margin-top: 2px; }
 .ops { display: flex; flex-direction: column; gap: 8px; }
 .pager { display: flex; justify-content: center; margin-top: 16px; }
+.mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.mat-cell video { width: 100%; height: 200px; border-radius: 10px; background: #000; object-fit: contain; }
+.mat-meta { display: flex; align-items: center; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.mat-tag { margin: 0; }
+.mat-dur { color: #94a3b8; font-size: 12px; }
 </style>

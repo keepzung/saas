@@ -54,6 +54,8 @@ export const getVideoTasks = (params) => request.get('/hotspot/videos', { params
 
 export const retryVideo = (id, params) => request.post(`/hotspot/videos/${id}/retry`, {}, { params });
 
+export const getMaterialVideos = (params) => request.get('/hotspot/material-videos', { params });
+
 // ─── 达人匹配 ───────────────────────────────────────────────────────
 export const runMatch = (data, params) => request.post('/hotspot/match/run', data, { params, timeout: 300000 });
 
