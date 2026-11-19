@@ -134,8 +134,12 @@ const NISSAN_DICT = [
   [/东风奕境/g, '东风日产'],
   [/奕境X9/gi, '东风日产N7'],
   [/变境X9/gi, '东风日产N7'],
+  [/卖境X9/gi, '东风日产N7'],
+  [/奕境4S/gi, '东风日产4S'],
+  [/变境4S/gi, '东风日产4S'],
   [/奕境/g, 'N7'],
   [/变境/g, 'N7'],
+  [/卖境/g, 'N7'],
   [/奕炫/g, 'N7'],
   [/风神/g, '日产'],
   [/皓极/g, 'N7'],
@@ -144,13 +148,16 @@ const NISSAN_DICT = [
   [/猛士/g, '日产'],
   [/俊风/g, '日产'],
   [/X9(?![0-9])/gi, 'N7'],
+  [/N74S/g, '东风日产4S'],
+  // 孤立的「奕」残字（源标题截断/错别字）：后一个字符不是汉字时兜底替换
+  [/奕(?![\u4e00-\u9fa5])/g, '东风日产'],
   [/东风(?!日产)/g, '东风日产'],
 ];
 const nissanTr = (s) => (typeof s === 'string' ? NISSAN_DICT.reduce((acc, [re, to]) => acc.replace(re, to), s) : s);
 
 // 写库前断言：目标品牌文本字段禁止出现的词
 const PET_FORBIDDEN = /[辆车]|试驾|4S|提车|交车|续航|东风|日产|奕境|荣威|特斯拉|格力|大众|Morgan|MDD/i;
-const NISSAN_FORBIDDEN = /奕境|奕炫|风神|皓极|皓瀚|纳米|猛士|俊风|荣威|特斯拉|格力|大众|Morgan|MDD|X9/i;
+const NISSAN_FORBIDDEN = /奕境|变境|卖境|奕炫|风神|皓极|皓瀚|纳米|猛士|俊风|荣威|特斯拉|格力|大众|Morgan|MDD|X9|N74S/i;
 const FORBIDDEN = MODE === 'pet' ? PET_FORBIDDEN : NISSAN_FORBIDDEN;
 const violations = [];
 function assertClean(label, fields) {
