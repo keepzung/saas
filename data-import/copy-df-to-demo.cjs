@@ -304,6 +304,8 @@ function rewriteRow(model, row) {
     ...(rule.keepFields ? Object.fromEntries(rule.keepFields.map((f) => [f, out[f]])) : {}),
     ...(Array.isArray(out.topics) ? { topics: out.topics } : {}),
   });
+  // id 只是断言标签/种子用的注入值，不能进 createMany（自增主键唯一约束）
+  delete out.id;
   return out;
 }
 const weeklySeen = new Map();
