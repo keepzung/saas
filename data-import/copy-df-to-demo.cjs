@@ -336,7 +336,7 @@ const ALIGN_ARG = (() => {
 const ALIGN_CONFIG = {
   koxNote: { anchor: ['publishTime'], dates: ['publishTime', 'statDate'] },
   koxNoteDailyStat: { anchor: ['day'], dates: ['day'] },
-  koxAccountDailyStat: { anchor: ['statDate'], dates: ['statDate'] },
+  // koxAccountDailyStat 无 brandId 列且源为 0 行，不进对齐配置
   koxContentNoteDaily: { anchor: ['day'], dates: ['day', 'notePublishTime'] },
   koxContentStatDaily: { anchor: ['day'], dates: ['day'] },
   koxJuguangNoteDaily: { anchor: ['day'], dates: ['day'] },
