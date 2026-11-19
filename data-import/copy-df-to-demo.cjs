@@ -129,9 +129,10 @@ const PET_POOLS = {
   productNames: ['冻干鸡肉粒', '猫粮成猫款', '狗窝四季款', '宠物羊奶粉', '猫咪逗猫棒', '狗狗洁齿骨', '猫砂混合款', '宠物智能饮水机'],
 };
 
-// Nissan 车型词字典改写（顺序敏感：先长词后短词）
+// Nissan 车型词字典改写（顺序敏感：先长词后短词；源车型实测为奕境X9系列）
 const NISSAN_DICT = [
   [/东风奕境/g, '东风日产'],
+  [/奕境X9/gi, '东风日产N7'],
   [/奕境/g, 'N7'],
   [/奕炫/g, 'N7'],
   [/风神/g, '日产'],
@@ -140,13 +141,14 @@ const NISSAN_DICT = [
   [/纳米/g, 'N7'],
   [/猛士/g, '日产'],
   [/俊风/g, '日产'],
+  [/X9(?![0-9])/g, 'N7'],
   [/东风(?!日产)/g, '东风日产'],
 ];
 const nissanTr = (s) => (typeof s === 'string' ? NISSAN_DICT.reduce((acc, [re, to]) => acc.replace(re, to), s) : s);
 
 // 写库前断言：目标品牌文本字段禁止出现的词
 const PET_FORBIDDEN = /[辆车]|试驾|4S|提车|交车|续航|东风|日产|奕境|荣威|特斯拉|格力|大众|Morgan|MDD/i;
-const NISSAN_FORBIDDEN = /奕境|奕炫|风神|皓极|皓瀚|纳米|猛士|俊风|荣威|特斯拉|格力|大众|Morgan|MDD/i;
+const NISSAN_FORBIDDEN = /奕境|奕炫|风神|皓极|皓瀚|纳米|猛士|俊风|荣威|特斯拉|格力|大众|Morgan|MDD|X9/i;
 const FORBIDDEN = MODE === 'pet' ? PET_FORBIDDEN : NISSAN_FORBIDDEN;
 const violations = [];
 function assertClean(label, fields) {
@@ -306,6 +308,10 @@ function rewriteRow(model, row) {
   });
   // id 只是断言标签/种子用的注入值，不能进 createMany（自增主键唯一约束）
   delete out.id;
+  // 宠物区笔记：源 category 为空导致内容类型图表全空，回填宠物品类（约10%留空保持真实感）
+  if (MODE === 'pet' && model === 'koxNote' && !out.category && hashStr(`cat${row.noteId ?? row.id}`) % 100 >= 10) {
+    out.category = pick(PET_POOLS.categories, `cat${row.noteId ?? row.id}`);
+  }
   return out;
 }
 const weeklySeen = new Map();
