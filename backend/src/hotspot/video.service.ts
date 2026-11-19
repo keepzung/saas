@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../contentpro/quota.service';
 import { chatJson, llmEnabled } from './llm.util';
-import { buildAss, probeDurationSec, runFfmpeg, subtitleFont, uploadRoot } from './media.util';
+import { buildAss, materialVideoDir, probeDurationSec, runFfmpeg, subtitleFont, uploadRoot } from './media.util';
 import { sparkCloneTts, sparkSeedanceGenerate, sparkSpeakerExists, sparkSpeakers, sparkTts } from './spark.tts';
 import { cogConfigured, cogVideoGenerate } from './cogvideo';
 import { VoiceService } from './voice.service';
@@ -263,6 +263,38 @@ export class VideoService {
       this.prisma.materialVideo.count({ where }),
     ]);
     return { total, page, page_size: pageSize, items: rows };
+  }
+
+  /** 上传品牌视频素材：multer 已落盘到 _tmp，此处移动到品牌目录并入 MaterialVideo */
+  async uploadMaterialVideo(
+    brandId: number,
+    file: { path: string; originalname?: string; size?: number } | undefined,
+    tagsCsv?: string,
+  ) {
+    if (!file?.path) throw new BadRequestException('未收到视频文件');
+    const ext = path.extname(file.originalname || '').toLowerCase() || '.mp4';
+    const dir = materialVideoDir(brandId);
+    const filename = `bv_${Date.now()}_${Math.floor(Math.random() * 1e6)}${ext}`;
+    fs.renameSync(file.path, path.join(dir, filename));
+    const tags = (tagsCsv ?? '')
+      .split(/[,，、\s]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const url = `/uploads/materials/brand-videos/${brandId}/${filename}`;
+    const durationSec = await probeDurationSec(path.join(dir, filename));
+    const row = await this.prisma.materialVideo.create({
+      data: { brandId, url, tags: tags.length ? tags : ['品牌视频'], durationSec: durationSec ?? null },
+    });
+    this.logger.log(`品牌素材上传 brand=${brandId} -> ${url} (${Math.round((file.size ?? 0) / 1024 / 1024)}MB, ${durationSec ?? '?'}s)`);
+    return { id: row.id, url: row.url, tags: row.tags, durationSec: row.durationSec };
+  }
+
+  /** 删除品牌视频素材（仅删记录与引用，源文件保留在磁盘上） */
+  async removeMaterialVideo(brandId: number, id: number) {
+    const row = await this.prisma.materialVideo.findFirst({ where: { id, brandId } });
+    if (!row) throw new NotFoundException('素材不存在');
+    await this.prisma.materialVideo.delete({ where: { id: row.id } });
+    return { id, deleted: true };
   }
 
   /** 删除任务（进行中的不允许删；已产出的视频文件保留在磁盘上不回收） */

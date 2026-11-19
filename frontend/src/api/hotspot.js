@@ -56,6 +56,18 @@ export const retryVideo = (id, params) => request.post(`/hotspot/videos/${id}/re
 
 export const getMaterialVideos = (params) => request.get('/hotspot/material-videos', { params });
 
+export const uploadMaterialVideo = (file, brandId, tags) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return request.post('/hotspot/material-videos/upload', fd, {
+    params: { brandId, tags: tags || undefined },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000,
+  });
+};
+
+export const deleteMaterialVideo = (id, params) => request.delete(`/hotspot/material-videos/${id}`, { params });
+
 // ─── 达人匹配 ───────────────────────────────────────────────────────
 export const runMatch = (data, params) => request.post('/hotspot/match/run', data, { params, timeout: 300000 });
 

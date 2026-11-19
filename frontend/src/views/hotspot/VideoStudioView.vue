@@ -65,6 +65,16 @@
 
     <!-- 品牌素材库（混剪/AI成片的素材源） -->
     <a-drawer v-model:open="matOpen" title="品牌素材库" width="680px">
+      <div class="mat-toolbar-row">
+        <a-upload
+          :show-upload-list="false"
+          accept=".mp4,.mov,.webm,.m4v"
+          :before-upload="onMaterialUpload"
+        >
+          <a-button type="primary" :loading="matUploading"><UploadOutlined /> 上传视频素材</a-button>
+        </a-upload>
+        <span class="mat-hint">支持 mp4/mov/webm，单个 ≤ 500MB；上传后自动用于混剪画面匹配（标签可提升命中）</span>
+      </div>
       <a-spin :spinning="matLoading">
         <div v-if="materials.length" class="mat-grid">
           <div v-for="m in materials" :key="m.id" class="mat-cell">
@@ -72,6 +82,9 @@
             <div class="mat-meta">
               <a-tag v-for="t in m.tags ?? []" :key="t" color="blue" class="mat-tag">{{ t }}</a-tag>
               <span v-if="m.durationSec" class="mat-dur">{{ m.durationSec }}s</span>
+              <a-popconfirm title="删除该视频素材？" ok-text="删除" cancel-text="取消" @confirm="removeMaterial(m)">
+                <a-button size="small" type="link" danger class="mat-del">删除</a-button>
+              </a-popconfirm>
             </div>
           </div>
         </div>
@@ -127,12 +140,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
-import { AudioOutlined, FolderOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
+import { AudioOutlined, FolderOutlined, PlusOutlined, QuestionCircleOutlined, UploadOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getVideoTasks, generateVideo, retryVideo, deleteVideoTask, getVoices, getMaterialVideos } from '../../api/hotspot';
+import { getVideoTasks, generateVideo, retryVideo, deleteVideoTask, getVoices, getMaterialVideos, uploadMaterialVideo, deleteMaterialVideo } from '../../api/hotspot';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -149,6 +162,7 @@ let timer = null;
 
 const matOpen = ref(false);
 const helpOpen = ref(false);
+const matUploading = ref(false);
 const materials = ref([]);
 const matTotal = ref(0);
 const matPage = ref(1);
@@ -169,6 +183,31 @@ const loadMaterials = async () => {
 const openMaterials = () => {
   matOpen.value = true;
   loadMaterials();
+};
+
+const onMaterialUpload = async (file) => {
+  matUploading.value = true;
+  try {
+    await uploadMaterialVideo(file, brandId.value);
+    message.success(`已上传 ${file.name}`);
+    matPage.value = 1;
+    await loadMaterials();
+  } catch (e) {
+    message.error(e?.message ?? '上传失败');
+  } finally {
+    matUploading.value = false;
+  }
+  return false;
+};
+
+const removeMaterial = async (m) => {
+  try {
+    await deleteMaterialVideo(m.id, { brandId: brandId.value });
+    message.success('已删除');
+    await loadMaterials();
+  } catch (e) {
+    message.error(e?.message ?? '删除失败');
+  }
 };
 
 const statusColor = (s) => ({ done: 'green', rendering: 'orange', scripting: 'orange', queued: 'orange', failed: 'red' }[s] ?? 'default');
@@ -264,6 +303,9 @@ onUnmounted(() => clearTimeout(timer));
 .mat-meta { display: flex; align-items: center; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 .mat-tag { margin: 0; }
 .mat-dur { color: #94a3b8; font-size: 12px; }
+.mat-del { margin-left: auto; padding: 0 4px; }
+.mat-toolbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.mat-hint { color: #94a3b8; font-size: 12px; }
 .help-list { padding-left: 18px; margin: 4px 0 12px; }
 .help-list li { margin-bottom: 6px; }
 .help-faq { margin-top: 8px; background: #f8fafc; border-radius: 8px; padding: 10px 12px; }

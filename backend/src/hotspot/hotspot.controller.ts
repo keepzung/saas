@@ -283,6 +283,29 @@ export class HotspotController {
     });
   }
 
+  /** 上传品牌视频素材（mp4/mov/webm/m4v，单文件 ≤ 500MB） */
+  @Post('material-videos/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 500 * 1024 * 1024 },
+      fileFilter: (_req: unknown, file: { originalname: string }, cb: (err: Error | null, acceptFile: boolean) => void) =>
+        cb(null, /\.(mp4|mov|webm|m4v)$/i.test(file.originalname)),
+      storage: materialVideoDiskStorage(),
+    }),
+  )
+  uploadMaterialVideo(
+    @UploadedFile() file: { path: string; originalname?: string; size?: number } | undefined,
+    @Query('brandId') brandId?: string,
+    @Query('tags') tags?: string,
+  ) {
+    return this.video.uploadMaterialVideo(num(brandId, 1)!, file, tags);
+  }
+
+  @Delete('material-videos/:id')
+  removeMaterialVideo(@Param('id', ParseIntPipe) id: number, @Query('brandId') brandId?: string) {
+    return this.video.removeMaterialVideo(num(brandId, 1)!, id);
+  }
+
   // ─── 达人匹配 ───────────────────────────────────────────────────────
   @Post('match/run')
   matchRun(@Req() req: Request, @Body() body: { brandId?: number; productId: number; topK?: number }) {
@@ -335,4 +358,25 @@ export class HotspotController {
 
 function brandIdNum(q: Record<string, string | undefined>) {
   return num(q.brandId, 1);
+}
+
+/** 品牌视频素材上传的 multer 磁盘存储（落 _tmp，由 service 移入品牌目录） */
+function materialVideoDiskStorage() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { diskStorage } = require('multer');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { materialVideoDir } = require('./media.util') as typeof import('./media.util');
+  return diskStorage({
+    destination: (_req: unknown, _file: unknown, cb: (err: null, dir: string) => void) => {
+      try {
+        cb(null, materialVideoDir());
+      } catch (e) {
+        cb(e as null, '');
+      }
+    },
+    filename: (_req: unknown, file: { originalname: string }, cb: (err: null, name: string) => void) => {
+      const ext = (file.originalname || '').match(/\.(mp4|mov|webm|m4v)$/i)?.[0]?.toLowerCase() ?? '.mp4';
+      cb(null, `up_${Date.now()}_${Math.floor(Math.random() * 1e6)}${ext}`);
+    },
+  });
 }

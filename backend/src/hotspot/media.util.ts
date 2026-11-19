@@ -15,6 +15,15 @@ export function uploadRoot(): string {
   return process.env.UPLOAD_ROOT ? process.env.UPLOAD_ROOT : path.resolve(__dirname, '..', '..', 'uploads');
 }
 
+/** 品牌视频素材目录（brandId 省略时为 multer 上传暂存目录） */
+export function materialVideoDir(brandId?: number): string {
+  const dir = brandId
+    ? path.join(uploadRoot(), 'materials', 'brand-videos', String(brandId))
+    : path.join(uploadRoot(), 'materials', 'brand-videos', '_tmp');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export function fontsDir(): string {
   return path.resolve(__dirname, '..', '..', 'assets', 'fonts');
 }
