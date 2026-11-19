@@ -2,9 +2,8 @@
   <PageWrapper title="热点雷达">
     <FilterTopbar>
       <a-radio-group v-model:value="platform" button-style="solid" @change="load">
-        <a-radio-button value="">全部</a-radio-button>
-        <a-radio-button value="xhs">小红书</a-radio-button>
         <a-radio-button value="bilibili">B站</a-radio-button>
+        <a-radio-button value="xhs">小红书</a-radio-button>
         <a-radio-button value="douyin" disabled>抖音（二期）</a-radio-button>
         <a-radio-button value="zhihu" disabled>知乎（二期）</a-radio-button>
       </a-radio-group>
@@ -177,7 +176,7 @@ const page = ref(1);
 const pageSize = ref(24);
 const loading = ref(false);
 const scraping = ref(false);
-const platform = ref('');
+const platform = ref('bilibili'); // 不设"全部"：明确选平台，避免服务器默认触碰已风控的小红书
 const sourceType = ref('');
 const sort = ref('new');
 const keyword = ref('');
