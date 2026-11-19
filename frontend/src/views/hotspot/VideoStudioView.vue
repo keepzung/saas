@@ -4,7 +4,8 @@
       <a-button type="primary" @click="pickOpen = true"><PlusOutlined /> 新建混剪视频</a-button>
       <a-button @click="openMaterials"><FolderOutlined /> 品牌素材库</a-button>
       <a-button @click="router.push('/hotspot/voices')"><AudioOutlined /> 我的音色</a-button>
-      <span class="tip">15-30 秒竖版视频：AI 分镜 → 品牌素材智能匹配 / CogVideoX 生成画面 → AI 配音（系统音色 / 我的音色）→ 字幕合成；混剪每条 10 算力，AI成片 50 算力，失败自动退回</span>
+      <a-button @click="helpOpen = true"><QuestionCircleOutlined /> 使用说明</a-button>
+      <span class="tip">15-30 秒竖版视频：AI 分镜 → 品牌素材智能匹配 / AI 生成画面 → AI 配音（豆包音色 / 系统音色 / 我的音色）→ 字幕合成；混剪每条 10 算力，AI成片 50 算力，失败自动退回</span>
     </FilterTopbar>
 
     <a-spin :spinning="loading">
@@ -54,7 +55,7 @@
           </div>
         </div>
       </div>
-      <a-empty v-if="!list.length && !loading" description="还没有视频任务：去「热点雷达」选一条爆款生成同款，或点上方新建" />
+      <a-empty v-if="!list.length && !loading" description="还没有视频任务：点上方「新建混剪视频」，选产品一键生成" />
       <div class="pager">
         <a-pagination v-model:current="page" :total="total" :page-size="pageSize" @change="load" />
       </div>
@@ -80,6 +81,45 @@
         </div>
       </a-spin>
     </a-drawer>
+    <!-- 使用说明 -->
+    <a-drawer v-model:open="helpOpen" title="视频工坊 · 使用说明" width="560px">
+      <a-typography>
+        <a-typography-title :level="5">三步出片</a-typography-title>
+        <a-timeline>
+          <a-timeline-item>点<b>「新建混剪视频」</b>，选择产品——AI 会读取产品的名称、卖点、产品知识，自动生成分镜脚本和口播文案。</a-timeline-item>
+          <a-timeline-item>选<b>生成引擎</b>和<b>配音音色</b>（豆包音色 / 系统音色 / 我的音色，均可先试听）。</a-timeline-item>
+          <a-timeline-item>点确定后任务进入队列：分镜 → 画面 → 配音 → 字幕逐段推进，完成后在本页直接<b>播放 / 下载</b>。</a-timeline-item>
+        </a-timeline>
+
+        <a-typography-title :level="5">两种生成引擎怎么选</a-typography-title>
+        <ul class="help-list">
+          <li><b>智能混剪（10 算力/条）</b>：画面来自品牌素材库的视频和素材库图片（智能匹配 + 动效合成），速度最快约 2-4 分钟，画面全部来自真实素材。</li>
+          <li><b>AI成片（50 算力/条）</b>：AI 视频大模型逐段生成全新画面（Seedance / CogVideoX 双通道），素材库图片自动作为画面首帧——产品展示真实、AI 只生成氛围与运镜，约 5-10 分钟。</li>
+        </ul>
+
+        <a-typography-title :level="5">画面素材从哪来</a-typography-title>
+        <ul class="help-list">
+          <li>优先使用<b>「品牌素材库」</b>里上传的品牌视频（按每段分镜的关键词智能匹配，标签越全命中率越高）。</li>
+          <li>没有视频素材时，自动回落内容工厂「素材库」的图片（动效合成），所以先去素材库上传产品图/实拍图，出片效果更好。</li>
+        </ul>
+
+        <a-typography-title :level="5">配音</a-typography-title>
+        <ul class="help-list">
+          <li>豆包音色（大模型自然度）/ 系统音色，创建时直接选、可试听。</li>
+          <li>想要专属声线：去<b>「我的音色」</b>录 10 秒左右样本训练复刻音色，训练完成后创建视频时即可选用。</li>
+        </ul>
+
+        <a-typography-title :level="5">算力与失败保护</a-typography-title>
+        <ul class="help-list">
+          <li>每条视频按引擎扣算力（混剪 10 / AI成片 50），顶部实时显示<b>可用算力</b>。</li>
+          <li>任务失败自动<b>全额退回算力</b>，可在列表点「重试」。</li>
+        </ul>
+
+        <a-typography-paragraph type="secondary" class="help-faq">
+          常见问题：视频时长 15-30 秒竖版（1080×1920）；AI成片逐段生成约需 5-10 分钟属正常；生成期间可离开本页，任务在服务器排队继续。
+        </a-typography-paragraph>
+      </a-typography>
+    </a-drawer>
   </PageWrapper>
 </template>
 
@@ -87,7 +127,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
-import { AudioOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { AudioOutlined, FolderOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
@@ -108,6 +148,7 @@ const voiceNames = ref({});
 let timer = null;
 
 const matOpen = ref(false);
+const helpOpen = ref(false);
 const materials = ref([]);
 const matTotal = ref(0);
 const matPage = ref(1);
@@ -223,4 +264,7 @@ onUnmounted(() => clearTimeout(timer));
 .mat-meta { display: flex; align-items: center; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 .mat-tag { margin: 0; }
 .mat-dur { color: #94a3b8; font-size: 12px; }
+.help-list { padding-left: 18px; margin: 4px 0 12px; }
+.help-list li { margin-bottom: 6px; }
+.help-faq { margin-top: 8px; background: #f8fafc; border-radius: 8px; padding: 10px 12px; }
 </style>
