@@ -47,10 +47,10 @@ const N7_KNOWLEDGE = `【核心亮点】
 城市领航辅助NOA：覆盖城区园区，实现车位到车位的领航驾驶辅助；高速领航辅助NOA：覆盖高速高架；智能泊车辅助系统：复杂场景轻松泊入；22项主动安全功能。
 
 【全车级品质】
-用料更可靠：母婴级标准打造，严格的VOC标准管控；超安全电池系统：78年纯电技术底蕴、29年电池研发制造经验；高刚性笼式车身：2000MPa超高强A柱、1700MPa辊压横梁。
+用料更可靠：母婴级标准打造，严格的VOC标准管控；超安全电池系统：78年纯电技术底蕴、29年电池研发制造经验；高刚性笼式车身：2000MPa超高强A柱、1700MPa辊压横梁。`;
 
-【销售政策】
-限时权益价：10.99万-14.69万；2年6万0息，置换至高享17000元补贴，叠加智行无忧保障+三无忧服务。
+// 销售政策：产品资料页有独立字段（Product.salesPolicy，AI 生成链路单独拼接），不放知识里
+const N7_SALES_POLICY = `限时权益价：10.99万-14.69万；2年6万0息，置换至高享17000元补贴，叠加智行无忧保障+三无忧服务。
 车型价格：510 Air 10.99万｜510 Pro 11.99万｜625 Pro 12.99万｜510 Max 12.99万｜625 Max 13.99万｜625 Pro 骑士版 13.49万｜625 Max 骑士版 14.49万。
 置换补贴：本品置换（原有日产车置换N7）厂家补贴5000元；他品牌置换厂家补贴3000元；可叠加国家置换补贴至高12000元，置换综合至高17000元（各地国家补贴落地细则有差异）；骑士版同期：本品置换厂家补贴2000元，叠加国家补贴至高12000元。
 金融方案（官方3套可选）：方案1：2年6万定额0息；方案2：0首付起，1–5年期低息；方案3：20%首付起5年期「轻享还」，月供更友好。
@@ -111,13 +111,17 @@ async function main() {
           displayName: '日产N7',
           description: '东风日产 N7 纯电轿车——合资纯电家轿标杆',
           knowledge: N7_KNOWLEDGE,
+          salesPolicy: N7_SALES_POLICY,
           configType: 'product',
         },
       });
       console.log(`  Product 东风日产N7 已创建（brand ${brandId} 缺失）`);
     } else {
-      await prisma.product.update({ where: { id: product.id }, data: { knowledge: N7_KNOWLEDGE, displayName: product.displayName ?? '日产N7' } });
-      console.log(`  Product 东风日产N7 #${product.id} knowledge 已更新为官方资料库全文（${N7_KNOWLEDGE.length} 字）`);
+      await prisma.product.update({
+        where: { id: product.id },
+        data: { knowledge: N7_KNOWLEDGE, salesPolicy: N7_SALES_POLICY, displayName: product.displayName ?? '日产N7' },
+      });
+      console.log(`  Product 东风日产N7 #${product.id} 已更新：knowledge ${N7_KNOWLEDGE.length} 字 + salesPolicy ${N7_SALES_POLICY.length} 字`);
     }
 
     // 内容创作策略
