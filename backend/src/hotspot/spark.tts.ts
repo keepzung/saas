@@ -108,7 +108,8 @@ export async function sparkSeedanceGenerate(prompt: string, opts?: SeedanceOpts)
     api_name: (process.env.SPARKHUB_VIDEO_MODEL ?? 'doubao_seedance_2').trim(),
     prompt,
     resolution: opts?.resolution ?? '720p',
-    aspect_ratio: opts?.aspectRatio ?? '9:16',
+    // Seedance 2.5 首帧/首尾帧任务仅接受 aspect_ratio=adaptive（跟随首帧图比例），固定比例会被拒单
+    aspect_ratio: opts?.firstImageUrl ? 'adaptive' : (opts?.aspectRatio ?? '9:16'),
     duration: opts?.durationSec ?? 5,
     kwargs: { generate_audio: false },
   };
