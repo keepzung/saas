@@ -133,7 +133,9 @@ const PET_POOLS = {
 const NISSAN_DICT = [
   [/东风奕境/g, '东风日产'],
   [/奕境X9/gi, '东风日产N7'],
+  [/变境X9/gi, '东风日产N7'],
   [/奕境/g, 'N7'],
+  [/变境/g, 'N7'],
   [/奕炫/g, 'N7'],
   [/风神/g, '日产'],
   [/皓极/g, 'N7'],
@@ -141,7 +143,7 @@ const NISSAN_DICT = [
   [/纳米/g, 'N7'],
   [/猛士/g, '日产'],
   [/俊风/g, '日产'],
-  [/X9(?![0-9])/g, 'N7'],
+  [/X9(?![0-9])/gi, 'N7'],
   [/东风(?!日产)/g, '东风日产'],
 ];
 const nissanTr = (s) => (typeof s === 'string' ? NISSAN_DICT.reduce((acc, [re, to]) => acc.replace(re, to), s) : s);
