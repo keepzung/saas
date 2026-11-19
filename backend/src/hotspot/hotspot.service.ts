@@ -254,13 +254,13 @@ export class HotspotService {
     return this.prisma.competitorAccount.update({ where: { id }, data: { enabled } });
   }
 
-  /** 本机抓取结果导入（与 scrapeNow 的 upsert 同管道；items 已是 ScrapedItem 形状） */
-  async importContents(input: { brandId: number; sourceType: string; sourceKeyword?: string; items: ScrapedItem[] }) {
+  /** 本机抓取结果导入（与 scrapeNow 的 upsert 同管道；items 已是 ScrapedItem 形状；搜索内容归属推送目标工作区） */
+  async importContents(input: { brandId: number; sourceType: string; sourceKeyword?: string; items: Record<string, unknown>[] }) {
     const r = await this.upsertContents(input.items, {
       brandId: input.brandId,
       sourceType: input.sourceType,
       sourceKeyword: input.sourceKeyword,
-      isPublic: input.sourceType !== 'competitor',
+      isPublic: false,
     });
     this.logger.log(`导入抓取结果 brand=${input.brandId} ${input.sourceType}/${input.sourceKeyword ?? ''}: 新增 ${r.inserted}，更新 ${r.updated}`);
     return r;
@@ -409,7 +409,8 @@ export class HotspotService {
       await sleep(1500 + Math.floor(Math.random() * 1500));
       return platform === 'xhs' ? scrapeXhsSearch(page, keyword) : scrapeBiliSearch(page, keyword);
     });
-    const r = await this.upsertContents(items, { brandId, sourceType: 'search', sourceKeyword: keyword, isPublic: true });
+    // 搜索抓取内容归属当前工作区（不跨品牌共享），避免素材混品牌
+    const r = await this.upsertContents(items, { brandId, sourceType: 'search', sourceKeyword: keyword, isPublic: false });
     this.logger.log(`手动抓取 ${platform}/${keyword}: 新增 ${r.inserted}，更新 ${r.updated}`);
     return { ...r, scraped: items.length };
   }

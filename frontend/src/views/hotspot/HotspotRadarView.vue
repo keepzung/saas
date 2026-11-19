@@ -158,6 +158,7 @@ import { useAuthStore } from '../../stores/auth';
 import {
   getHotContents,
   getHotContentDetail,
+  runScrape,
   runScrapeRound,
   getKeywords,
   addKeyword as addKeywordApi,
@@ -251,8 +252,37 @@ const removeKeyword = async (k) => {
 const manualRound = async () => {
   scraping.value = true;
   try {
-    const r = await runScrapeRound();
-    message.success(`抓取完成：${r?.tasks ?? 0} 个关键词任务，新增 ${r?.inserted ?? 0} 条`);
+    const kw = keyword.value?.trim();
+    if (kw) {
+      // 搜索框有关键词：直接抓这个词（当前平台；全部=B站+小红书），并加入关键词配置供定时轮覆盖
+      const platforms = platform.value ? [platform.value] : ['bilibili', 'xhs'];
+      let inserted = 0;
+      let scraped = 0;
+      const skipped = [];
+      for (const plt of platforms) {
+        try {
+          const r = await runScrape({ brandId: brandId.value, platform: plt, keyword: kw });
+          inserted += r?.inserted ?? 0;
+          scraped += r?.scraped ?? 0;
+        } catch (e) {
+          skipped.push(plt);
+        }
+      }
+      const exists = keywords.value.find((k) => k.keyword === kw);
+      if (!exists) {
+        try {
+          await addKeywordApi({ brandId: brandId.value, keyword: kw, platforms: platform.value ? [platform.value] : ['bilibili'] }, { brandId: brandId.value });
+          loadKeywords();
+        } catch { /* 配置失败不阻断 */ }
+      }
+      const skipNote = skipped.length
+        ? `；${skipped.join('/')} 本轮跳过${skipped.includes('xhs') ? '（小红书需本机抓取）' : ''}`
+        : '';
+      message.success(`抓取「${kw}」完成：新增 ${inserted} 条（抓到 ${scraped} 条）${skipNote}；关键词已加入定时抓取配置`);
+    } else {
+      const r = await runScrapeRound();
+      message.success(`抓取完成：${r?.tasks ?? 0} 个关键词任务，新增 ${r?.inserted ?? 0} 条`);
+    }
     load();
   } catch (e) {
     message.error(e?.message ?? '抓取失败');
