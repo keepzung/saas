@@ -453,14 +453,20 @@ export class VideoService {
     const interV = path.join(tmpDir, 'inter_v.mp4');
     await runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', interV]);
 
-    // 音频：TTS 片段按镜头时长对齐（不足补静音）
+    // 音频：TTS 片段按镜头时长对齐（不足补静音；超长自动变速塞入，绝不硬截断口播）
     const audioInputs: string[] = [];
     const filterParts: string[] = [];
     for (let i = 0; i < audioFiles.length; i++) {
       const padded = path.join(tmpDir, `tts_pad_${i}.m4a`);
       if (fs.existsSync(audioFiles[i])) {
-        // apad 需要重编码（不能 -c copy）：补齐到镜头时长，统一重采样便于 concat
-        await runFfmpeg(['-y', '-i', audioFiles[i], '-af', `apad=whole_dur=${shotDur[i]}`, '-t', String(shotDur[i]), '-ar', '24000', '-ac', '1', '-b:a', '64k', padded]);
+        // 配音比镜头长时 atempo 加速（≤3x），而不是 -t 硬截——避免口播被砍半句
+        const audioDur = (await probeDurationSec(audioFiles[i])) ?? shotDur[i];
+        const tempo = audioDur > shotDur[i] + 0.05 ? Math.min(3, audioDur / shotDur[i]) : 1;
+        const af =
+          tempo > 1
+            ? `atempo=${tempo.toFixed(3)},apad=whole_dur=${shotDur[i]}`
+            : `apad=whole_dur=${shotDur[i]}`;
+        await runFfmpeg(['-y', '-i', audioFiles[i], '-af', af, '-t', String(shotDur[i]), '-ar', '24000', '-ac', '1', '-b:a', '64k', padded]);
       } else {
         await runFfmpeg(['-y', '-f', 'lavfi', '-i', `anullsrc=r=24000:cl=mono`, '-t', String(shotDur[i]), '-b:a', '64k', padded]);
       }
@@ -714,7 +720,8 @@ export class VideoService {
     const sys = [
       '你是 15-30 秒竖屏带货短视频编导。根据爆款拆解结构与产品信息，输出分镜脚本。',
       `要求：${Math.round((MIN_TOTAL_SEC + MAX_TOTAL_SEC) / 2)} 秒左右；3-6 个镜头；每镜头 2.5-9 秒；`,
-      'voiceover 是该镜头口播（口语化，每句 ≤30 字）；subtitle 是烧录字幕（≤16 字，去掉标点更利落）；mediaQuery 是为该镜头挑选素材的关键词（1-3 个词，产品/场景词）。',
+      'voiceover 是该镜头口播（口语化，每句 ≤22 字）；subtitle 是烧录字幕（≤16 字，去掉标点更利落）；mediaQuery 是为该镜头挑选素材的关键词（1-3 个词，产品/场景词）。',
+      '全部镜头的口播合计 ≤ 65 字（保证 30 秒内能自然念完，不赶不截）。',
       '参考爆款结构但不照抄文案，结合产品卖点重新创作。',
       '输出严格 JSON：{"title":"视频标题(≤20字)","shots":[{"durSec":4,"voiceover":"...","subtitle":"...","mediaQuery":"..."}]}',
     ].join('\n');
