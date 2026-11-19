@@ -408,12 +408,15 @@ export class VideoService {
           await runFfmpeg(['-y', '-ss', '0', '-t', String(dur), '-i', assigned[i].mediaUrl!, '-vf', scale, '-an', '-c:v', 'libx264', '-preset', 'fast', seg]);
         } else {
           const frames = Math.max(2, Math.round(dur * FPS));
-          const zoom = `zoompan=z='min(zoom+0.0016,1.22)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${WIDTH}x${HEIGHT}:fps=${FPS}`;
+          // 先 4x 超采样再 zoompan：zoompan 位移在输入像素上取整，低分辨率画布会整帧抖动；高分辨率下取整不可见
+          const upW = WIDTH * 4;
+          const upH = HEIGHT * 4;
+          const zoom = `zoompan=z='min(zoom+0.0016,1.22)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${WIDTH}x${HEIGHT}:fps=${FPS},format=yuv420p`;
           await runFfmpeg([
             '-y',
             '-loop', '1',
             '-i', assigned[i].mediaUrl!,
-            '-vf', `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},${zoom}`,
+            '-vf', `scale=${upW}:${upH}:force_original_aspect_ratio=increase,crop=${upW}:${upH},${zoom}`,
             '-frames:v', String(frames),
             '-c:v', 'libx264', '-preset', 'fast',
             seg,
