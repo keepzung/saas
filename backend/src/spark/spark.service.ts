@@ -1173,13 +1173,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const nicknameByIdD = new Map(accounts.map((a) => [a.id, a.nickname ?? '']));
     const renames = new Map<string, string>();
 
-    const rows: Record<string, unknown>[] = [];
     let total = 0;
+    let rawFetched = 0;
     // brand5：基线外作者跳过统计（同 syncNotes，写日志便于发现账号改名致匹配失效）
     const skipped = new Map<string, number>();
     // 全创作者的笔记×日行很大（34 天 ≈ 8 万行，探针实测 30 天 69,729 行），pageSize 500 × 200 页覆盖；
-    // 视图的 author_name 服务端过滤不生效（2026-10 探针），基线账号在客户端过滤
+    // 视图的 author_name 服务端过滤不生效（2026-10 探针），基线账号在客户端过滤。
+    // 逐页即时落库（流式）：整窗 ≤10 万行的堆积曾把 3.6GB 内存服务器的 V8 堆顶到上限自杀
+    // （pm2 saas-api ↺），流式后峰值内存仅单页 500 行
     const maxPages = 200;
+    let upserted = 0;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList(
         {
@@ -1194,73 +1197,72 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         org,
       );
       total = data.total;
-      rows.push(...data.rows);
-      if (rows.length >= total || !data.rows.length) break;
-    }
-
-    let upserted = 0;
-    for (const r of rows) {
-      const m = this.staffRowMap(r);
-      const noteId = str(m.get('note_id'));
-      const dayStr = str(m.get('date_key'));
-      if (!noteId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
-      const authorName = str(m.get('author_name')) || null;
-      const authorUid = str(m.get('author_id')) || null;
-      const accountId =
-        (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
-        (authorName ? byNickname.get(authorName) ?? null : null);
-      const oldNickD = accountId != null ? nicknameByIdD.get(accountId) ?? '' : '';
-      if (accountId != null && authorName && oldNickD && authorUid && byAuthorUid.get(authorUid) === accountId && oldNickD !== authorName && !renames.has(authorUid)) {
-        renames.set(authorUid, `${oldNickD}→${authorName}`);
-      }
-      // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
-      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
-        const key = authorName ?? '(作者为空)';
-        skipped.set(key, (skipped.get(key) ?? 0) + 1);
-        continue;
-      }
-      const data = {
-        title: str(m.get('note_title')) || null,
-        authorName,
-        accountId,
-        noteType: str(m.get('note_type')) === '2' ? 'video' : 'normal',
-        isRtbAdver: bool(m.get('is_rtb_adver')),
-        exposure: num(m.get('imp_num')),
-        views: num(m.get('read_feed_num')),
-        likes: num(m.get('like_num')),
-        collects: num(m.get('fav_num')),
-        comments: num(m.get('cmt_num')),
-        shares: num(m.get('share_num')),
-        followCount: num(m.get('follow_num')),
-        naturalExposure: num(m.get('ziran_imp_cnt')),
-        naturalViews: num(m.get('ziran_read_cnt')),
-        rtbEngage: num(m.get('ads_rtb_engage_cnt')),
-        rtbImp: num(m.get('ads_rtb_imp_cnt')),
-        rtbClick: num(m.get('ads_rtb_click_cnt')),
-        pmInquiries: num(m.get('message_open_cnt')),
-        pmOpenings: num(m.get('message_driving_open_cnt')),
-        pmLeads: num(m.get('msg_leads_num')),
-        formLeads: num(m.get('leads_success')),
-      };
-      await this.prisma.koxNoteDailyStat.upsert({
-        where: {
-          brandId_noteId_day: {
-            brandId: org.brandId,
-            noteId,
-            day: new Date(`${dayStr}T00:00:00.000Z`),
+      if (!data.rows.length) break;
+      for (const r of data.rows) {
+        const m = this.staffRowMap(r);
+        const noteId = str(m.get('note_id'));
+        const dayStr = str(m.get('date_key'));
+        if (!noteId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
+        const authorName = str(m.get('author_name')) || null;
+        const authorUid = str(m.get('author_id')) || null;
+        const accountId =
+          (authorUid ? byAuthorUid.get(authorUid) : undefined) ??
+          (authorName ? byNickname.get(authorName) ?? null : null);
+        const oldNickD = accountId != null ? nicknameByIdD.get(accountId) ?? '' : '';
+        if (accountId != null && authorName && oldNickD && authorUid && byAuthorUid.get(authorUid) === accountId && oldNickD !== authorName && !renames.has(authorUid)) {
+          renames.set(authorUid, `${oldNickD}→${authorName}`);
+        }
+        // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
+        if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
+          const key = authorName ?? '(作者为空)';
+          skipped.set(key, (skipped.get(key) ?? 0) + 1);
+          continue;
+        }
+        const row = {
+          title: str(m.get('note_title')) || null,
+          authorName,
+          accountId,
+          noteType: str(m.get('note_type')) === '2' ? 'video' : 'normal',
+          isRtbAdver: bool(m.get('is_rtb_adver')),
+          exposure: num(m.get('imp_num')),
+          views: num(m.get('read_feed_num')),
+          likes: num(m.get('like_num')),
+          collects: num(m.get('fav_num')),
+          comments: num(m.get('cmt_num')),
+          shares: num(m.get('share_num')),
+          followCount: num(m.get('follow_num')),
+          naturalExposure: num(m.get('ziran_imp_cnt')),
+          naturalViews: num(m.get('ziran_read_cnt')),
+          rtbEngage: num(m.get('ads_rtb_engage_cnt')),
+          rtbImp: num(m.get('ads_rtb_imp_cnt')),
+          rtbClick: num(m.get('ads_rtb_click_cnt')),
+          pmInquiries: num(m.get('message_open_cnt')),
+          pmOpenings: num(m.get('message_driving_open_cnt')),
+          pmLeads: num(m.get('msg_leads_num')),
+          formLeads: num(m.get('leads_success')),
+        };
+        await this.prisma.koxNoteDailyStat.upsert({
+          where: {
+            brandId_noteId_day: {
+              brandId: org.brandId,
+              noteId,
+              day: new Date(`${dayStr}T00:00:00.000Z`),
+            },
           },
-        },
-        create: { brandId: org.brandId, noteId, day: new Date(`${dayStr}T00:00:00.000Z`), ...data },
-        update: data,
-      });
-      upserted += 1;
+          create: { brandId: org.brandId, noteId, day: new Date(`${dayStr}T00:00:00.000Z`), ...row },
+          update: row,
+        });
+        upserted += 1;
+      }
+      rawFetched += data.rows.length;
+      if (rawFetched >= total) break;
     }
 
     const result: SyncResult = {
       syncType: 'notes_daily',
       statDate,
       status: 'success',
-      fetched: rows.length,
+      fetched: rawFetched,
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
