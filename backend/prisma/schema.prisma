@@ -2033,3 +2033,35 @@ model BrandReport {
   @@unique([brandId, type, period])
   @@index([brandId, type])
 }
+
+// 聚光「笔记×天」级投放明细（手工导出导入：如格力《小红书笔记推进表》投放数据源 sheet）。
+// 用途：员工矩阵历史回溯的数据底表（SparkStaffUserDaily 9-01~11-03 的 rtb 字段由此聚合）+
+// 对 KoxNoteDailyStat 的 rtb/pm 字段做交叉验证。口径=聚光投放（不含自然），勿与平台全量口径混读。
+model GreeAdNoteDaily {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @default(8)
+  day          DateTime
+  sellerName   String?
+  sellerId     String?
+  authorId     String? // 账号UID → KoxAccount.authorId → 员工
+  noteId       String
+  fee          Decimal  @default(0) @db.Decimal(14, 2)
+  impression   Int      @default(0)
+  click        Int      @default(0)
+  interaction  Int      @default(0)
+  pmInquiries  Int      @default(0) // 私信进线数（投放口径）
+  pmOpenings   Int      @default(0) // 私信开口数（投放口径）
+  pmLeads      Int      @default(0) // 私信留资数（投放口径）
+  pmOpenMsgs   Int      @default(0) // 私信开口条数
+  pmInqUsers   Int      @default(0) // 私信进线人数
+  resp15s      Int      @default(0)
+  reply30s     Int      @default(0)
+  reply1min    Int      @default(0)
+  source       String   @default("excel_推进表_20261120")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([brandId, noteId, day])
+  @@index([brandId, day])
+  @@index([brandId, authorId, day])
+}
