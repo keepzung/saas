@@ -138,7 +138,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       where: { syncType: type, statDate, status: 'success', brandId },
     });
     if (!done) return false;
-    // fetched=0 的"成功"多为平台当日未出数时的空跑，不锁定该日，后续轮次自愈重拉
+    // fetched=0 的"成功"多为平台当日未出数时的空跑，不锁定该日，后续轮次自愈重拉；
+    // staff_matrix 在分区未出数时改记 status='partial'（fetched>0 但行落在旧分区），同样不锁日
     if (done.fetched === 0) return false;
     return true;
   }
@@ -197,12 +198,28 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         if (!(await this.hasSuccessLog('notes', d, ctx.brandId))) notesOldest = d;
       }
       if (notesOldest && !cookieBroken) {
+        const syncStart = new Date();
         try {
           const result = await this.syncNotes(notesOldest, undefined, ctx);
           syncedSomething = true;
-          // 一次同步覆盖 notesOldest~昨日 的发布窗口，逐日落成功日志避免逐日重爬
+          // 一次同步覆盖 notesOldest~昨日 的发布窗口，逐日落成功日志避免逐日重爬。
+          // 但只给本轮确实落了新行（fetchedAt 有更新）的日落日志：平台日分区傍晚才出，
+          // 早拉时窗口只含旧分区，若按窗口整段记"covered"会把未出数的日子假锁死
+          // （2026-11-19 格力笔记断档根因之一），保持无日志让下一轮自愈重拉
           const covered = dates.slice(0, dates.indexOf(notesOldest) + 1);
+          const touched = await this.prisma.koxNoteDailyStat.groupBy({
+            by: ['day'],
+            where: {
+              brandId: ctx.brandId,
+              day: { gte: new Date(`${notesOldest}T00:00:00.000Z`) },
+              fetchedAt: { gte: syncStart },
+            },
+            _count: { _all: true },
+          });
+          const touchedDays = new Set(touched.map((r) => r.day.toISOString().slice(0, 10)));
+          const missed = covered.filter((d) => !touchedDays.has(d));
           for (const d of covered) {
+            if (!touchedDays.has(d)) continue;
             await this.prisma.sparkSyncLog.create({
               data: {
                 syncType: 'notes',
@@ -214,6 +231,11 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
                 brandId: ctx.brandId,
               },
             });
+          }
+          if (missed.length) {
+            this.logger.warn(
+              `星火notes brand=${ctx.brandId} ${missed.join(',')} 分区本轮未出数，不记 covered 待下轮重拉`,
+            );
           }
           this.logger.log(
             `星火notes 同步完成 brand=${ctx.brandId} 自${notesOldest}：拉取 ${result.fetched}，入库 ${result.upserted}`,
@@ -1391,9 +1413,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     };
     const dayOf = (v: unknown): Date =>
       new Date(`${str(v) || statDate}T00:00:00.000Z`);
-
+    // 平台日分区傍晚才出，接口对未出数的 statDate 会静默返回"截至最新可得分区"的
+    // 滚动窗口（行 date_key 全是旧日期）——必须校验当天分区是否真的拉到行，
+    // 否则早拉的 fetched>0 假成功会把该日永久锁死（2026-11-19 格力员工矩阵断档根因）
+    const statDay = new Date(`${statDate}T00:00:00.000Z`);
     let brandUpserted = 0;
     let staffUpserted = 0;
+    let capturedOnStatDate = 0;
     try {
       const targets = await this.staffMatrixTargetCodes(org);
       const brandRows = await this.staffMatrixRows('brandDetailList', statDate, targets, org);
@@ -1402,6 +1428,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         const brandUserId = str(m.get('brand_user_id'));
         if (!brandUserId) continue;
         const day = dayOf(m.get('date_key'));
+        if (day.getTime() === statDay.getTime()) capturedOnStatDate += 1;
         const data = {
           brandUserName: str(m.get('brand_user_name')) || brandUserId,
           accountType: str(m.get('account_type')) || null,
@@ -1440,6 +1467,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         const userId = str(m.get('user_id'));
         if (!userId) continue;
         const day = dayOf(m.get('date_key'));
+        if (day.getTime() === statDay.getTime()) capturedOnStatDate += 1;
         const data = {
           brandUserId: str(m.get('brand_user_id')) || '',
           brandUserName: str(m.get('brand_user_name')) || null,
@@ -1475,15 +1503,18 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         staffUpserted += 1;
       }
 
+      const partitionCaptured = capturedOnStatDate > 0;
       const result: SyncResult = {
         syncType: 'staff_matrix',
         statDate,
-        status: 'success',
+        status: partitionCaptured ? 'success' : 'partial',
         fetched: brandRows.length + staffRows.length,
         upserted: brandUpserted + staffUpserted,
         accountsAdded: 0,
         accountsRemoved: 0,
-        message: `brand=${brandUpserted} staff=${staffUpserted}`,
+        message: partitionCaptured
+          ? `brand=${brandUpserted} staff=${staffUpserted}`
+          : `brand=${brandUpserted} staff=${staffUpserted}; ${statDate} 分区未出数（窗口止于最新可得分区），不锁日待重拉`,
         brandId: org.brandId,
       };
       await this.prisma.sparkSyncLog.create({ data: result });
