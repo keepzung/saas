@@ -300,6 +300,17 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
     };
     let filteredAccounts: { id: number; nickname: string }[] | null = null;
+    // 格力(8)：仅监控账号内容（MCC 组织视图含全国经销商数千作者，查询层隐藏；同 noteFilters 口径）
+    if (brandId === 8) {
+      const scope = await this.greeAuthorScope();
+      noteWhere = {
+        ...noteWhere,
+        OR: [
+          { accountId: { in: scope.ids } },
+          { authorName: { in: scope.nicknames } },
+        ],
+      };
+    }
     if (accountTag.length || regionName) {
       filteredAccounts = await this.prisma.kosAccount.findMany({
         where: accountWhere,
@@ -2240,6 +2251,12 @@ export class KoxService {
       const scope = await this.mddAuthorScope();
       base.OR = [{ accountId: { in: scope.ids } }, { authorName: { in: scope.nicknames } }];
     }
+    // 格力(8)：仅监控账号的内容——MCC 组织为全国经销商大组织，笔记分析视图含全行业
+    // 数千作者（2026-11-20 实测 5,845 篇/3,031 作者，监控账号仅 660 篇），查询层隐藏非监控范围
+    if (Number(query.brandId) === 8) {
+      const scope = await this.greeAuthorScope();
+      base.OR = [{ accountId: { in: scope.ids } }, { authorName: { in: scope.nicknames } }];
+    }
     const where: Prisma.KoxNoteWhereInput = { ...base };
     if (query.noteType) where.noteType = query.noteType;
     // Morgandada：分类为动态打标（不入库），筛选在内存进行
@@ -2863,6 +2880,25 @@ export class KoxService {
       at: Date.now(),
     };
     this.mddScopeCache = scope;
+    return scope;
+  }
+
+  /** 格力(8) 监控账号范围（笔记/运营总览查询层过滤用；同 MDD 基线账号模式） */
+  private greeScopeCache: { ids: number[]; nicknames: string[]; at: number } | null = null;
+  private async greeAuthorScope(): Promise<{ ids: number[]; nicknames: string[] }> {
+    if (this.greeScopeCache && Date.now() - this.greeScopeCache.at < 5 * 60_000) {
+      return this.greeScopeCache;
+    }
+    const accs = await this.prisma.kosAccount.findMany({
+      where: { brandId: 8 },
+      select: { id: true, nickname: true },
+    });
+    const scope = {
+      ids: accs.map((a) => a.id),
+      nicknames: accs.map((a) => a.nickname).filter(Boolean),
+      at: Date.now(),
+    };
+    this.greeScopeCache = scope;
     return scope;
   }
 
