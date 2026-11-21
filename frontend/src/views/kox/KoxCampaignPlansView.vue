@@ -35,15 +35,6 @@
       </FilterTopbar>
     </template>
 
-    <a-alert
-      v-if="cookieValid === false && !isVw"
-      type="error"
-      show-icon
-      style="margin-bottom: 12px"
-      message="投放数据拉取异常，投放数据暂停更新"
-      description="数据断档期间历史数据仍可筛选，数据补齐后自动恢复实时展示。请联系管理员处理。"
-    />
-
     <a-card :bordered="false" class="overview-card" :body-style="{ padding: '16px' }">
       <div class="section-title">
         <span class="bar"></span>投流情况总览
