@@ -12,7 +12,8 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 
 const PERRY_ID = 6;
-const CHECK_PHONES = ['15221013391', '18082035029']; // 肖肖 / 张宇(批次)
+const BATCH_PHONES = ['18082035029']; // 张宇(门店批次, 只应出现在大众)
+const DUAL_PHONES = ['15221013391']; // 肖肖(Perry 同事, 应回时出现在大众+奕境两边)
 
 const psql = (sql) =>
   execSync(`sudo -u postgres psql saas_prod -tAc ${JSON.stringify(sql)}`)
@@ -46,19 +47,22 @@ async function main() {
   const phones7 = new Set(inBrand7.map((u) => u.phone));
   const phones4 = new Set(inBrand4.map((u) => u.phone));
 
-  const batchIn7 = CHECK_PHONES.filter((p) => phones7.has(p));
-  const batchIn4 = CHECK_PHONES.filter((p) => phones4.has(p));
+  const batchIn7 = BATCH_PHONES.filter((p) => phones7.has(p));
+  const batchIn4 = BATCH_PHONES.filter((p) => phones4.has(p));
+  const dualBoth = DUAL_PHONES.filter((p) => phones7.has(p) && phones4.has(p));
 
-  console.log(`奕境(brandId=7) 列表人数: ${inBrand7.length} (期望 119)`);
+  console.log(`奕境(brandId=7) 列表人数: ${inBrand7.length} (期望 120)`);
   console.log(`大众(brandId=4) 列表人数: ${inBrand4.length}`);
   console.log(`无参(旧并集行为) 列表人数: ${union.length}`);
-  console.log(`肖肖/张宇 在奕境列表: ${batchIn7.length ? `仍出现 ${batchIn7} => FAIL` : '不出现 => PASS'}`);
-  console.log(`肖肖/张宇 在大众列表: ${batchIn4.length === CHECK_PHONES.length ? '出现 => PASS' : `缺失 ${batchIn4} => FAIL`}`);
+  console.log(`批次(张宇) 在奕境列表: ${batchIn7.length ? `仍出现 => FAIL` : '不出现 => PASS'}`);
+  console.log(`批次(张宇) 在大众列表: ${batchIn4.length === BATCH_PHONES.length ? '出现 => PASS' : '缺失 => FAIL'}`);
+  console.log(`肖肖(双挂同事) 两边都在: ${dualBoth.length === DUAL_PHONES.length ? 'PASS' : 'FAIL'}`);
 
   const ok =
-    inBrand7.length === 119 &&
+    inBrand7.length === 120 &&
     batchIn7.length === 0 &&
-    batchIn4.length === CHECK_PHONES.length;
+    batchIn4.length === BATCH_PHONES.length &&
+    dualBoth.length === DUAL_PHONES.length;
   console.log(ok ? 'ALL PASS' : 'HAS FAILURES');
   process.exit(ok ? 0 : 1);
 }
