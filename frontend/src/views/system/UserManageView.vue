@@ -778,7 +778,7 @@ const fmtDateTime = (d) => (d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-');
 async function load() {
   loading.value = true;
   try {
-    const data = await getUsers();
+    const data = await getUsers({ brandId: auth.currentBrandId ?? undefined });
     rows.value = data.list ?? [];
   } catch (e) {
     message.error(e.message || '加载用户列表失败');

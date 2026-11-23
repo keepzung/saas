@@ -162,10 +162,13 @@ export class UserService {
     return build(null);
   }
 
-  async listUsers(operatorId: number) {
+  async listUsers(operatorId: number, brandId?: number) {
     const operatorRole = await this.assertOperator(operatorId);
     let where: Record<string, unknown> = {};
-    if (operatorRole !== 'ADMIN') {
+    if (brandId) {
+      // 按当前工作区过滤：只列该工作区成员（多工作区管理员在各工作区只见本区成员，跨区批次不串页）
+      where = { brandMembers: { some: { brandId } } };
+    } else if (operatorRole !== 'ADMIN') {
       // 项目管理员可见：自己创建的 ∪ 自己 ∪ 自己所在工作区的全部成员
       const myBrands = await this.prisma.brandMember.findMany({
         where: { userId: operatorId },

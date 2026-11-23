@@ -44,9 +44,13 @@ export class UserController {
   }
 
   @Get('manage/list')
-  manageList(@Req() req: Request) {
+  manageList(@Req() req: Request, @Query('brandId') brandId?: string) {
     const user = req.user as { id: number };
-    return this.userService.listUsers(user.id);
+    const bid = brandId ? Number(brandId) : NaN;
+    return this.userService.listUsers(
+      user.id,
+      Number.isInteger(bid) && bid > 0 ? bid : undefined,
+    );
   }
 
   @Post('manage')

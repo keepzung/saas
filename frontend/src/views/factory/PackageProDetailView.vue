@@ -247,8 +247,8 @@ const openDispatch = async (ids) => {
   dispatchIds.value = ids;
   dispatchUser.value = null;
   if (!userOptions.value.length) {
-    const res = await getUsers();
-    userOptions.value = (res ?? []).map((u) => ({ value: u.id, label: u.nickname ?? u.phone ?? `用户${u.id}` }));
+    const res = await getUsers({ brandId: brandId.value ?? undefined });
+    userOptions.value = ((res?.list ?? res) ?? []).map((u) => ({ value: u.id, label: u.nickname ?? u.phone ?? `用户${u.id}` }));
   }
   dispatchOpen.value = true;
 };

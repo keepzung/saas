@@ -1,6 +1,6 @@
 import request from './request';
 
-export const getUsers = () => request.get('/user/manage/list');
+export const getUsers = (params) => request.get('/user/manage/list', { params });
 
 export const createUser = (data) => request.post('/user/manage', data);
 
