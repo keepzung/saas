@@ -44,7 +44,8 @@
             </a-tag>
           </template>
           <template v-else-if="column.key === 'modules'">
-            <a-tag v-if="isAllModules(record)" color="green">全部模块</a-tag>
+            <a-tag v-if="record.role === 'ADMIN'" color="green">全部模块</a-tag>
+            <a-tag v-else-if="!(record.moduleIds ?? []).length">未分配</a-tag>
             <a-tooltip v-else :title="moduleNames(record)">
               <a-tag color="orange">{{ (record.moduleIds ?? []).length }} 个模块</a-tag>
             </a-tooltip>
@@ -129,7 +130,7 @@
           v-if="!editing"
           type="info"
           show-icon
-          message="账号创建后，可在列表「分配权限」中随时调整可见模块与所属品牌"
+          message="普通用户默认开通「内容创作任务」的任务列表 / 任务详情（不含派发新任务）；其余模块与所属品牌可在「分配权限」中调整"
           style="margin-bottom: 16px"
         />
         <a-button type="primary" block :loading="saving" @click="save">
@@ -152,7 +153,7 @@
         <a-form-item>
           <template #label>
             可见模块
-            <span class="muted small">（不勾选 = 全部可见）</span>
+            <span class="muted small">（不勾选 = 不授权，登录后无业务页面）</span>
           </template>
           <div class="module-tree">
             <a-tree
@@ -751,9 +752,6 @@ const moduleTreeData = computed(() => {
   };
   return build(auth.moduleTree);
 });
-
-const isAllModules = (record) =>
-  record.role === 'ADMIN' || (record.moduleIds ?? []).length === 0;
 
 const moduleNames = (record) =>
   (record.moduleIds ?? [])

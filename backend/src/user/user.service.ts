@@ -211,6 +211,19 @@ export class UserService {
     return 'kos_operator';
   }
 
+  /** 普通用户新建默认模块：内容创作任务 → 任务列表 + 任务详情（不含派发新任务），按 path 解析（节点缺失时回退为空 = 严格分配制） */
+  private async defaultSalesModuleIds(): Promise<number[]> {
+    const nodes = await this.prisma.moduleNode.findMany({
+      where: {
+        path: {
+          in: ['/kox_task/content-task/task-list', '/kox_task/content-task/task-detail'],
+        },
+      },
+      select: { id: true },
+    });
+    return nodes.map((n) => n.id);
+  }
+
   async createUser(operatorId: number, dto: CreateUserDto) {
     const operatorRole = await this.assertOperator(operatorId);
     if (operatorRole !== 'ADMIN' && dto.role === 'ADMIN') {
@@ -245,7 +258,9 @@ export class UserService {
       return { ...adopted, adopted: true };
     }
 
-    // 未显式指定模块 → moduleIds 为空 = 页面空白（严格分配制：需管理员在「分配权限」中授权后才可见业务页面）
+    // 普通用户未显式指定模块 → 默认仅授「内容创作任务」的任务列表/任务详情；其余角色未指定 = 空（严格分配制：需管理员在「分配权限」中授权后才可见业务页面）
+    const moduleIds =
+      dto.moduleIds ?? (dto.role === 'SALES' ? await this.defaultSalesModuleIds() : []);
     const user = await this.prisma.user.create({
       data: {
         phone: dto.phone,
@@ -254,7 +269,7 @@ export class UserService {
         role: dto.role,
         adminFlag: dto.role === 'ADMIN' ? 1 : 0,
         companyId: 1,
-        moduleIds: dto.moduleIds ?? [],
+        moduleIds,
         createdById: operatorId,
       },
       select: USER_SELECT,
