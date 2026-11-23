@@ -2257,6 +2257,13 @@ export class KoxService {
       const scope = await this.greeAuthorScope();
       base.OR = [{ accountId: { in: scope.ids } }, { authorName: { in: scope.nicknames } }];
     }
+    // 东风(7)/荣威(2)/大众(4)：仅底表账号的内容——syncNotes 全来源，聚光笔记报表会混入
+    // 组织内非底表作者（2026-11-23 东风实测混入 4 篇个人提车笔记：沐予崽/喵苗淼妙等），
+    // 与 MDD/格力同口径，查询层隐藏（不删库）
+    if ([2, 4, 7].includes(Number(query.brandId))) {
+      const scope = await this.baselineAuthorScope(Number(query.brandId));
+      base.OR = [{ accountId: { in: scope.ids } }, { authorName: { in: scope.nicknames } }];
+    }
     const where: Prisma.KoxNoteWhereInput = { ...base };
     if (query.noteType) where.noteType = query.noteType;
     // Morgandada：分类为动态打标（不入库），筛选在内存进行
@@ -2899,6 +2906,26 @@ export class KoxService {
       at: Date.now(),
     };
     this.greeScopeCache = scope;
+    return scope;
+  }
+
+  /** 通用基线账号范围（brandId → KosAccount 全量；笔记查询层过滤非底表作者用，同 MDD/格力模式） */
+  private authorScopeCache = new Map<number, { ids: number[]; nicknames: string[]; at: number }>();
+  private async baselineAuthorScope(brandId: number): Promise<{ ids: number[]; nicknames: string[] }> {
+    const hit = this.authorScopeCache.get(brandId);
+    if (hit && Date.now() - hit.at < 5 * 60_000) {
+      return hit;
+    }
+    const accs = await this.prisma.kosAccount.findMany({
+      where: { brandId },
+      select: { id: true, nickname: true },
+    });
+    const scope = {
+      ids: accs.map((a) => a.id),
+      nicknames: accs.map((a) => a.nickname).filter(Boolean),
+      at: Date.now(),
+    };
+    this.authorScopeCache.set(brandId, scope);
     return scope;
   }
 
