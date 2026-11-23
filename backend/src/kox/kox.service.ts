@@ -2299,7 +2299,8 @@ export class KoxService {
     }
     if (where.OR) andConds.push({ OR: where.OR as Prisma.KoxNoteWhereInput[] });
     if (andConds.length) {
-      where.AND = [...(where.AND ?? []), ...andConds];
+      const prevAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+      where.AND = [...prevAnd, ...andConds];
       delete where.OR;
     }
     return { where, base, start, end };
