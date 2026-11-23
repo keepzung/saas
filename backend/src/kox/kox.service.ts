@@ -2274,27 +2274,32 @@ export class KoxService {
     }
     if (query.keyword)
       where.title = { contains: query.keyword, mode: 'insensitive' };
+    // 作者搜索 / 账号标签 / 品牌作者范围（base.OR）统一 AND 合并——作者搜索若直接覆盖
+    // where.OR 会绕过 b5/b8/b2/b4/b7 的基线范围过滤（2026-11-23 堵口）
+    const andConds: Prisma.KoxNoteWhereInput[] = [];
     if (query.author)
-      where.OR = [
-        { authorName: { contains: query.author, mode: 'insensitive' } },
-        { account: { nickname: { contains: query.author, mode: 'insensitive' } } },
-      ];
+      andConds.push({
+        OR: [
+          { authorName: { contains: query.author, mode: 'insensitive' } },
+          { account: { nickname: { contains: query.author, mode: 'insensitive' } } },
+        ],
+      });
     if (query.accountTag || query.regionName) {
       const scoped = { ...(query.accountTag ? { accountTag: { in: query.accountTag.split(',').map((t) => t.trim()).filter(Boolean) } } : {}), ...(query.regionName ? { regionName: query.regionName } : {}) };
       const accs = await this.prisma.kosAccount.findMany({
         where: scoped,
         select: { id: true, nickname: true },
       });
-      const and: Prisma.KoxNoteWhereInput[] = [
-        {
-          OR: [
-            { account: { id: { in: accs.map((a) => a.id) } } },
-            { authorName: { in: accs.map((a) => a.nickname) } },
-          ],
-        },
-      ];
-      if (where.OR) and.push({ OR: where.OR as Prisma.KoxNoteWhereInput[] });
-      where.AND = and;
+      andConds.push({
+        OR: [
+          { account: { id: { in: accs.map((a) => a.id) } } },
+          { authorName: { in: accs.map((a) => a.nickname) } },
+        ],
+      });
+    }
+    if (where.OR) andConds.push({ OR: where.OR as Prisma.KoxNoteWhereInput[] });
+    if (andConds.length) {
+      where.AND = [...(where.AND ?? []), ...andConds];
       delete where.OR;
     }
     return { where, base, start, end };
