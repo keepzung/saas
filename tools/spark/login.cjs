@@ -21,6 +21,16 @@ const account = env[TAG ? `SPARK_ACCOUNT_${TAG.toUpperCase()}` : 'SPARK_ACCOUNT'
 const password =
   env[TAG ? `SPARK_PASSWORD_${TAG.toUpperCase()}` : 'SPARK_PASSWORD'] || env.SPARK_PASSWORD;
 
+// 品牌身份档案（防串号三道闸的源头）：label 用于窗口标题/横幅/预告弹窗，
+// expectedUser 与 state 里 localStorage.userName 对账——历史串号事故即userName混淆（10-26 两次）
+const BRANDS = {
+  RW:   { label: '荣威 RW · brand2',     expectedUser: '原山互创' },
+  MDD:  { label: 'MDD摩根 MDD · brand5', expectedUser: 'mkt数据' },
+  DF:   { label: '东风奕境 DF · brand7', expectedUser: 'MKT数据' },
+  GREE: { label: '格力 GREE · brand8',   expectedUser: 'MKT数据' },
+};
+const BRAND = BRANDS[TAG.toUpperCase()] || null;
+
 const dumpPage = async (page, label) => {
   console.log(`\n===== [${label}] URL: ${page.url()}`);
   console.log(`TITLE: ${await page.title()}`);
@@ -52,6 +62,39 @@ const dumpPage = async (page, label) => {
 
 (async () => {
   const headless = process.env.HEADLESS !== '0';
+  // 防串号第一道：登录窗口弹出前的置顶预告（品牌+账号大字，点确定才开窗口），仅例程有头模式触发
+  if (BRAND && !headless && process.env.ANNOUNCE === '1') {
+    const { spawnSync } = require('child_process');
+    const msg = [
+      `即将弹出【${BRAND.label}】的登录窗口`,
+      '',
+      `自动填入账号：${account || '(未配置)'}`,
+      '账密会自动填好，只需要完成滑块验证',
+      '如需手动输入，请务必核对账号后缀，勿输入其他品牌账密！',
+      '',
+      '确认这是目标品牌后，点「确定」继续',
+    ].join('\n');
+    spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-STA',
+        '-Command',
+        "Add-Type -AssemblyName System.Windows.Forms|Out-Null;" +
+          '$o=New-Object System.Windows.Forms.Form;$o.TopMost=$true;' +
+          "[void][System.Windows.Forms.MessageBox]::Show($o,$env:BRANDGUARD_MSG,$env:BRANDGUARD_TITLE,'OK','Warning','Button1',0)",
+      ],
+      {
+        env: {
+          ...process.env,
+          BRANDGUARD_MSG: msg,
+          BRANDGUARD_TITLE: `每日登录例程 · ${BRAND.label}`,
+        },
+        stdio: 'ignore',
+        timeout: 120000,
+      },
+    );
+  }
   // NO_PROXY=1: 本机系统代理挂掉时绕过（mcc/xhs 国内直连可达）
   const browser = await chromium.launch({
     headless,
@@ -64,6 +107,31 @@ const dumpPage = async (page, label) => {
     locale: 'zh-CN',
   });
   const page = await ctx.newPage();
+
+  // 防串号第二道：窗口标题+置顶红条横幅写上品牌和账号（每个导航后自动重挂，页面自己改标题也会被拨回来）
+  if (BRAND) {
+    await ctx.addInitScript(
+      ({ label, acct }) => {
+        const apply = () => {
+          try {
+            document.title = `【${label}】此窗口只允许本品牌账密`;
+            if (!document.getElementById('brand-guard-banner')) {
+              const el = document.createElement('div');
+              el.id = 'brand-guard-banner';
+              el.style.cssText =
+                'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#d62828;color:#fff;' +
+                'font:700 15px/32px system-ui,sans-serif;text-align:center;pointer-events:none';
+              el.textContent = `当前窗口：${label} ｜ 账号(已自动填入)：${acct} ｜ 只需完成滑块；手输前请核对账号后缀！`;
+              (document.body || document.documentElement).appendChild(el);
+            }
+          } catch (e) {}
+        };
+        apply();
+        setInterval(apply, 800);
+      },
+      { label: BRAND.label, acct: account || '' },
+    );
+  }
 
   console.log('[*] opening mcc.xiaohongshu.com ...');
   await page.goto('https://mcc.xiaohongshu.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -180,6 +248,25 @@ const dumpPage = async (page, label) => {
     await ctx.storageState({ path: STATE_FILE });
     await page.screenshot({ path: path.join(STATE_DIR, '04-logged-in.png') });
     console.log(`\n[OK] 登录成功${TAG ? `（tag=${TAG}）` : ''}，state 已保存到 ${path.relative(__dirname, STATE_FILE)}`);
+    // 防串号第三道：登录完成立刻对账身份（state 里 localStorage.userName vs 品牌预期值）
+    try {
+      const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      let userName = '';
+      for (const o of st.origins || [])
+        for (const kv of o.localStorage || [])
+          if (kv.name === 'userName') userName = kv.value;
+      if (BRAND) {
+        if (userName && userName !== BRAND.expectedUser) {
+          console.error(`\n❌❌ [串号警报] 当前登录身份="${userName}"，但本窗口是【${BRAND.label}】(预期="${BRAND.expectedUser}")！`);
+          console.error('❌❌ 本次不会推送生产库（push-state-to-prod 会拦截）。请回到正确品牌的登录窗口重新登录。');
+          process.exitCode = 2;
+        } else if (userName) {
+          console.log(`[身份对账] ${TAG}: ${userName} ✓`);
+        }
+      }
+    } catch (e) {
+      console.log('[身份对账] 读取失败(忽略):', e.message);
+    }
     await dumpPage(page, 'post-login');
   } else {
     await page.screenshot({ path: path.join(STATE_DIR, '04-not-logged.png') });

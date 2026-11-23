@@ -1,52 +1,64 @@
-rem WARNING: this file MUST stay GBK/ANSI encoded - do NOT resave as UTF-8 (cmd.exe would mangle Chinese lines)
+rem === daily-login.cmd - daily manual login routine (PURE ASCII on purpose) ===
+rem The old GBK Chinese version was destroyed by sed on 11-15 (4 nights of broken logins).
+rem ASCII bytes are identical in GBK and UTF-8, so this file can never be mangled by encoding again.
+rem
+rem Order: partner -> pro -> RW(brand2) -> MDD(brand5) -> DF(brand7) -> GREE(brand8)
+rem Before each MCC login window opens, a topmost confirm popup shows the brand + account.
+rem Each login window shows a RED brand banner and its window title carries the brand name.
+rem Credentials are auto-filled - a human only needs to finish the slider.
+rem After login, login.cjs verifies the account identity, and push-state-to-prod re-checks it
+rem before pushing to prod: a wrong-brand login is blocked and never reaches production.
 @echo off
-rem Ã¿ÈÕÊÖ¹¤µÇÂ¼Àı³Ì (½¨ÒéÃ¿Ìì 21:00 ×óÓÒÔËĞĞ, ÓÉµ±ÖµÈËÔ±Ö´ĞĞ; À­ÊıÔÚÁè³¿ 04:00, Íí¼äµÇÂ¼¿É±£»á»° 7h Áä¸²¸ÇÀ­Êı´°¿Ú)
-rem Ë³Ğò: partner -> ×¨ÒµºÅ -> ÈÙÍş -> MDD -> ¶«·ç -> ¸ñÁ¦
-rem »á»°»¹»î×ÅÊ±Ç°Á½²½»á¾²Ä¬Í¨¹ı; ËÀÁË²Åµ¯´°µÈ»¬¿é/É¨Âë
-rem MCC ËÄ¸öÕËºÅ»á×Ô¶¯ÌîÕËÃÜ, Ö»ĞèÒªÔÚµ¯»¬¿éÊ±ÍÏÒ»ÏÂ; ²»ÒªĞŞ¸ÄÔ¤ÌîµÄÕËºÅÃÜÂë
-rem µÇÂ¼Íê³Éºó×Ô¶¯°Ñ cookie ÍÆËÍÉú²ú¿â
+setlocal
 cd /d "%~dp0"
 set "NODE=C:\Program Files\nodejs\node.exe"
 set HEADLESS=0
+set ANNOUNCE=1
 
-echo [1/6] partner (ÌØË¹À­¶¢ÅÌ) ...
+if defined SELFTEST (
+  echo SELFTEST OK - syntax fine. Steps: partner, pro, RW, MDD, DF, GREE
+  exit /b 0
+)
+
+echo [1/6] partner (tesla watch) - silent if session is alive ...
 "%NODE%" partner-keepalive-local.cjs
 if errorlevel 2 "%NODE%" partner-keepalive-local.cjs --interactive
 
-echo [2/6] ×¨ÒµºÅ (KOS/ÏßË÷) ...
+echo [2/6] pro (KOS / leads) - silent if session is alive ...
 "%NODE%" pro-keepalive-local.cjs
 if errorlevel 2 "%NODE%" pro-keepalive-local.cjs --interactive
 
-set TAG=RW
-set BRAND=2
-echo [3/6] ÈÙÍş MCC ...
-"%NODE%" login.cjs
-"%NODE%" push-state-to-prod.cjs RW 2
+echo [3/6] Rongwei - RW, brand 2 ...
+call :dologin RW 2
 
-set TAG=MDD
-set BRAND=5
-echo [4/6] MDD MCC ...
-"%NODE%" login.cjs
-"%NODE%" push-state-to-prod.cjs MDD 5
+echo [4/6] MDD - MorganData, brand 5 ...
+call :dologin MDD 5
 
-set TAG=DF
-set BRAND=7
-echo [5/6] ¶«·ç MCC ...
-"%NODE%" login.cjs
-"%NODE%" push-state-to-prod.cjs DF 7
+echo [5/6] Dongfeng - DF, brand 7 ...
+call :dologin DF 7
 
-set TAG=GREE
-set BRAND=8
-rem ¸ñÁ¦ MCC ×éÖ¯È¨ÏŞÎ´¿ªÍ¨, Ä¬ÈÏÌø¹ı; È¨ÏŞ¿ªÍ¨ºóÉ¾³ıÏÂÃæÕâĞĞ rem set SKIP_GREE=1É»Ö¸´
-set SKIP_GREE=1
 if defined SKIP_GREE (
-  echo [6/6] ¸ñÁ¦ MCC - È¨ÏŞÎ´¿ªÍ¨, Ìø¹ı
+  echo [6/6] Gree skipped - SKIP_GREE is set
 ) else (
-  echo [6/6] ¸ñÁ¦ MCC ...
-  "%NODE%" login.cjs
-  "%NODE%" push-state-to-prod.cjs GREE 8
+  echo [6/6] Gree - GREE, brand 8 ...
+  call :dologin GREE 8
 )
 
-echo ===== Ã¿ÈÕµÇÂ¼Àı³ÌÍê³É, cookie ÒÑ×Ô¶¯ÍÆËÍÉú²ú¿â =====
+echo ===== daily login routine done, cookies pushed to prod =====
 pause
+exit /b 0
 
+:dologin
+rem %~1 = TAG, %~2 = brandId
+"%NODE%" login.cjs
+if errorlevel 1 (
+  echo *** [%~1] login FAILED or identity mismatch - push SKIPPED to avoid pushing a stale/wrong cookie ***
+  pause
+  exit /b 0
+)
+"%NODE%" push-state-to-prod.cjs %~1 %~2
+if errorlevel 1 (
+  echo *** [%~1] push FAILED or identity-guard blocked it - read the red lines above ***
+  pause
+)
+exit /b 0
