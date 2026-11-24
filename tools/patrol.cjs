@@ -515,9 +515,12 @@ async function main() {
       }
 
       // ⑤ 同步日志异常: 近24h 同一(syncType,statDate) 成功>5次 = 锁日误判签名(每小时白拉全量)
+      //    例外: keepalive(设计即10分钟一条); brand2 notes(滚动重拉设计,每小时一条)
+      const dupWhere = { brandId, status: 'success', createdAt: { gte: ago(1) }, syncType: { not: 'keepalive' } };
+      if (brandId === 2) dupWhere.syncType = { notIn: ['keepalive', 'notes'] };
       const dup = await p.sparkSyncLog.groupBy({
         by: ['syncType', 'statDate'],
-        where: { brandId, status: 'success', createdAt: { gte: ago(1) } },
+        where: dupWhere,
         _count: { _all: true },
       });
       const worst = dup.filter((d) => d._count._all > 5).sort((a, b) => b._count._all - a._count._all)[0];
