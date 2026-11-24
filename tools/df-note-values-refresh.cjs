@@ -109,7 +109,7 @@ async function pullAll(cookie) {
     // 封面：first_file_id（藏在 targetList[].linkVos 里）→ xhscdn 直链，压到 480 宽。
     // 笔记页 og:image 抓取已被风控/登录墙挡死，直链是唯一稳定的封面来源
     const fid = pickDeep(r, 'first_file_id');
-    const cover = fid && !found.coverUrl ? `https://sns-img-hw.xhscdn.com/${fid}?imageView2/2/w/480` : undefined;
+    const cover = fid && !found.coverUrl ? `https://sns-img-hw.xhscdn.com/${fid}?imageView2/2/w/480/format/jpeg` : undefined;
     await p.koxNote.update({
       where: { id: found.id },
       data: { ...data, ...(freshUrl ? { noteUrl: freshUrl } : {}), ...(cover ? { coverUrl: cover } : {}) },

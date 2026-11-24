@@ -954,9 +954,16 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         statDate: day,
         rawJson: r as Prisma.InputJsonValue,
       };
+      // 封面=报表自带 first_file_id（藏于 targetList[].linkVos）→ xhscdn 直链。
+      // og:image 抓笔记页已被登录墙/风控挡死，直链是唯一稳定来源；format/jpeg 归一化
+      // HEIC/PNG（部分 UHDR 资源原格式浏览器不能渲染）。只在新笔记入库时写，不动存量封面
+      const coverFid = String(pick('first_file_id') ?? pickLink('first_file_id') ?? '').trim();
+      const coverUrl = coverFid
+        ? `https://sns-img-hw.xhscdn.com/${coverFid}?imageView2/2/w/480/format/jpeg`
+        : null;
       await this.prisma.koxNote.upsert({
         where: { noteId },
-        create: { noteId, ...data },
+        create: { noteId, ...data, ...(coverUrl ? { coverUrl } : {}) },
         // 星火报表无正文（content 恒 null），更新时跳过 content 以免覆盖已采集的正文
         update: { ...data, content: undefined },
       });
