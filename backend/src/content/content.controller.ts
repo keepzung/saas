@@ -44,6 +44,16 @@ export class ContentController {
     return this.contentService.createProduct(dto, brandId ? Number(brandId) : 1);
   }
 
+  // 别名路由: 部分浏览器广告拦截插件/办公网设备会按 URL 关键字 'products' 拦截 POST
+  // (格力 2026-11-24 实测浏览器新增产品 POST 从未到达 nginx, GET 正常), 提供无关键字路径绕过
+  @Post('content-pro/product-node')
+  createProductAlias(
+    @Body() dto: ProductDto,
+    @Query('brandId') brandId?: string,
+  ) {
+    return this.contentService.createProduct(dto, brandId ? Number(brandId) : 1);
+  }
+
   @Post('products/import')
   importProducts(
     @Body() dto: ImportProductsDto,

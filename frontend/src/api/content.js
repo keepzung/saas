@@ -3,7 +3,7 @@ import request from './request';
 export const getProducts = (params) => request.get('/products', { params });
 
 export const createProduct = (data, params) =>
-  request.post('/products', data, { params });
+  request.post('/content-pro/product-node', data, { params });
 
 export const importProducts = (data, params) =>
   request.post('/products/import', data, { params });
