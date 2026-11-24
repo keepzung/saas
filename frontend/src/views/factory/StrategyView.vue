@@ -55,14 +55,14 @@
         <a-form-item label="策略描述">
           <a-textarea v-model:value="form.description" :rows="3" placeholder="一句话描述这个策略面向什么客户、讲什么重点" />
         </a-form-item>
-        <a-form-item label="人设">
-          <a-select v-model:value="form.persona" mode="tags" placeholder="回车添加，如：从业多年的老销售" />
+        <a-form-item label="人设（每行一个）">
+          <a-textarea v-model:value="form.persona_text" :rows="2" placeholder="每行一个人设，如：从业多年的老销售" />
         </a-form-item>
-        <a-form-item label="卖点（生成文章时必须覆盖）">
-          <a-select v-model:value="form.selling_points" mode="tags" placeholder="回车添加卖点" />
+        <a-form-item label="卖点（生成文章时必须覆盖，每行一个）">
+          <a-textarea v-model:value="form.selling_points_text" :rows="3" placeholder="每行一个卖点" />
         </a-form-item>
-        <a-form-item label="目标受众">
-          <a-select v-model:value="form.audience" mode="tags" placeholder="回车添加受众" />
+        <a-form-item label="目标受众（每行一个）">
+          <a-textarea v-model:value="form.audience_text" :rows="2" placeholder="每行一个目标受众" />
         </a-form-item>
         <a-form-item label="内容方向">
           <div v-for="(d, i) in form.content_directions" :key="i" class="dir-row">
@@ -120,6 +120,9 @@ const emptyForm = () => ({
   persona: [],
   selling_points: [],
   audience: [],
+  persona_text: '',
+  selling_points_text: '',
+  audience_text: '',
   content_directions: [],
   enabled: true,
 });
@@ -139,6 +142,9 @@ const openForm = (s) => {
         persona: [...s.persona],
         selling_points: [...s.selling_points],
         audience: [...s.audience],
+        persona_text: (s.persona ?? []).join('\n'),
+        selling_points_text: (s.selling_points ?? []).join('\n'),
+        audience_text: (s.audience ?? []).join('\n'),
         content_directions: s.content_directions.map((d) => ({ ...d })),
         enabled: s.enabled,
       }
@@ -151,6 +157,11 @@ const save = async () => {
     message.warning('请填写策略名称');
     return;
   }
+  // 多行文本 → 数组（兼容中文输入法：不再依赖回车逐条添加）
+  const toLines = (t) => String(t ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+  form.value.persona = toLines(form.value.persona_text);
+  form.value.selling_points = toLines(form.value.selling_points_text);
+  form.value.audience = toLines(form.value.audience_text);
   saving.value = true;
   try {
     if (form.value.id) {
