@@ -9,6 +9,8 @@ import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
 import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.client';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
 import { BrandProfilesService } from '../brand/brand-profiles.service';
+import { MccConnector } from '../ingest/connectors/mcc.connector';
+import { targetRowMap } from '../ingest/target-row';
 
 /** 特斯拉官号投流行识别：partner 子账户名含「官号」（与 sync-juguang.cjs 官号枚举过滤一致） */
 const OFFICIAL_BRAND_USER_KEYWORD = '官号';
@@ -61,6 +63,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly orgs: SparkOrgRegistry,
     private readonly brandProfiles: BrandProfilesService,
+    private readonly mcc: MccConnector,
   ) {}
 
   onModuleInit() {
@@ -995,21 +998,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     const org = ctx ?? (await this.orgs.forBrand());
     if (!org) throw new Error('无可用星火组织配置');
     const statDate = date ?? this.syncDate();
-    const num = (v: unknown): number => {
-      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
-      const s = String(v ?? '').replace(/,/g, '').trim();
-      const n = Number(s);
-      return Number.isFinite(n) ? Math.round(n) : 0;
-    };
-    const str = (v: unknown): string => String(v ?? '').trim();
-    const rows: Record<string, unknown>[] = [];
-    let total = 0;
-    for (let pageNo = 1; pageNo <= 40; pageNo++) {
-      const data = await this.api.clueAnalysisList({ start: statDate, end: statDate, timeDim: 'date_key', pageNo, pageSize: 200 }, org);
-      total = data.total;
-      rows.push(...data.rows);
-      if (rows.length >= total || !data.rows.length) break;
-    }
+    // 拉取+标准化在 MCC 连接器(P4);此处只做持久化与改名检测
+    const { rows, total } = await this.mcc.pullClueAnalysis(org, statDate);
     let upserted = 0;
     // 改名检测：线索分析的 sub_user_name 是平台当前昵称，UID 命中账号但名字不一致 → 记入同步日志
     const accountsC = await this.prisma.kosAccount.findMany({
@@ -1020,25 +1010,24 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       accountsC.filter((a) => /^[0-9a-f]{24}$/.test(a.authorId)).map((a) => [a.authorId, a]),
     );
     const renamesC = new Map<string, string>();
-    for (const r of rows) {
-      const m = this.staffRowMap(r);
-      const subUserId = str(m.get('sub_user_id'));
-      const dayStr = str(m.get('date_key')) || statDate;
+    for (const row of rows) {
+      const subUserId = row.subUserId;
+      const dayStr = row.day || statDate;
       if (!subUserId) continue;
       const accC = byAuthorUidC.get(subUserId);
-      const subUserName = str(m.get('sub_user_name'));
+      const subUserName = row.subUserName ?? '';
       if (accC && accC.nickname && subUserName && accC.nickname !== subUserName && !renamesC.has(subUserId)) {
         renamesC.set(subUserId, `${accC.nickname}→${subUserName}`);
       }
       const day = new Date(`${dayStr}T00:00:00.000Z`);
       const data = {
-        subUserName: str(m.get('sub_user_name')) || null,
-        proUserId: str(m.get('pro_user_id')) || null,
-        proUserName: str(m.get('pro_user_name')) || null,
-        clueCnt: num(m.get('new_clue_cnt')),
-        adsClueCnt: num(m.get('new_ads_clue_cnt')),
-        natureClueCnt: num(m.get('new_nature_clue_cnt')),
-        leadsUserCnt: num(m.get('leads_user_cnt')),
+        subUserName: row.subUserName,
+        proUserId: row.proUserId,
+        proUserName: row.proUserName,
+        clueCnt: row.clueCnt,
+        adsClueCnt: row.adsClueCnt,
+        natureClueCnt: row.natureClueCnt,
+        leadsUserCnt: row.leadsUserCnt,
       };
       await this.prisma.clueAnalysisDaily.upsert({
         where: { brandId_day_subUserId: { brandId: org.brandId, day, subUserId } },
@@ -1074,41 +1063,27 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     if (!org) throw new Error('无可用星火组织配置');
     const statDate = date ?? this.syncDate();
     const lookbackDays = 7;
-    const num = (v: unknown): number => {
-      if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
-      const s = String(v ?? '').replace(/,/g, '').trim();
-      const n = Number(s);
-      return Number.isFinite(n) ? Math.round(n) : 0;
-    };
-    const str = (v: unknown): string => String(v ?? '').trim();
     const winStart = new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - (lookbackDays - 1) * 86400000)
       .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-    const rows: Record<string, unknown>[] = [];
-    let total = 0;
-    for (let pageNo = 1; pageNo <= 40; pageNo++) {
-      const data = await this.api.clueAcqToolList({ start: winStart, end: statDate, timeDim: 'date_key', pageNo, pageSize: 200 }, org);
-      total = data.total;
-      rows.push(...data.rows);
-      if (rows.length >= total || !data.rows.length) break;
-    }
+    // 拉取+标准化在 MCC 连接器(P4);此处只做持久化
+    const { rows } = await this.mcc.pullClueAcqTool(org, winStart, statDate);
     let upserted = 0;
-    for (const r of rows) {
-      const m = this.staffRowMap(r);
-      const subUserId = str(m.get('pro_user_id'));
-      const dayStr = str(m.get('date_key'));
+    for (const row of rows) {
+      const subUserId = row.subUserId;
+      const dayStr = row.day;
       if (!subUserId || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) continue;
       const day = new Date(`${dayStr}T00:00:00.000Z`);
       const data = {
-        subUserName: str(m.get('pro_user_name')) || null,
-        consultCnt: num(m.get('is_consult')),
-        chatCnt: num(m.get('is_chat')),
-        msgLeads: num(m.get('is_msg_leads')),
-        serviceCardLeads: num(m.get('is_service_card_leads')),
-        wecomCardLeads: num(m.get('is_qw_add_leads')),
-        bookingLeads: num(m.get('is_book_comp_leads')),
-        landingPageLeads: num(m.get('is_landing_page_leads')),
-        wechatCopyLeads: num(m.get('is_wechat_leads')),
-        tradeCardLeads: num(m.get('is_app_card_leads')),
+        subUserName: row.subUserName,
+        consultCnt: row.consultCnt,
+        chatCnt: row.chatCnt,
+        msgLeads: row.msgLeads,
+        serviceCardLeads: row.serviceCardLeads,
+        wecomCardLeads: row.wecomCardLeads,
+        bookingLeads: row.bookingLeads,
+        landingPageLeads: row.landingPageLeads,
+        wechatCopyLeads: row.wechatCopyLeads,
+        tradeCardLeads: row.tradeCardLeads,
       };
       await this.prisma.clueAcqToolDaily.upsert({
         where: { brandId_day_subUserId: { brandId: org.brandId, day, subUserId } },
@@ -1125,7 +1100,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       upserted,
       accountsAdded: 0,
       accountsRemoved: 0,
-      message: `total=${total}, window=${winStart}~${statDate}`,
+      message: `total=${rows.length}, window=${winStart}~${statDate}`,
       brandId: org.brandId,
     };
     await this.prisma.sparkSyncLog.create({ data: result });
@@ -1285,20 +1260,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
   /** 视图行 → targetCode 映射（兼容 targetList/targetVos 数组与平铺对象两种行结构） */
   private staffRowMap(r: Record<string, unknown>): Map<string, unknown> {
-    const m = new Map<string, unknown>();
-    const list = Array.isArray(r.targetList)
-      ? (r.targetList as { targetCode?: string; targetValue?: unknown; targetOriginValue?: unknown; targetDownloadValue?: unknown }[])
-      : Array.isArray(r.targetVos)
-        ? (r.targetVos as { targetCode?: string; targetValue?: unknown; targetOriginValue?: unknown; targetDownloadValue?: unknown }[])
-        : [];
-    for (const t of list ?? []) {
-      const v = t.targetValue ?? t.targetOriginValue ?? t.targetDownloadValue;
-      if (v != null && v !== '') m.set(String(t.targetCode), v);
-    }
-    for (const [k, v] of Object.entries(r)) {
-      if (k !== 'targetList' && k !== 'targetVos' && v != null && v !== '') m.set(k, v);
-    }
-    return m;
+    // 抽到 ingest/target-row.ts 共享(MCC 连接器同用);此处委托保持原调用点不变
+    return targetRowMap(r);
   }
 
   /** 员工矩阵视图分页拉取（7 天窗口锚定 statDate；行按自身 date_key 落库）。
