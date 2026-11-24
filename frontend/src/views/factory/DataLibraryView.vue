@@ -228,7 +228,8 @@ const confirmAdd = async () => {
     }
     expandedKeys.value = (treeNodes.value ?? []).flatMap((n) => [n.key, ...(n.children ?? []).map((c) => c.key)]);
   } catch (e) {
-    message.error(e?.response?.data?.msg ?? '新增失败');
+    const status = e?.response?.status;
+    message.error(e?.response?.data?.msg ?? `新增失败${status ? `（HTTP ${status}）` : ''}${e?.message && !e?.response ? `：${e.message}` : ''}`);
   } finally {
     addSaving.value = false;
   }
