@@ -19,7 +19,7 @@ for (const l of fs.readFileSync(path.join(BACKEND_DIR, '.env'), 'utf8').split(/\
 }
 const p = new PrismaClient();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
-const argOf = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const argOf = (k, d) => { const i = process.argv.indexOf(k); if (i > -1) return process.argv[i + 1]; const eq = process.argv.find((a) => a.startsWith(k + '=')); return eq ? eq.slice(k.length + 1) : d; };
 const BRAND = Number(argOf('--brand', '7'));
 // 与 brand-profiles.ts notes.noteSources 对齐(独立脚本不引 TS,改动需两处同步)
 const NOTE_SOURCES = { 5: ['员工笔记'] };
