@@ -15,11 +15,15 @@ import {
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SparkService } from './spark.service';
+import { BrandProfilesService } from '../brand/brand-profiles.service';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class SparkController {
-  constructor(private sparkService: SparkService) {}
+  constructor(
+    private sparkService: SparkService,
+    private brandProfiles: BrandProfilesService,
+  ) {}
 
   @Post('spark/sync')
   async sync(
@@ -57,10 +61,11 @@ export class SparkController {
         continue;
       }
       if (type === 'campaign') {
-        // Morgandada(5)：投放日报当日同步存在未结算尾差（实测 10-18 单日差 75 元），无显式日期时连刷近 3 天回补
-        if (Number(brandId) === 5 && !dto?.date) {
+        // 投放日报尾差连刷(档案 campaign.noDateRefetchDays,MDD=3)：无显式日期时连刷近 N 天回补未结算尾差
+        const noDateRefetchDays = this.brandProfiles.getProfile(Number(brandId)).campaign?.noDateRefetchDays;
+        if (noDateRefetchDays && !dto?.date) {
           const multi = [];
-          for (let i = 1; i <= 3; i++) {
+          for (let i = 1; i <= noDateRefetchDays; i++) {
             const d = new Date(Date.now() + 8 * 3600000 - i * 86400000).toISOString().slice(0, 10);
             multi.push(await this.sparkService.syncCampaign(d, ctx));
           }

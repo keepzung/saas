@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SparkOrgCtx, SparkOrgRegistry } from './spark-org.registry';
 import { PartnerApiClient, PartnerCookieExpiredError } from './partner-api.client';
 import { RtbAccountMetrics, SparkApiClient, SparkCookieExpiredError } from './spark-api.client';
+import { BrandProfilesService } from '../brand/brand-profiles.service';
 
 /** 特斯拉官号投流行识别：partner 子账户名含「官号」（与 sync-juguang.cjs 官号枚举过滤一致） */
 const OFFICIAL_BRAND_USER_KEYWORD = '官号';
@@ -59,6 +60,7 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     private readonly partnerApi: PartnerApiClient,
     private readonly configService: ConfigService,
     private readonly orgs: SparkOrgRegistry,
+    private readonly brandProfiles: BrandProfilesService,
   ) {}
 
   onModuleInit() {
@@ -171,10 +173,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 2) 笔记：荣威(2)走每日滚动重拉（backfill 模式：重拉近35天发布笔记的最新累计指标，
-    //    并自动注册新创作者）——修复「同步成功过的天不再重查 + covered 假覆盖」导致的
-    //    近期天数长期半截数据、笔记累计指标停留在首抓快照的问题
-    if (ctx.brandId === 2) {
+    // 2) 笔记：滚动重拉品牌(档案 notes.mode='rolling_backfill',当前=荣威)走每日滚动重拉
+    //    (backfill 模式：重拉近35天发布笔记的最新累计指标，并自动注册新创作者)——修复「同步成功过的天
+    //    不再重查 + covered 假覆盖」导致的近期天数长期半截数据、笔记累计指标停留在首抓快照的问题
+    if (this.brandProfiles.getProfile(ctx.brandId).notes.mode === 'rolling_backfill') {
       if (!cookieBroken) {
         try {
           const result = await this.syncNotes(this.syncDate(), { backfill: true }, ctx);
@@ -617,13 +619,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
 
       let upserted = 0;
       const sellerIds = new Set<string>();
-      // Morgandada(5)：仅保留指定代理商子账户（客户确认单一投放账户，env 可配）
-      const mddOnlyAdvertiser = (
-        this.configService.get<string>('SPARK_MDD_ADVERTISER_ID') ?? '10847045'
-      ).trim();
+      // 投放账户过滤(档案 campaign.advertiserFilter,MDD=10847045 客户确认单一投放账户;
+      // 原 SPARK_MDD_ADVERTISER_ID env 覆盖由改档案承担,值未变)
+      const advertiserFilter = this.brandProfiles.getProfile(org.brandId).campaign?.advertiserFilter;
       for (const r of rows) {
         if (!r.virtualSellerId) continue;
-        if (org.brandId === 5 && String(r.advertiserId ?? '') !== mddOnlyAdvertiser) continue;
+        if (advertiserFilter && String(r.advertiserId ?? '') !== advertiserFilter) continue;
         sellerIds.add(r.virtualSellerId);
         const isSub = !!r.subAccount?.agentSubAccountId;
         await this.prisma.koxCampaignDailyStat.upsert({
@@ -713,10 +714,12 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         : opts?.promoted
           ? NOTE_PROMOTED_MAX_PAGES
           : NOTE_DAILY_MAX_PAGES;
-    // Morgandada(5)：daily 模式也刷新整个发布窗口（指标为滚动窗口快照，仅抓当日新笔记会让老笔记冻结在发布日）
+    // window30 模式(MDD,档案 notes.mode)：daily 模式也刷新整个发布窗口（指标为滚动窗口快照，
+    // 仅抓当日新笔记会让老笔记冻结在发布日）
+    const np = this.brandProfiles.getProfile(org.brandId).notes;
     const publishStart = opts?.full || opts?.promoted
       ? undefined
-      : org.brandId === 5
+      : np.mode === 'window30'
         ? new Date(new Date(`${statDate}T00:00:00+08:00`).getTime() - (NOTE_WINDOW_DAYS - 1) * 86400000)
             .toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
         : opts?.backfill
@@ -740,10 +743,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
           publishStart,
           publishEnd: today,
           promotedOnly: !!opts?.promoted,
-          // 荣威(2)：底表只收录「专业号笔记 + 员工笔记」，达人笔记暂不收录（客户确认 2026-10）
-          // Morgandada(5)：只收录「员工笔记」（2026-10-20 客户确认：官号/博主合作等非员工笔记一律不进看板）
-          noteSources:
-            org.brandId === 2 ? ['专业号笔记', '员工笔记'] : org.brandId === 5 ? ['员工笔记'] : undefined,
+          // 收录来源过滤(档案 notes.noteSources)：荣威=专业号+员工笔记(客户确认 2026-10)、MDD=仅员工笔记
+          noteSources: np.noteSources,
           pageNo,
           pageSize: NOTE_PAGE_SIZE,
         },
@@ -876,13 +877,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
       if (accountId != null && authorName && oldNick && authorUid && byAuthorUid.get(authorUid) === accountId && oldNick !== authorName && !renames.has(authorUid)) {
         renames.set(authorUid, `${oldNick}→${authorName}`);
       }
-      // 荣威(2)：未匹配创作者自动注册为账号（账号底表每天自动长全，
-      // 新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
-      if (accountId == null && org.brandId === 2 && authorName) {
+      // 自动注册(档案 notes.autoRegisterAuthors,当前=荣威)：未匹配创作者自动注册为账号
+      // （账号底表每天自动长全，新开经销商店发首篇笔记即入系统；作者 id 可取则带真实 UID，否则派生稳定虚拟 id）
+      if (accountId == null && np.autoRegisterAuthors && authorName) {
         const authorIdRaw = String(pick('author_id') ?? pickLink('author_id') ?? '').trim();
         const regAuthorId =
           authorIdRaw ||
-          `auto_b2_${createHash('md5').update(authorName).digest('hex').slice(0, 20)}`;
+          `auto_b${org.brandId}_${createHash('md5').update(authorName).digest('hex').slice(0, 20)}`;
         const existing = await this.prisma.kosAccount.findUnique({
           where: { authorId: regAuthorId },
         });
@@ -906,10 +907,10 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         byNickname.set(authorName, accountId);
       }
 
-      // Morgandada(5)：仅入库基线账号的内容（来鼓租户多品牌共用，拦截其他组织笔记回流）；
-      // 官号（主账号 MorganDaDa）的任何数据不进看板（2026-10-20 客户确认）。
-      // 基线外作者（典型：平台改昵称致昵称匹配失效）计数进日志，不再静默丢弃
-      if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
+      // 基线账号约束(档案 notes.baselineOnly/excludeAuthors,MDD)：仅基线账号内容入库
+      // （来鼓租户多品牌共用,拦截其他组织笔记回流）；官号等排除作者不进看板（客户确认）。
+      // 基线外作者（典型：平台改昵称致昵称匹配失效）计数进日志,不再静默丢弃
+      if (np.baselineOnly && (!accountId || (authorName && np.excludeAuthors?.includes(authorName)))) {
         skipped.set(authorName, (skipped.get(authorName) ?? 0) + 1);
         continue;
       }
@@ -1189,14 +1190,15 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
     // （pm2 saas-api ↺），流式后峰值内存仅单页 500 行
     const maxPages = 200;
     let upserted = 0;
+    const notesProfileD = this.brandProfiles.getProfile(org.brandId).notes;
     for (let pageNo = 1; pageNo <= maxPages; pageNo += 1) {
       const data = await this.api.noteDetailList(
         {
           timeStart,
           timeEnd: statDate,
           timeDim: 'date_key',
-          // Morgandada(5)：只收「员工笔记」（官号/博主合作不进看板）
-          noteSources: org.brandId === 5 ? ['员工笔记'] : undefined,
+          // 收录来源过滤(档案 notes.noteSources,MDD=仅员工笔记)
+          noteSources: notesProfileD.noteSources,
           pageNo,
           pageSize: 500,
         },
@@ -1218,8 +1220,8 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
         if (accountId != null && authorName && oldNickD && authorUid && byAuthorUid.get(authorUid) === accountId && oldNickD !== authorName && !renames.has(authorUid)) {
           renames.set(authorUid, `${oldNickD}→${authorName}`);
         }
-        // Morgandada(5)：仅基线账号，且官号（主账号 MorganDaDa）不进看板
-        if (org.brandId === 5 && (!accountId || authorName === 'MorganDaDa')) {
+        // 基线账号约束(档案 notes.baselineOnly/excludeAuthors)：仅基线账号,排除作者(官号)不进看板
+        if (notesProfileD.baselineOnly && (!accountId || (authorName && notesProfileD.excludeAuthors?.includes(authorName)))) {
           const key = authorName ?? '(作者为空)';
           skipped.set(key, (skipped.get(key) ?? 0) + 1);
           continue;
