@@ -60,7 +60,8 @@ export class ContentService {
         where: { id: dto.parentId },
       });
       if (!parent) throw new NotFoundException('父节点不存在');
-      if (parent.parentId != null && parent.configType !== 'strategy_card') {
+      // series 下挂 product 是标准三级形态（既有树即如此），一并放行
+      if (parent.parentId != null && !['strategy_card', 'series'].includes(parent.configType ?? '')) {
         throw new BadRequestException('产品树最多三级');
       }
     }
