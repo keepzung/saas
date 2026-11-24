@@ -50,6 +50,11 @@ exit /b 0
 
 :dologin
 rem %~1 = TAG, %~2 = brandId
+rem 2026-11-24 fix: TAG must reach login.cjs so it uses per-brand credentials
+rem (SPARK_ACCOUNT_%TAG%), writes state/auth-%TAG%.json, verifies brand identity.
+rem Without TAG it wrote generic auth.json while push-state-to-prod read auth-%TAG%.json
+rem (stale) - every push re-pushed the OLD cookie (fake success), broke all T-1 syncs.
+set "TAG=%~1"
 "%NODE%" login.cjs
 if errorlevel 1 (
   echo *** [%~1] login FAILED or identity mismatch - push SKIPPED to avoid pushing a stale/wrong cookie ***
