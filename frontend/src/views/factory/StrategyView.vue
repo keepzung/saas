@@ -48,6 +48,30 @@
       :width="560"
       destroy-on-close
     >
+      <div class="ai-fill" v-if="!form.id">
+        <div class="ai-fill-title"><ThunderboltOutlined /> AI 起草（填 4 个空，自动生成整份策略）</div>
+        <a-form-item label="产品">
+          <a-select
+            v-model:value="aiFill.productId"
+            :options="productOptions"
+            placeholder="选择产品（可选）"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+          />
+        </a-form-item>
+        <a-form-item label="写作角度">
+          <a-input v-model:value="aiFill.angle" :maxlength="60" placeholder="如：装修师傅视角 / 一个月电费实测" />
+        </a-form-item>
+        <a-form-item label="想表达的观点">
+          <a-textarea v-model:value="aiFill.viewpoint" :rows="2" :maxlength="200" placeholder="如：中央空调不是贵，是算完总账之后更省" />
+        </a-form-item>
+        <a-form-item label="重要的点（每行一个）">
+          <a-textarea v-model:value="aiFill.keyPoints" :rows="3" placeholder="生成文章时必须讲到的点，每行一个" />
+        </a-form-item>
+        <a-button type="primary" block :loading="aiGenerating" @click="aiGenerate">AI 生成写作策略</a-button>
+        <a-divider plain style="margin: 12px 0 4px">生成后可自行调整，再保存</a-divider>
+      </div>
       <a-form layout="vertical">
         <a-form-item label="策略名称" required>
           <a-input v-model:value="form.name" :maxlength="30" placeholder="如：从业多年的老销售" />
@@ -92,6 +116,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import {
+  ThunderboltOutlined,
   ReloadOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -99,6 +124,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
+import { getProducts } from '../../api/content';
 import {
   getStrategies,
   createStrategy,
@@ -127,6 +153,62 @@ const emptyForm = () => ({
   enabled: true,
 });
 const form = ref(emptyForm());
+const NL = String.fromCharCode(10);
+const productOptions = ref([]);
+const aiFill = ref({ productId: null, angle: '', viewpoint: '', keyPoints: '' });
+const aiGenerating = ref(false);
+
+const loadProducts = async () => {
+  try {
+    const tree = (await getProducts({ brandId: brandId.value })) ?? [];
+    const walk = (nodes, out = []) => {
+      for (const n of nodes ?? []) {
+        const t = n.type ?? n.configType;
+        if (t === 'product') out.push({ label: n.display_name ?? n.name, value: n.id });
+        walk(n.children, out);
+      }
+      return out;
+    };
+    productOptions.value = walk(tree);
+  } catch {
+    // 产品树加载失败不阻塞策略表单
+  }
+};
+
+const aiGenerate = async () => {
+  const f = aiFill.value;
+  if (!f.angle.trim() && !f.viewpoint.trim() && !f.keyPoints.trim()) {
+    message.warning('先至少填写一个空（角度/观点/要点）');
+    return;
+  }
+  aiGenerating.value = true;
+  try {
+    const draft = await generateStrategy(
+      { productId: f.productId ?? null, angle: f.angle.trim(), viewpoint: f.viewpoint.trim(), keyPoints: f.keyPoints.trim() },
+      { brandId: brandId.value },
+    );
+    const d = draft ?? {};
+    if (d.name) form.value.name = d.name;
+    if (d.description) form.value.description = d.description;
+    form.value.persona = Array.isArray(d.persona) ? d.persona : [];
+    form.value.selling_points = Array.isArray(d.selling_points) ? d.selling_points : [];
+    form.value.audience = Array.isArray(d.audience) ? d.audience : [];
+    form.value.persona_text = form.value.persona.join(NL);
+    form.value.selling_points_text = form.value.selling_points.join(NL);
+    form.value.audience_text = form.value.audience.join(NL);
+    form.value.content_directions = Array.isArray(d.content_directions)
+      ? d.content_directions.map((x) => ({ name: x.name ?? '', description: x.description ?? '' }))
+      : [];
+    if (!form.value.content_directions.length) form.value.content_directions.push({ name: '', description: '' });
+    message.success('策略已生成，调整后点「保存」即可');
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? e?.message ?? 'AI 生成失败');
+  } finally {
+    aiGenerating.value = false;
+  }
+};
+
+
 
 const load = async () => {
   const data = await getStrategies({ brandId: brandId.value });
@@ -149,6 +231,7 @@ const openForm = (s) => {
         enabled: s.enabled,
       }
     : emptyForm();
+  if (!s) aiFill.value = { productId: null, angle: '', viewpoint: '', keyPoints: '' };
   formOpen.value = true;
 };
 
@@ -195,7 +278,10 @@ const remove = (s) => {
   });
 };
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadProducts();
+});
 </script>
 
 <style scoped>

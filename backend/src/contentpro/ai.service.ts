@@ -33,6 +33,15 @@ export interface PreReviewResult {
   ruleHits: { ruleId: number; name: string; action: string; matched: string; replyHint?: string }[];
 }
 
+export interface StrategyDraftResult {
+  name: string;
+  description: string;
+  persona: string[];
+  selling_points: string[];
+  audience: string[];
+  content_directions: { name: string; description: string }[];
+}
+
 export const NOTE_KINDS: Record<string, { label: string; guidance: string }> = {
   seeding: { label: '种草笔记', guidance: '围绕车型卖点种草，激发购买兴趣；讲清「为什么值得买」，用体验感与对比强化种草效果。' },
   scene: { label: '场景笔记', guidance: '从真实用车场景切入（家庭出行/日常通勤/节假日自驾/周末近郊），让读者代入「这就是我的生活」，自然带出车型价值。' },
@@ -112,6 +121,57 @@ export class AiService {
       null;
     const complianceTpl = rows.find((r) => r.kind === 'compliance_template') ?? null;
     return { spec, vehicle, complianceTpl };
+  }
+
+  /** KOS 填空 → AI 生成写作策略草稿（轻量 chatJson，不扣算力；仅草稿，KOS 可继续调整） */
+  async generateStrategyDraft(input: {
+    brandId: number;
+    productId?: number | null;
+    angle: string;
+    viewpoint: string;
+    keyPoints: string;
+  }): Promise<StrategyDraftResult> {
+    let product: { name: string; displayName: string | null; description: string | null; knowledge: string | null; salesPolicy: string | null; faq: string | null } | null = null;
+    if (input.productId) {
+      const found = await this.prisma.product.findUnique({ where: { id: input.productId } });
+      if (found) product = found;
+    }
+    const knowledge = [product?.knowledge, product?.salesPolicy, product?.faq]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 1200);
+    const system = [
+      '你是小红书 KOS（品牌门店员工）的内容策略专家。',
+      'KOS 给你：产品信息、写作角度、想表达的观点、必须覆盖的重要要点。',
+      '请产出一份可直接使用的写作策略，输出严格 JSON：',
+      '{"name":"人设化策略名(12字内)","description":"一句话概括面向什么客户讲什么重点","persona":["人设1"],"selling_points":["卖点1","..."],"audience":["目标受众1"],"content_directions":[{"name":"内容方向名","description":"方向说明"}]}',
+      '要求：persona 1-2 条；selling_points 3-5 条且必须自然覆盖用户给的重要要点；audience 1-2 条；content_directions 1-3 个；',
+      '语言口语化、符合门店员工真人表达，贴合产品信息与写作角度；只输出 JSON，不要其他文字。',
+    ].join('\n');
+    const user = [
+      product ? `【产品】${product.displayName ?? product.name}` : '【产品】未指定',
+      knowledge ? `【产品资料】${knowledge}` : '',
+      `【写作角度】${input.angle}`,
+      `【想表达的观点】${input.viewpoint}`,
+      `【必须覆盖的重要要点】${input.keyPoints}`,
+    ]
+      .filter(Boolean)
+      .join('\n' + '\n');
+    const draft = await this.chatJson<Record<string, unknown>>(system, user, 0.5);
+    const dirs = Array.isArray(draft.content_directions)
+      ? (draft.content_directions as Record<string, unknown>[])
+          .map((d) => ({ name: String(d?.name ?? '').trim(), description: String(d?.description ?? '').trim() }))
+          .filter((d) => d.name)
+          .slice(0, 3)
+      : [];
+    return {
+      name: String(draft.name ?? '').trim().slice(0, 30) || 'AI 生成的写作策略',
+      description: String(draft.description ?? '').trim(),
+      persona: asArr(draft.persona).slice(0, 3),
+      selling_points: asArr(draft.selling_points).slice(0, 8),
+      audience: asArr(draft.audience).slice(0, 3),
+      content_directions: dirs,
+    };
   }
 
   async generateArticle(input: {

@@ -548,6 +548,17 @@ export class ContentproService {
   }
 
   // ─── 算力配额 ──────────────────────────────────────────────────────
+  /** KOS 填空 → AI 生成写作策略草稿（透传 AI 服务，不扣算力） */
+  generateStrategyDraft(input: {
+    brandId: number;
+    productId?: number | null;
+    angle: string;
+    viewpoint: string;
+    keyPoints: string;
+  }) {
+    return this.ai.generateStrategyDraft(input);
+  }
+
   quotaSummary(brandId: number) {
     return this.quota.summary(brandId);
   }

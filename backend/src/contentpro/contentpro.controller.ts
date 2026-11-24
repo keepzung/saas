@@ -31,6 +31,7 @@ import {
   ChuangkitImportDto,
   DispatchDto,
   GenerateArticleDto,
+  GenerateStrategyDto,
   ImagesZipDto,
   MaterialImageAssignDto,
   MaterialImageImportDto,
@@ -221,6 +222,11 @@ export class ContentproController {
   generate(@Body() dto: GenerateArticleDto, @Req() req: Request, @Query('brandId') brandId?: string) {
     const user = req.user as { id: number };
     return this.service.generate({ ...dto, brandId: Number(brandId ?? 1) }, user.id);
+  }
+
+  @Post('content-pro/ai/generate-strategy')
+  generateStrategy(@Body() dto: GenerateStrategyDto, @Query('brandId') brandId?: string) {
+    return this.service.generateStrategyDraft({ ...dto, brandId: Number(brandId ?? 1) });
   }
 
   @Get('content-pro/ai/random-images')

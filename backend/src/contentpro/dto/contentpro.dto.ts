@@ -61,6 +61,13 @@ export class GenerateArticleDto {
   @IsOptional() @IsString() form?: string | null;
 }
 
+export class GenerateStrategyDto {
+  @IsOptional() @IsInt() productId?: number | null;
+  @IsString() angle: string;
+  @IsString() viewpoint: string;
+  @IsString() keyPoints: string;
+}
+
 export class SaveArticleDto {
   @IsOptional() @IsInt() id?: number | null;
   @IsString() title: string;

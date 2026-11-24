@@ -69,6 +69,9 @@ export const deleteStrategy = (id) =>
 // ─── AI / 历史 / 批量 ───────────────────────────────────────────────
 export const aiHealth = () => request.get('/content-pro/ai/health');
 
+export const generateStrategy = (data, params) =>
+  request.post('/content-pro/ai/generate-strategy', data, { params, timeout: 120000 });
+
 export const generateArticle = (data, params) =>
   request.post('/content-pro/ai/generate-article', data, { params, timeout: 180000 });
 
