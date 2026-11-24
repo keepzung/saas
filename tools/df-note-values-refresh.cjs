@@ -28,6 +28,17 @@ const pick = (r, code) => {
   const hit = list.find((t) => t.targetCode === code);
   return hit ? (hit.targetValue ?? hit.targetOriginValue ?? hit.targetDownloadValue) : undefined;
 };
+// first_file_id 等附件字段不在 targetList 顶层，藏在条目的 linkVos 里
+const pickDeep = (r, code) => {
+  const list = Array.isArray(r.targetList) ? r.targetList : Array.isArray(r.targetVos) ? r.targetVos : [];
+  const all = [];
+  for (const t of list) {
+    all.push(t);
+    if (Array.isArray(t.linkVos)) all.push(...t.linkVos);
+  }
+  const hit = all.find((t) => t?.targetCode === code);
+  return hit ? String(hit.targetValue ?? hit.targetOriginValue ?? '').trim() : undefined;
+};
 const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };
 const TARGETS = ['note_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
 const dayStr = (offsetDays) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -91,11 +102,18 @@ async function pullAll(cookie) {
       pmOpenings: num(pick(r, 'message_driving_open_cnt')),
       pmLeads: num(pick(r, 'msg_leads_num')),
     };
-    const found = await p.koxNote.findFirst({ where: { brandId: BRAND, noteId }, select: { id: true } });
+    const found = await p.koxNote.findFirst({ where: { brandId: BRAND, noteId }, select: { id: true, coverUrl: true } });
     if (!found) { missing += 1; continue; }
     // note_link 每次报表都带新 xsec_token：顺带刷新 noteUrl，供无标题回填抓页面用（旧 token 会过期 404）
     const freshUrl = String(pick(r, 'note_link') ?? '').trim();
-    await p.koxNote.update({ where: { id: found.id }, data: { ...data, ...(freshUrl ? { noteUrl: freshUrl } : {}) } });
+    // 封面：first_file_id（藏在 targetList[].linkVos 里）→ xhscdn 直链，压到 480 宽。
+    // 笔记页 og:image 抓取已被风控/登录墙挡死，直链是唯一稳定的封面来源
+    const fid = pickDeep(r, 'first_file_id');
+    const cover = fid && !found.coverUrl ? `https://sns-img-hw.xhscdn.com/${fid}?imageView2/2/w/480` : undefined;
+    await p.koxNote.update({
+      where: { id: found.id },
+      data: { ...data, ...(freshUrl ? { noteUrl: freshUrl } : {}), ...(cover ? { coverUrl: cover } : {}) },
+    });
     updated += 1;
   }
   const msg = `values refreshed: mcc_rows=${rows.length} updated=${updated} not_in_db=${missing}`;

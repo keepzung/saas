@@ -134,14 +134,13 @@ export class SparkService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async hasSuccessLog(type: string, statDate: string, brandId: number): Promise<boolean> {
+    // 必须限定 fetched>0：findFirst 无排序会命中最早那条 fetched=0 的空跑日志，
+    // 该日即使后续拉到数据也永远判为未锁定，每小时白拉一遍（2026-11 奕境 campaign/notes 卡死根因）。
+    // fetched=0 的空跑与 staff_matrix 的 partial（fetched>0 但分区未出）依旧不锁日
     const done = await this.prisma.sparkSyncLog.findFirst({
-      where: { syncType: type, statDate, status: 'success', brandId },
+      where: { syncType: type, statDate, status: 'success', brandId, fetched: { gt: 0 } },
     });
-    if (!done) return false;
-    // fetched=0 的"成功"多为平台当日未出数时的空跑，不锁定该日，后续轮次自愈重拉；
-    // staff_matrix 在分区未出数时改记 status='partial'（fetched>0 但行落在旧分区），同样不锁日
-    if (done.fetched === 0) return false;
-    return true;
+    return !!done;
   }
 
   private async safeSyncOrg(ctx: SparkOrgCtx) {
