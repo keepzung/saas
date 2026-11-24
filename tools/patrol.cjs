@@ -451,16 +451,36 @@ async function main() {
   // ── L5: 指标级检查(跨源;管道活着但某列指标死了/日志异常/封面缺失) ──────
   // 背景 2026-11-24 奕境: 笔记报表私信字段 10-13 起平台断供(曝光/阅读仍流动), L1-L4 管道级
   // 探活与页面遍历都查不出——信号在"近期笔记全零 vs 历史非零""日志同日重复成功""not_in_db""封面率"里
+  // 巡检范围/阈值唯一事实=后端品牌档案(GET /brand/profiles);接口不可达时回退内置清单(降级不阻断)
+  async function loadPatrolScope() {
+    const FALLBACK = [2, 5, 6, 7, 8].map((b) => ({ brandId: b, coverThreshold: 15 }));
+    try {
+      const jwt = backendRequire('jsonwebtoken');
+      const u = await p.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true, phone: true, role: true } });
+      const token = jwt.sign({ sub: u.id, phone: u.phone, role: u.role, brandId: 2 }, ENV.JWT_SECRET, { expiresIn: '10m' });
+      const res = await fetch(`${process.env.PATROL_API || 'http://127.0.0.1:3000/api/agency-api'}/brand/profiles`, {
+        headers: { token }, signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return FALLBACK;
+      const j = await res.json();
+      const list = Array.isArray(j) ? j : j?.data;
+      const scoped = (Array.isArray(list) ? list : []).filter((x) => x?.patrol?.inScope)
+        .map((x) => ({ brandId: x.brandId, coverThreshold: x.patrol?.coverThreshold ?? 15 }));
+      return scoped.length ? scoped : FALLBACK;
+    } catch {
+      return FALLBACK;
+    }
+  }
+  const PATROL_SCOPE = await loadPatrolScope();
+  const ago = (days) => new Date(Date.now() - days * 86400_000);
+
   async function runMetricChecks() {
     const out = [];
     const mk = (brandId, anomalies, detail = {}) => ({
       brandId, brand: brandName(brandId), source: 'metric', cookie: '—', lastSuccess: '—',
       anomalies, detail,
     });
-    const PIPELINE_BRANDS = [2, 5, 6, 7, 8]; // 演示区(1/9/10/11)数据冻结不巡检
-    const ago = (days) => new Date(Date.now() - days * 86400_000);
-
-    for (const brandId of PIPELINE_BRANDS) {
+    for (const { brandId } of PATROL_SCOPE) {
       const anomalies = [];
       const detail = {};
 
@@ -546,7 +566,8 @@ async function main() {
       ]);
       const pct = totalN ? Math.round((nullN / totalN) * 100) : 0;
       detail['封面缺失率'] = `${pct}%`;
-      if (pct > 15) anomalies.push(`L5 封面缺失率 ${pct}% (${nullN}/${totalN})`);
+      const coverThreshold = PATROL_SCOPE.find((x) => x.brandId === brandId)?.coverThreshold ?? 15;
+      if (pct > coverThreshold) anomalies.push(`L5 封面缺失率 ${pct}% (${nullN}/${totalN},阈值${coverThreshold}%)`);
 
       if (anomalies.length) out.push(mk(brandId, [...new Set(anomalies)], detail));
     }

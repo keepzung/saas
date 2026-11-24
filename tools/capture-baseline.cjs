@@ -9,9 +9,14 @@ const env = fs.readFileSync(path.join(__dirname, '..', 'backend', '.env'), 'utf8
 const secret = (env.match(/JWT_SECRET="([^"]+)"/) || [])[1];
 if (!secret) { console.error('JWT_SECRET 未找到'); process.exit(1); }
 
-const argOf = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const OUT = path.join(__dirname, '..', argOf('--out', 'docs/arch-baseline'));
-const TAG = argOf('--tag', 'run');
+const argVal = (k) => {
+  const i = process.argv.indexOf(k);
+  if (i > -1) return process.argv[i + 1];
+  const eq = process.argv.find((a) => a.startsWith(`${k}=`));
+  return eq ? eq.slice(k.length + 1) : null;
+};
+const OUT = path.join(__dirname, '..', argVal('--out') || 'docs/arch-baseline');
+const TAG = argVal('--tag') || 'run';
 const API = process.env.BASELINE_API || 'http://127.0.0.1:3000/api/agency-api';
 const BRANDS = [2, 5, 6, 7, 8];
 // 固定窗口(不含今天,两次采集间数据不再变化)

@@ -36,6 +36,7 @@ export const mddCategoryOf = (title: string | null | undefined) => {
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { BrandProfilesService } from '../brand/brand-profiles.service';
 import { calcCes, classifyTier, KOS_TIERS, KosTierMeta } from './kos-tier.service';
 import { extractKeywords } from '../common/text-keywords';
 import { ProMatrixService, ProMatrixResult, PRO_STAFF_DAY_DATE_TYPE } from '../pro/pro-matrix.service';
@@ -104,6 +105,7 @@ export class KoxService {
   constructor(
     private prisma: PrismaService,
     private proMatrixSvc: ProMatrixService,
+    private brandProfiles: BrandProfilesService,
   ) {}
 
   async accounts(query: {
@@ -300,8 +302,8 @@ export class KoxService {
       ...(brandId ? { brandId } : {}),
     };
     let filteredAccounts: { id: number; nickname: string; authorId?: string | null }[] | null = null;
-    // 格力(8)：仅监控账号内容（MCC 组织视图含全国经销商数千作者，查询层隐藏；同 noteFilters 口径）
-    if (brandId === 8) {
+    // 仅监控账号内容(格力,MCC 组织视图含全国经销商数千作者,查询层隐藏;同 noteFilters 口径)——档案 notes.monitorScopeOnly
+    if (this.brandProfiles.getProfile(brandId).notes.monitorScopeOnly) {
       const scope = await this.greeAuthorScope();
       noteWhere = {
         ...noteWhere,
@@ -339,8 +341,9 @@ export class KoxService {
       isRtbAdver: boolean | null;
       publishTime: Date | null;
     }[]> =
-      // 特斯拉不再使用 KoxNote（星火 partner 通道停更已弃用），内容指标走专业号员工矩阵
-      brandId === 6
+      // KoxNote 主表弃用的品牌(特斯拉,档案 notes.masterDeprecated):星火 partner 通道停更,
+      // 内容指标走专业号员工矩阵
+      this.brandProfiles.getProfile(brandId).notes.masterDeprecated
         ? Promise.resolve([])
         : this.prisma.koxNote.findMany({
             where: noteWhere,
@@ -926,15 +929,20 @@ export class KoxService {
           };
         }
         // 客户周度表快照分支已移除（KoxWeeklySnapshot 停用，2026-10-08 客户确认）
-        if (brandId === 7) {
-          // 奕境：笔记报表私信三数自 2026-10-13 平台侧断供（周度进线 106→79→68→0 断崖，曝光/阅读仍正常流动），
-          // 漏斗切 MCC 线索口径（与 MDD 同款公式，2026-10-21/22 客户拍板）：
+        // 漏斗口径由品牌档案驱动(brand/brand-profiles.ts,架构蓝图 v2):
+        // clue_tool=MCC 线索分析(数据缺失按档案 fallback 回退,奕境 2026-11-24 起、MDD 2026-10-21 起);
+        // note_pm=投放逐日聚合+自然笔记私信(G2,荣威/格力); pro_clue=专业号·客户管理(特斯拉,上方分支)。
+        // 分支内部公式与切换前一致;口径定义/切换依据见档案文件注释
+        const funnelProfile = this.brandProfiles.getProfile(brandId);
+        let clueActive = false;
+        if (funnelProfile.funnel.caliber === 'clue_tool') {
+          // 奕境背景：笔记报表私信三数自 2026-10-13 平台侧断供（周度进线 106→79→68→0 断崖），
           // 进线/开口=线索分析·获客工具统计按日求和；留资=线索分析（按线索生成日落窗，含广告/自然拆分）；
-          // 自然=总数−聚光投放日报私信三数；大区/账号筛选经账号 authorId 归属传导到线索行。
-          // clue_analysis/clue_acq_tool 2026-11-24 才接入 brand7：表为空时回退旧笔记私信口径，避免回填落地前假 0
-          const clueReady = await this.prisma.clueAnalysisDaily.count({ where: { brandId: 7 } });
+          // 自然=总数−聚光投放日报私信三数；大区/账号筛选经账号 authorId 归属传导到线索行
+          const clueReady = await this.prisma.clueAnalysisDaily.count({ where: { brandId } });
           if (clueReady > 0) {
-            const clueDayWhere = { brandId: 7, day: { gte: start, lte: end } };
+            clueActive = true;
+            const clueDayWhere = { brandId, day: { gte: start, lte: end } };
             const [acqRows, clueRows] = await Promise.all([
               this.prisma.clueAcqToolDaily.findMany({
                 where: clueDayWhere,
@@ -988,8 +996,15 @@ export class KoxService {
             };
           }
         }
-        if (brandId !== 6) {
-          // G2（非专业号口径，仅非 brand6 品牌）：线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信
+        // G2(note_pm 口径):档案 caliber==='note_pm',或 clue_tool 且线索表空且档案声明了 note_pm 回退。
+        // pro_clue(特斯拉)永不进入——严格单源,获客统计无数据时如实 0
+        const notePmActive =
+          funnelProfile.funnel.caliber === 'note_pm' ||
+          (funnelProfile.funnel.caliber === 'clue_tool' &&
+            !clueActive &&
+            funnelProfile.funnel.fallback === 'note_pm');
+        if (notePmActive) {
+          // G2:线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信
           let funnelCampaign = { enter: 0, open: 0, leads: 0 };
           const campNickSet = filteredAccounts ? new Set(filteredAccounts.map((a) => a.nickname)) : null;
           for (const r of campaignRows) {
