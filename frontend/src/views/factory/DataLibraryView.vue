@@ -29,6 +29,13 @@
           <div class="product-head">
             <span class="product-name">{{ selectedProduct.display_name ?? selectedProduct.name }}</span>
             <a-tag color="blue">{{ typeLabel(selectedProduct.type) }}</a-tag>
+            <a-button size="small" type="link" @click="openInfoEdit">编辑信息</a-button>
+            <a-popconfirm title="确定删除该产品节点？" @confirm="confirmDelete" ok-text="删除" cancel-text="取消">
+              <a-button size="small" type="link" danger>删除</a-button>
+            </a-popconfirm>
+          </div>
+          <div class="product-desc" :class="{ empty: !selectedProduct.description }">
+            {{ selectedProduct.description || '暂无产品描述，点「编辑信息」录入' }}
           </div>
           <div class="info-block" v-for="sec in sections" :key="sec.key">
             <div class="info-head">
@@ -112,6 +119,12 @@
         @press-enter="confirmAdd"
       />
     </a-modal>
+    <a-modal v-model:open="infoOpen" title="编辑产品信息" :confirm-loading="infoSaving" @ok="confirmInfoEdit">
+      <div style="margin-bottom: 8px; color: #64748b; font-size: 13px">产品名称</div>
+      <a-input v-model:value="infoName" :maxlength="50" />
+      <div style="margin: 12px 0 8px; color: #64748b; font-size: 13px">产品描述</div>
+      <a-textarea v-model:value="infoDesc" :rows="4" placeholder="产品描述（展示用，也会被 AI 写作引用）" />
+    </a-modal>
   </PageWrapper>
 </template>
 
@@ -126,7 +139,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { createProduct, getProducts, updateProduct } from '../../api/content';
+import { createProduct, deleteProduct, getProducts, updateProduct } from '../../api/content';
 
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
@@ -253,6 +266,55 @@ const confirmAdd = async () => {
   }
 };
 
+const infoOpen = ref(false);
+const infoName = ref('');
+const infoDesc = ref('');
+const infoSaving = ref(false);
+
+const openInfoEdit = () => {
+  infoName.value = selectedProduct.value?.name ?? '';
+  infoDesc.value = selectedProduct.value?.description ?? '';
+  infoOpen.value = true;
+};
+
+const confirmInfoEdit = async () => {
+  const id = selectedProduct.value?.id;
+  const name = infoName.value.trim();
+  if (!id) return;
+  if (!name) { message.warning('请输入产品名称'); return; }
+  infoSaving.value = true;
+  try {
+    await updateProduct(id, { name, description: infoDesc.value });
+    message.success('已保存');
+    infoOpen.value = false;
+    await loadTree();
+    const node = findRawByPredicate((r) => r.id === id);
+    if (node) {
+      selectedKeys.value = [node.id];
+      selectedProduct.value = node;
+    }
+  } catch (e) {
+    const status = e?.response?.status;
+    message.error(e?.response?.data?.msg ?? `保存失败${status ? `（HTTP ${status}）` : ''}`);
+  } finally {
+    infoSaving.value = false;
+  }
+};
+
+const confirmDelete = async () => {
+  const id = selectedProduct.value?.id;
+  if (id == null) return;
+  try {
+    await deleteProduct(id);
+    message.success('已删除');
+    selectedProduct.value = null;
+    selectedKeys.value = [];
+    await loadTree();
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '删除失败');
+  }
+};
+
 const onSelect = (keys, { node }) => {
   if (!keys.length) return;
   selectedProduct.value = node.raw;
@@ -343,6 +405,18 @@ onMounted(loadTree);
   color: #64748b;
   font-size: 13px;
   margin-bottom: 8px;
+}
+
+.product-desc {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 6px 0 4px;
+  white-space: pre-wrap;
+}
+
+.product-desc.empty {
+  color: #94a3b8;
 }
 
 .tree-hint {
