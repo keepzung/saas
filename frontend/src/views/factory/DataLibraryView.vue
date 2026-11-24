@@ -95,7 +95,16 @@
       :confirm-loading="addSaving"
       @ok="confirmAdd"
     >
-      <div class="add-parent-line">上级：{{ addParentLabel }}</div>
+      <div class="add-parent-line" v-if="addKind === 'series'">上级：{{ addParentLabelFallback }}（品牌）</div>
+      <div class="add-parent-line" v-else>
+        上级产品线：
+        <a-select
+          v-model:value="addParentId"
+          style="width: 100%"
+          placeholder="选择产品线"
+          :options="seriesOptions"
+        />
+      </div>
       <a-input
         v-model:value="addName"
         placeholder="输入产品名称"
@@ -160,7 +169,8 @@ const addOpen = ref(false);
 const addName = ref('');
 const addSaving = ref(false);
 const addKind = ref('product');
-const addParentLabel = ref('');
+const addParentId = ref(null);
+const addParentLabelFallback = ref('');
 
 const findRootRaw = () => {
   for (const n of treeNodes.value ?? []) {
@@ -182,29 +192,36 @@ const findRawByPredicate = (pred) => {
   return walk(treeNodes.value);
 };
 
-const resolveParent = (kind) => {
-  const sel = selectedProduct.value;
-  const selType = sel?.type ?? sel?.configType ?? null;
-  if (kind === 'series' || !sel) {
-    const root = sel && selType === 'brand' ? sel : findRootRaw();
-    if (!root) return null;
-    return { parentId: root.id, configType: 'series', label: root.display_name ?? root.name };
-  }
-  if (selType === 'product') {
-    const parent = sel.parentId != null ? findRawByPredicate((r) => r.id === sel.parentId) : null;
-    return parent
-      ? { parentId: parent.id, configType: 'product', label: parent.display_name ?? parent.name }
-      : null;
-  }
-  const childType = selType === 'brand' ? 'series' : 'product';
-  return { parentId: sel.id, configType: childType, label: sel.display_name ?? sel.name };
-};
+const seriesOptions = computed(() => {
+  const walk = (nodes, out = []) => {
+    for (const n of nodes ?? []) {
+      const t = n.raw?.type ?? n.raw?.configType;
+      if (t === 'series') out.push({ label: n.raw?.display_name ?? n.raw?.name, value: n.raw?.id });
+      walk(n.children, out);
+    }
+    return out;
+  };
+  return walk(treeNodes.value);
+});
+
+const brandRoot = computed(() => findRootRaw());
 
 const openAdd = (kind) => {
   addKind.value = kind;
-  const p = resolveParent(kind);
-  if (!p) { message.warning('未找到上级节点'); return; }
-  addParentLabel.value = p.label;
+  const sel = selectedProduct.value;
+  const selType = sel?.type ?? sel?.configType ?? null;
+  if (kind === 'series') {
+    addParentId.value = brandRoot.value?.id ?? null;
+    addParentLabelFallback.value = brandRoot.value?.display_name ?? brandRoot.value?.name ?? '品牌';
+    addName.value = '';
+    addOpen.value = true;
+    return;
+  }
+  let pid = null;
+  if (selType === 'series') pid = sel.id;
+  else if (selType === 'product') pid = sel.parentId;
+  if (pid == null) pid = seriesOptions.value[0]?.value ?? null;
+  addParentId.value = pid;
   addName.value = '';
   addOpen.value = true;
 };
@@ -212,16 +229,17 @@ const openAdd = (kind) => {
 const confirmAdd = async () => {
   const name = addName.value.trim();
   if (!name) { message.warning('请输入产品名称'); return; }
-  const p = resolveParent(addKind.value);
-  if (!p || p.parentId == null) { message.error('未找到上级节点'); return; }
+  const isSeries = addKind.value === 'series';
+  const parentId = isSeries ? (brandRoot.value?.id ?? null) : addParentId.value;
+  if (parentId == null) { message.error('未找到上级节点'); return; }
   addSaving.value = true;
   try {
-    await createProduct({ name, parentId: p.parentId, configType: p.configType }, brandId.value);
+    await createProduct({ name, parentId, configType: isSeries ? 'series' : 'product' }, brandId.value);
     message.success('已新增');
     addOpen.value = false;
     addName.value = '';
     await loadTree();
-    const newNode = findRawByPredicate((r) => r.name === name && r.parentId === p.parentId);
+    const newNode = findRawByPredicate((r) => r.name === name && r.parentId === parentId);
     if (newNode) {
       selectedKeys.value = [newNode.id];
       selectedProduct.value = newNode;
