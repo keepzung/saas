@@ -31,6 +31,9 @@ silence:
   - { brand: 5, source: spark_mcc, until: "2026-11-15", reason: "MDD 疑似停投, campaign 连续 fetched=0 定性中(勿当同步故障)" }
   - { brand: 1, source: pro_clue, reason: "brand1 marketineok 为演示区, 专业号线索不维护(用户 10-31 确认)" }
   # 格力静音已移除(2026-11-11): orgCode 已初始化(1933872459910004736), MCC 链路复活且数据正常入库
+  # L5 指标级检查已知项(11-24 封面全品牌核查后):
+  - { brand: 2, source: metric, reason: "荣威封面未回填(5.9万篇,页面有设计兜底图非可见故障), 待用户拍板是否升级真封面" }
+  - { brand: 8, source: metric, reason: "格力 647 篇前 NDS 时代老行无 first_file_id 无法直链回填(热门位 285 篇已补), 占位可接受" }
 
 # ------------------------------------------------------------
 # 数据源定义

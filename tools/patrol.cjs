@@ -448,6 +448,108 @@ async function main() {
     return rows;
   }
 
+  // ── L5: 指标级检查(跨源;管道活着但某列指标死了/日志异常/封面缺失) ──────
+  // 背景 2026-11-24 奕境: 笔记报表私信字段 10-13 起平台断供(曝光/阅读仍流动), L1-L4 管道级
+  // 探活与页面遍历都查不出——信号在"近期笔记全零 vs 历史非零""日志同日重复成功""not_in_db""封面率"里
+  async function runMetricChecks() {
+    const out = [];
+    const mk = (brandId, anomalies, detail = {}) => ({
+      brandId, brand: brandName(brandId), source: 'metric', cookie: '—', lastSuccess: '—',
+      anomalies, detail,
+    });
+    const PIPELINE_BRANDS = [2, 5, 6, 7, 8]; // 演示区(1/9/10/11)数据冻结不巡检
+    const ago = (days) => new Date(Date.now() - days * 86400_000);
+
+    for (const brandId of PIPELINE_BRANDS) {
+      const anomalies = [];
+      const detail = {};
+
+      // ① 行到达新鲜度: KoxNote 最新入库 ≥ T-2.5(笔记管道断流/缺天的第一信号;当天笔记 T+1 才同步)
+      const newest = await p.koxNote.findFirst({
+        where: { brandId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true },
+      });
+      detail['笔记最新入库'] = shDateTime(newest?.createdAt);
+      if (!newest?.createdAt || Date.now() - newest.createdAt.getTime() > 2.5 * 86400_000)
+        anomalies.push(`L5 笔记入库停更: 最新 ${shDateTime(newest?.createdAt)} (>2.5天)`);
+
+      // ② 投放行新鲜度: KoxCampaignDailyStat 最新 statDate ≥ T-2(有投放报表链路的品牌)
+      const campMax = await p.koxCampaignDailyStat.findFirst({
+        where: { brandId }, orderBy: { statDate: 'desc' }, select: { statDate: true },
+      });
+      detail['投放最新日'] = campMax?.statDate ? shDayStr(campMax.statDate) : '—';
+      if (campMax?.statDate && Date.now() - campMax.statDate.getTime() > 2.5 * 86400_000)
+        anomalies.push(`L5 投放报表停更: 最新 ${shDayStr(campMax.statDate)} (>2.5天)`);
+
+      // ③ 笔记私信断供签名(仅仍用笔记私信口径的品牌 2/8): 近14天发布≥5篇且全部零进线,
+      //    而历史(发布>30天)有非零 → 平台断供; 历史也全零 → 新号正常沉默, 不告警
+      if (brandId === 2 || brandId === 8) {
+        const recentN = await p.koxNote.count({ where: { brandId, publishTime: { gte: ago(14) } } });
+        if (recentN >= 5) {
+          const recentPm = await p.koxNote.count({ where: { brandId, publishTime: { gte: ago(14) }, pmInquiries: { gt: 0 } } });
+          if (recentPm === 0) {
+            const oldPm = await p.koxNote.count({ where: { brandId, publishTime: { lt: ago(30) }, pmInquiries: { gt: 0 } } });
+            if (oldPm > 0) {
+              const lastNz = await p.koxNote.findFirst({
+                where: { brandId, pmInquiries: { gt: 0 } }, orderBy: { publishTime: 'desc' }, select: { publishTime: true },
+              });
+              anomalies.push(`L5 笔记私信疑似断供: 近14天发布${recentN}篇全零进线, 历史非零${oldPm}篇, 最后非零 ${lastNz?.publishTime ? shDayStr(lastNz.publishTime) : '—'}`);
+            }
+          }
+        }
+      }
+
+      // ④ 线索表新鲜度(页面用线索口径的品牌 5/7): 两表 max(day) ≥ T-2
+      if (brandId === 5 || brandId === 7) {
+        const clueMax = await p.clueAnalysisDaily.findFirst({
+          where: { brandId }, orderBy: { day: 'desc' }, select: { day: true },
+        });
+        detail['线索最新日'] = clueMax?.day ? shDayStr(clueMax.day) : '—';
+        if (!clueMax?.day || Date.now() - clueMax.day.getTime() > 2.5 * 86400_000)
+          anomalies.push(`L5 线索分析停更: 最新 ${clueMax?.day ? shDayStr(clueMax.day) : '无行'} (>2.5天)`);
+        const acqMax = await p.clueAcqToolDaily.findFirst({
+          where: { brandId }, orderBy: { day: 'desc' }, select: { day: true },
+        });
+        detail['获客工具最新日'] = acqMax?.day ? shDayStr(acqMax.day) : '—';
+        if (!acqMax?.day || Date.now() - acqMax.day.getTime() > 2.5 * 86400_000)
+          anomalies.push(`L5 获客工具统计停更: 最新 ${acqMax?.day ? shDayStr(acqMax.day) : '无行'} (>2.5天)`);
+      }
+
+      // ⑤ 同步日志异常: 近24h 同一(syncType,statDate) 成功>5次 = 锁日误判签名(每小时白拉全量)
+      const dup = await p.sparkSyncLog.groupBy({
+        by: ['syncType', 'statDate'],
+        where: { brandId, status: 'success', createdAt: { gte: ago(1) } },
+        _count: { _all: true },
+      });
+      const worst = dup.filter((d) => d._count._all > 5).sort((a, b) => b._count._all - a._count._all)[0];
+      if (worst) {
+        anomalies.push(`L5 同步日志异常: ${worst.syncType} ${worst.statDate ?? '-'} 近24h 成功 ${worst._count._all} 次(疑似锁日失效,反复全量重拉)`);
+        detail['日志同日最高重复'] = `${worst.syncType}@${worst.statDate}×${worst._count._all}`;
+      }
+
+      // ⑥ values-refresh not_in_db: 报表有而主表没有的笔记数>20 = 笔记漏拉(奕境 199 篇缺天曾仅在此可见)
+      const vref = await p.sparkSyncLog.findFirst({
+        where: { brandId, syncType: 'note_values_refresh', createdAt: { gte: ago(4) } },
+        orderBy: { createdAt: 'desc' }, select: { fetched: true, upserted: true, createdAt: true },
+      });
+      if (vref && vref.fetched - vref.upserted > 20) {
+        anomalies.push(`L5 笔记漏拉: values-refresh not_in_db=${vref.fetched - vref.upserted} (${shDateTime(vref.createdAt)})`);
+        detail['not_in_db'] = vref.fetched - vref.upserted;
+      }
+
+      // ⑦ 封面空值率 >15%(已知项走静音名单: 荣威设计兜底待拍板 / 格力前 NDS 老行无 fid)
+      const [totalN, nullN] = await Promise.all([
+        p.koxNote.count({ where: { brandId } }),
+        p.koxNote.count({ where: { brandId, OR: [{ coverUrl: null }, { coverUrl: '' }] } }),
+      ]);
+      const pct = totalN ? Math.round((nullN / totalN) * 100) : 0;
+      detail['封面缺失率'] = `${pct}%`;
+      if (pct > 15) anomalies.push(`L5 封面缺失率 ${pct}% (${nullN}/${totalN})`);
+
+      if (anomalies.length) out.push(mk(brandId, [...new Set(anomalies)], detail));
+    }
+    return out;
+  }
+
   // ── 执行全部启用的源 ─────────────────────────────────────────────────────
   const rows = [];
   for (const [id, spec] of Object.entries(manifest.sources || {})) {
@@ -457,6 +559,14 @@ async function main() {
       rows.push(...(await checkSource(id, spec)));
     } catch (e) {
       rows.push({ brand: '—', source: id, cookie: '—', lastSuccess: '—', anomalies: [`引擎执行失败: ${String(e.message).slice(0, 120)}`], detail: {} });
+    }
+  }
+  // L5 指标级检查追加(只产生有异常的行;--only 指定源时跳过以免语义混乱)
+  if (!onlySrc) {
+    try {
+      rows.push(...(await runMetricChecks()));
+    } catch (e) {
+      rows.push({ brand: '—', source: 'metric', cookie: '—', lastSuccess: '—', anomalies: [`L5 引擎执行失败: ${String(e.message).slice(0, 120)}`], detail: {} });
     }
   }
   await p.$disconnect();
@@ -487,6 +597,7 @@ async function main() {
   }
   const header = ['品牌', '来源', 'Cookie状态', '最后成功时间', '异常原因'];
   const labels = Object.fromEntries(Object.entries(manifest.sources || {}).map(([id, s]) => [id, s.label || id]));
+  labels.metric = '指标级检查(L5)';
   const tableRows = rows.map((r) => [
     disp(r.brand),
     labels[r.source] || r.source,
