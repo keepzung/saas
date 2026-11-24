@@ -22,11 +22,23 @@ const m = env.match(/JWT_SECRET="([^"]+)"/);
   const u = await p.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true, phone: true, role: true } });
   await p.$disconnect();
   const token = jwt.sign({ sub: u.id, phone: u.phone, role: u.role, brandId: Number(brandId) }, m[1], { expiresIn: '30m' });
-  const res = await fetch('http://127.0.0.1:3000/api/agency-api/spark/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', token },
-    body: JSON.stringify(body),
+  // notes_daily 等重同步服务端可跑 5 分钟以上: undici fetch 默认 300s 响应头超时会先断
+  // (2026-11-25 实测),改用 http.request 显式 30 分钟超时;服务端本身幂等,断线重试无副作用
+  const j = await new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = require('http').request('http://127.0.0.1:3000/api/agency-api/spark/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', token, 'Content-Length': Buffer.byteLength(payload) },
+      timeout: 30 * 60 * 1000,
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => (buf += c));
+      res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(new Error('bad json: ' + buf.slice(0, 100))); } });
+    });
+    req.on('timeout', () => req.destroy(new Error('client timeout 30min')));
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
   });
-  const j = await res.json();
   console.log(JSON.stringify(j.data ?? j, null, 1));
 })().catch((e) => { console.error(e.message); process.exit(1); });
