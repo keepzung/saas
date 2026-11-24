@@ -498,10 +498,22 @@ export class UserService {
         // KOS 矩阵账号绑定（1:1）
         let kosNickname: string | undefined;
         if (row.kosNickname && primaryBrand) {
-          const kos = await this.prisma.kosAccount.findFirst({
+          // 昵称精确匹配失败时, 归一化全角/半角竖线后重试(台账/规划表与底表的昵称竖线混用)
+          let kos = await this.prisma.kosAccount.findFirst({
             where: { brandId: primaryBrand, nickname: row.kosNickname },
-            select: { id: true, userId: true },
+            select: { id: true, userId: true, nickname: true },
           });
+          if (!kos && row.kosNickname) {
+            const normalized = row.kosNickname.replace(/[｜|]/g, '|');
+            const candidates = await this.prisma.kosAccount.findMany({
+              where: { brandId: primaryBrand, nickname: { contains: normalized.split('|')[0] } },
+              select: { id: true, userId: true, nickname: true },
+            });
+            kos =
+              candidates.find((c) => c.nickname.replace(/[｜|]/g, '|') === normalized) ??
+              candidates.find((c) => c.nickname.replace(/[｜|]/g, '|').includes(normalized)) ??
+              null;
+          }
           if (!kos) throw new BadRequestException(`矩阵账号不存在: ${row.kosNickname}`);
           if (kos.userId && kos.userId !== userId) {
             throw new BadRequestException(`矩阵账号已被其他账号绑定: ${row.kosNickname}`);
