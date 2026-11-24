@@ -36,7 +36,7 @@
       <a-card :bordered="false" class="hero-card">
         <div class="sec-title">
           <span class="bar"></span>运营总览
-          <a-tooltip title="账号/内容指标随筛选联动；留资=笔记私信口径，投流=星火聚光投放（T+1 逐日自动同步）">
+          <a-tooltip :title="leadTooltip">
             <question-circle-outlined class="q-icon" />
           </a-tooltip>
         </div>
@@ -174,6 +174,12 @@ import { getKoxAccounts, getKoxNotes, getKoxOverview } from '../../../api/kox';
 import { useAuthStore } from '../../../stores/auth';
 
 const auth = useAuthStore();
+const isYijing = computed(() => Number(auth.currentBrandId) === 7);
+const leadTooltip = computed(() =>
+  isYijing.value
+    ? '账号/内容指标随筛选联动；线索口径（2026-11-24 切换）：进线/开口=MCC获客工具统计按日求和，留资=线索分析按线索生成日落窗，自然=总−聚光投流（原笔记私信口径因平台 10-13 起断供弃用）'
+    : '账号/内容指标随筛选联动；留资=笔记私信口径，投流=星火聚光投放（T+1 逐日自动同步）',
+);
 const brandShort = computed(
   () => brandTheme(auth.currentBrandId)?.short ?? (Number(auth.currentBrandId) === 7 ? '东风奕境' : '格力'),
 );

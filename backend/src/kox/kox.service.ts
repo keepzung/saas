@@ -299,7 +299,7 @@ export class KoxService {
       publishTime: { gte: start, lte: end },
       ...(brandId ? { brandId } : {}),
     };
-    let filteredAccounts: { id: number; nickname: string }[] | null = null;
+    let filteredAccounts: { id: number; nickname: string; authorId?: string | null }[] | null = null;
     // 格力(8)：仅监控账号内容（MCC 组织视图含全国经销商数千作者，查询层隐藏；同 noteFilters 口径）
     if (brandId === 8) {
       const scope = await this.greeAuthorScope();
@@ -314,7 +314,7 @@ export class KoxService {
     if (accountTag.length || regionName) {
       filteredAccounts = await this.prisma.kosAccount.findMany({
         where: accountWhere,
-        select: { id: true, nickname: true },
+        select: { id: true, nickname: true, authorId: true },
       });
       noteWhere = {
         ...noteWhere,
@@ -926,6 +926,68 @@ export class KoxService {
           };
         }
         // 客户周度表快照分支已移除（KoxWeeklySnapshot 停用，2026-10-08 客户确认）
+        if (brandId === 7) {
+          // 奕境：笔记报表私信三数自 2026-10-13 平台侧断供（周度进线 106→79→68→0 断崖，曝光/阅读仍正常流动），
+          // 漏斗切 MCC 线索口径（与 MDD 同款公式，2026-10-21/22 客户拍板）：
+          // 进线/开口=线索分析·获客工具统计按日求和；留资=线索分析（按线索生成日落窗，含广告/自然拆分）；
+          // 自然=总数−聚光投放日报私信三数；大区/账号筛选经账号 authorId 归属传导到线索行。
+          // clue_analysis/clue_acq_tool 2026-11-24 才接入 brand7：表为空时回退旧笔记私信口径，避免回填落地前假 0
+          const clueReady = await this.prisma.clueAnalysisDaily.count({ where: { brandId: 7 } });
+          if (clueReady > 0) {
+            const clueDayWhere = { brandId: 7, day: { gte: start, lte: end } };
+            const [acqRows, clueRows] = await Promise.all([
+              this.prisma.clueAcqToolDaily.findMany({
+                where: clueDayWhere,
+                select: { subUserId: true, consultCnt: true, chatCnt: true },
+              }),
+              this.prisma.clueAnalysisDaily.findMany({
+                where: clueDayWhere,
+                select: { subUserId: true, clueCnt: true, adsClueCnt: true, natureClueCnt: true },
+              }),
+            ]);
+            const uidSet = filteredAccounts
+              ? new Set(filteredAccounts.map((a) => a.authorId ?? '').filter(Boolean))
+              : null;
+            const inScope = (uid: string) => !uidSet || uidSet.has(uid);
+            let acqConsult = 0;
+            let acqChat = 0;
+            for (const r of acqRows) {
+              if (!inScope(r.subUserId)) continue;
+              acqConsult += r.consultCnt;
+              acqChat += r.chatCnt;
+            }
+            let clueTotal = 0;
+            let clueNature = 0;
+            for (const r of clueRows) {
+              if (!inScope(r.subUserId)) continue;
+              clueTotal += r.clueCnt;
+              clueNature += r.natureClueCnt;
+            }
+            const funnelCampaign = { enter: 0, open: 0, leads: 0 };
+            for (const r of campaignRows) {
+              funnelCampaign.enter += r.messageConsult;
+              funnelCampaign.open += r.msgChatUserCnt;
+              funnelCampaign.leads += r.msgLeadsNum;
+            }
+            const inquiries = acqConsult;
+            const openings = acqChat;
+            return {
+              pm_inquiries: inquiries,
+              pm_openings: openings,
+              pm_leads: clueTotal,
+              open_rate: inquiries ? r2((openings / inquiries) * 100) : 0,
+              lead_rate: inquiries ? r2((clueTotal / inquiries) * 100) : 0,
+              campaign: funnelCampaign,
+              organic: {
+                inquiries: Math.max(0, acqConsult - funnelCampaign.enter),
+                openings: Math.max(0, acqChat - funnelCampaign.open),
+                leads: clueNature,
+              },
+              scope_note:
+                '线索=MCC线索管理·线索分析（2026-11-24 切换，原笔记私信口径因平台 10-13 起断供弃用）：进线/开口=获客工具统计按日求和；留资按线索生成日落窗，自然=总−聚光投流',
+            };
+          }
+        }
         if (brandId !== 6) {
           // G2（非专业号口径，仅非 brand6 品牌）：线索=投放逐日聚合（乐允报表+partner T+1）+ 自然笔记私信
           let funnelCampaign = { enter: 0, open: 0, leads: 0 };

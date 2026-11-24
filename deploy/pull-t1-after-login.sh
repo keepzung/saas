@@ -53,6 +53,20 @@ for t in notes notes_daily clue_analysis clue_acq_tool; do
   echo "----- $(date '+%F %T') [5] $t" >> "$LOG"
   runuser -u deploy -- bash -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs $t 5" >> "$LOG" 2>&1 || sleep 30
 done
+
+# ④ 东风奕境 brand7：等 brand7 cookie 刷新（21:30 例程同批拖滑块），补线索两表
+#    （运营总览漏斗 2026-11-24 切 MCC 线索口径；notes/notes_daily 由 safeSync+夜间 notes_daily 覆盖，此处不重复）
+cookieFresh7=f
+for i in $(seq 1 40); do
+  cookieFresh7=$(sudo -u postgres psql saas_prod -Atc "SELECT extract(epoch from ((now() AT TIME ZONE 'utc') - \"updatedAt\"))::int < 5400 FROM \"SparkOrgConfig\" WHERE \"brandId\"=7;" 2>/dev/null | tr -d '[:space:]')
+  [ "$cookieFresh7" = "t" ] && break
+  sleep 60
+done
+echo "----- $(date '+%F %T') [7] df clue chain start (cookieFresh=$cookieFresh7)" >> "$LOG"
+for t in clue_analysis clue_acq_tool; do
+  echo "----- $(date '+%F %T') [7] $t" >> "$LOG"
+  runuser -u deploy -- bash -c "cd /opt/saas/tools && /usr/local/bin/node trigger-sync.cjs $t 7" >> "$LOG" 2>&1 || sleep 30
+done
 echo "===== $(date '+%F %T') pull-t1 done =====" >> "$LOG"
 tail -n 3000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
 exit 0
