@@ -555,9 +555,9 @@ export class ContentproService {
   generateStrategyDraft(input: {
     brandId: number;
     productId?: number | null;
-    angle: string;
-    viewpoint: string;
-    keyPoints: string;
+    angle?: string;
+    viewpoint?: string;
+    keyPoints?: string;
   }) {
     return this.ai.generateStrategyDraft(input);
   }

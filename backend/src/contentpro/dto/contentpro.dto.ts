@@ -64,9 +64,9 @@ export class GenerateArticleDto {
 
 export class GenerateStrategyDto {
   @IsOptional() @IsInt() productId?: number | null;
-  @IsString() angle: string;
-  @IsString() viewpoint: string;
-  @IsString() keyPoints: string;
+  @IsOptional() @IsString() angle?: string;
+  @IsOptional() @IsString() viewpoint?: string;
+  @IsOptional() @IsString() keyPoints?: string;
 }
 
 export class SaveArticleDto {

@@ -1,6 +1,6 @@
 // AI 文章生成服务：GLM API 优先（LLM_API_KEY），未配置 key 时回退模板拼装（source=template）
 // 2026-11-17 建设项：品牌模板注入 + 四类笔记×双风格×图文/短视频 prompt 矩阵 + AI 预审评分（有效率≥70%三道闸门之二）
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface GenerateResult {
@@ -127,10 +127,16 @@ export class AiService {
   async generateStrategyDraft(input: {
     brandId: number;
     productId?: number | null;
-    angle: string;
-    viewpoint: string;
-    keyPoints: string;
+    angle?: string;
+    viewpoint?: string;
+    keyPoints?: string;
   }): Promise<StrategyDraftResult> {
+    const hasAngle = Boolean(input.angle?.trim());
+    const hasView = Boolean(input.viewpoint?.trim());
+    const hasKeys = Boolean(input.keyPoints?.trim());
+    if (!input.productId && !hasAngle && !hasView && !hasKeys) {
+      throw new BadRequestException('请选择产品，或至少填写一个空（角度/观点/要点）');
+    }
     let product: { name: string; displayName: string | null; description: string | null; knowledge: string | null; salesPolicy: string | null; faq: string | null } | null = null;
     if (input.productId) {
       const found = await this.prisma.product.findUnique({ where: { id: input.productId } });
@@ -145,15 +151,19 @@ export class AiService {
       'KOS 给你：产品信息、写作角度、想表达的观点、必须覆盖的重要要点。',
       '请产出一份可直接使用的写作策略，输出严格 JSON：',
       '{"name":"人设化策略名(12字内)","description":"一句话概括面向什么客户讲什么重点","persona":["人设1"],"selling_points":["卖点1","..."],"audience":["目标受众1"],"content_directions":[{"name":"内容方向名","description":"方向说明"}]}',
-      '要求：persona 1-2 条；selling_points 3-5 条且必须自然覆盖用户给的重要要点；audience 1-2 条；content_directions 1-3 个；',
-      '语言口语化、符合门店员工真人表达，贴合产品信息与写作角度；只输出 JSON，不要其他文字。',
+      hasKeys
+        ? '要求：persona 1-2 条；selling_points 3-5 条且必须自然覆盖用户给的重要要点；audience 1-2 条；content_directions 1-3 个；'
+        : '要求：persona 1-2 条；selling_points 3-5 条（从产品资料中提炼核心卖点与差异优势）；audience 1-2 条；content_directions 1-3 个；',
+      hasAngle || hasView
+        ? '语言口语化、符合门店员工真人表达，贴合产品信息与给定的写作角度/观点；只输出 JSON，不要其他文字。'
+        : '语言口语化、符合门店员工真人表达，贴合产品信息，角度与观点由你从产品资料中提炼最合适的；只输出 JSON，不要其他文字。',
     ].join('\n');
     const user = [
       product ? `【产品】${product.displayName ?? product.name}` : '【产品】未指定',
       knowledge ? `【产品资料】${knowledge}` : '',
-      `【写作角度】${input.angle}`,
-      `【想表达的观点】${input.viewpoint}`,
-      `【必须覆盖的重要要点】${input.keyPoints}`,
+      hasAngle ? `【写作角度】${input.angle}` : '',
+      hasView ? `【想表达的观点】${input.viewpoint}` : '',
+      hasKeys ? `【必须覆盖的重要要点】${input.keyPoints}` : '',
     ]
       .filter(Boolean)
       .join('\n' + '\n');

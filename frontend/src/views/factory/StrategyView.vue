@@ -49,8 +49,8 @@
       destroy-on-close
     >
       <div class="ai-fill" v-if="!form.id">
-        <div class="ai-fill-title"><ThunderboltOutlined /> AI 起草（填 4 个空，自动生成整份策略）</div>
-        <a-form-item label="产品">
+        <div class="ai-fill-title"><ThunderboltOutlined /> AI 起草（选择产品即可自动生成，也可填空引导）</div>
+        <a-form-item label="产品（必选，卖点/资料从这里读取）">
           <a-select
             v-model:value="aiFill.productId"
             :options="productOptions"
@@ -60,13 +60,13 @@
             option-filter-prop="label"
           />
         </a-form-item>
-        <a-form-item label="写作角度">
+        <a-form-item label="写作角度（选填）">
           <a-input v-model:value="aiFill.angle" :maxlength="60" placeholder="如：装修师傅视角 / 一个月电费实测" />
         </a-form-item>
-        <a-form-item label="想表达的观点">
+        <a-form-item label="想表达的观点（选填）">
           <a-textarea v-model:value="aiFill.viewpoint" :rows="2" :maxlength="200" placeholder="如：中央空调不是贵，是算完总账之后更省" />
         </a-form-item>
-        <a-form-item label="重要的点（每行一个）">
+        <a-form-item label="重要的点（选填，可引导 AI 重点覆盖）">
           <a-textarea v-model:value="aiFill.keyPoints" :rows="3" placeholder="生成文章时必须讲到的点，每行一个" />
         </a-form-item>
         <a-button type="primary" block :loading="aiGenerating" @click="aiGenerate">AI 生成写作策略</a-button>
@@ -177,7 +177,7 @@ const loadProducts = async () => {
 
 const aiGenerate = async () => {
   const f = aiFill.value;
-  if (!f.angle.trim() && !f.viewpoint.trim() && !f.keyPoints.trim()) {
+  if (!f.productId && !f.angle.trim() && !f.viewpoint.trim() && !f.keyPoints.trim()) {
     message.warning('先至少填写一个空（角度/观点/要点）');
     return;
   }
