@@ -15,6 +15,15 @@
         allow-clear
         :options="setOptions"
       />
+      <a-select
+        v-model:value="filterProduct"
+        style="width: 160px"
+        placeholder="按产品筛选"
+        allow-clear
+        show-search
+        option-filter-prop="label"
+        :options="productNodeOptions"
+      />
       <a-input-search
         v-model:value="keyword"
         style="width: 200px"
@@ -41,6 +50,27 @@
           批量设置{{ typeLabel }}/套图
         </a-button>
         <div class="mat-toolbar-right">
+          <a-select
+            v-model:value="uploadProduct"
+            style="width: 180px"
+            size="small"
+            show-search
+            allow-clear
+            placeholder="归属产品(可搜索/新建)"
+            :options="productNodeOptions"
+            @search="(v) => (uploadSearch = v)"
+          >
+            <template #dropdownRender>
+              <div style="padding: 4px 8px">
+                <a-button
+                  size="small"
+                  type="link"
+                  :disabled="!uploadSearch.trim() || creatingNode"
+                  @click="addProductNode(uploadSearch)"
+                >＋ 新建产品「{{ uploadSearch.trim() }}」</a-button>
+              </div>
+            </template>
+          </a-select>
           <a-upload
             :show-upload-list="false"
             :before-upload="onUpload"
@@ -68,6 +98,7 @@
             <a-checkbox :checked="checked.includes(img.id)" class="img-check" @click.stop @change="toggleCheck(img.id)" />
             <img :src="img.url" loading="lazy" class="img-thumb" />
             <div class="img-tags">
+              <a-tag v-if="img.product_name" class="img-tag prod">{{ img.product_name }}</a-tag>
               <a-tag v-if="img.set_name" class="img-tag set">{{ img.set_name }}</a-tag>
               <a-tag v-if="img.type_name" class="img-tag type">{{ img.type_name }}</a-tag>
             </div>
@@ -128,10 +159,18 @@
         <span class="assign-label">所属套图</span>
         <a-select v-model:value="assignSet" style="width: 200px" allow-clear placeholder="不修改" :options="setOptions" />
       </div>
+      <div class="assign-row">
+        <span class="assign-label">所属产品</span>
+        <a-select v-model:value="assignProduct" style="width: 200px" allow-clear placeholder="不修改" :options="productNodeOptions" />
+      </div>
     </a-modal>
 
     <!-- URL 导入 -->
     <a-modal v-model:open="importOpen" title="URL 导入素材" @ok="doImport">
+      <div class="assign-row" style="margin-bottom: 8px">
+        <span class="assign-label">归属产品</span>
+        <a-select v-model:value="importProduct" style="width: 100%" allow-clear placeholder="不指定" :options="productNodeOptions" />
+      </div>
       <a-textarea v-model:value="importText" :rows="6" placeholder="每行一个图片 URL（http/https）" />
     </a-modal>
   </PageWrapper>
@@ -149,6 +188,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
+import { createProduct, getProducts } from '../../api/content';
 import { useAuthStore } from '../../stores/auth';
 import { BRAND_MATERIAL_TYPE_LABEL } from '../../config/brands';
 import {
@@ -194,11 +234,24 @@ const assignType = ref(undefined);
 const assignSet = ref(undefined);
 const importOpen = ref(false);
 const importText = ref('');
+const productNodeOptions = ref([]);
+const productFilter = ref(null);
+const uploadProduct = ref(null);
+const importProduct = ref(null);
+const assignProduct = ref(undefined);
+const uploadSearch = ref('');
+const creatingNode = ref(false);
 
 const typeOptions = computed(() => tags.value.map((t) => ({ label: t.name, value: t.id })));
 const setOptions = computed(() => sets.value.map((s) => ({ label: s.name, value: s.id })));
 const typeLabel = computed(() => BRAND_MATERIAL_TYPE_LABEL[Number(brandId.value)] ?? '素材类型');
 const allChecked = computed(() => list.value.length > 0 && checked.value.length === list.value.length);
+
+const productNameMap = computed(() => {
+  const m = {};
+  for (const o of productNodeOptions.value) m[o.value] = o.label;
+  return m;
+});
 
 const loadMeta = async () => {
   const [t, s] = await Promise.all([
@@ -207,6 +260,39 @@ const loadMeta = async () => {
   ]);
   tags.value = t?.list ?? [];
   sets.value = s?.list ?? [];
+};
+
+const loadProductNodes = async () => {
+  try {
+    const tree = (await getProducts({ brandId: brandId.value })) ?? [];
+    const walk = (nodes, depth, out = []) => {
+      for (const n of nodes ?? []) {
+        out.push({ label: (depth ? '　'.repeat(depth) : '') + (n.display_name ?? n.name), value: n.id });
+        walk(n.children, depth + 1, out);
+      }
+      return out;
+    };
+    productNodeOptions.value = walk(tree, 0);
+  } catch {
+    // 产品树缺失的工作区允许手动新建
+  }
+};
+
+const addProductNode = async (name) => {
+  const n = String(name ?? '').trim();
+  if (!n || creatingNode.value) return;
+  creatingNode.value = true;
+  try {
+    const root = productNodeOptions.value.length ? productNodeOptions.value[0].value : null;
+    const created = await createProduct({ name: n, parentId: root, configType: 'product' }, brandId.value);
+    message.success(`已创建产品「${n}」`);
+    await loadProductNodes();
+    uploadProduct.value = created?.id ?? uploadProduct.value;
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '新建失败');
+  } finally {
+    creatingNode.value = false;
+  }
 };
 
 const load = async () => {
@@ -220,6 +306,7 @@ const load = async () => {
       keyword: keyword.value || undefined,
       typeId: filterType.value ?? undefined,
       setId: filterSet.value ?? undefined,
+      productNodeId: filterProduct.value ?? undefined,
       unassigned: onlyUnassigned.value ? '1' : undefined,
     });
     list.value = data?.list ?? [];
@@ -244,7 +331,7 @@ const onUpload = async (file) => {
   try {
     const res = await uploadMaterialImage(file, brandId.value);
     if (!res?.url) throw new Error(res?.error ?? '上传失败');
-    await importMaterialImages({ urls: [res.url] }, { brandId: brandId.value });
+    await importMaterialImages({ urls: [res.url], productNodeId: uploadProduct.value ?? null }, { brandId: brandId.value });
     message.success(`已上传 ${file.name}`);
     await Promise.all([load(), loadMeta()]);
   } catch (e) {
@@ -274,6 +361,7 @@ const doAssign = async () => {
   const data = { ids: checked.value };
   if (assignType.value !== undefined) data.typeId = assignType.value;
   if (assignSet.value !== undefined) data.setId = assignSet.value;
+  if (assignProduct.value !== undefined) data.productNodeId = assignProduct.value;
   await assignMaterialImages(data);
   message.success('已更新');
   assignOpen.value = false;
@@ -283,7 +371,7 @@ const doAssign = async () => {
 const doImport = async () => {
   const urls = importText.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   if (!urls.length) return;
-  const res = await importMaterialImages({ urls }, { brandId: brandId.value });
+  const res = await importMaterialImages({ urls, productNodeId: importProduct.value ?? null }, { brandId: brandId.value });
   message.success(`新增 ${res?.added ?? 0} 张`);
   importOpen.value = false;
   importText.value = '';
@@ -441,6 +529,14 @@ onMounted(async () => {
   margin: 0;
   background: #eef4ff;
   color: #3456e6;
+  border: none;
+  font-size: 11px;
+}
+
+.img-tag.prod {
+  margin: 0;
+  background: #e0e9ff;
+  color: #1d4ed8;
   border: none;
   font-size: 11px;
 }

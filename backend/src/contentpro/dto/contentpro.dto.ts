@@ -23,6 +23,7 @@ export class MaterialImageAssignDto {
   @IsArray() ids: number[];
   @IsOptional() setId?: number | null;
   @IsOptional() typeId?: number | null;
+  @IsOptional() productNodeId?: number | null;
 }
 
 export class MaterialImageImportDto {

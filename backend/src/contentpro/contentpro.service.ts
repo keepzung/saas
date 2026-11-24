@@ -123,6 +123,7 @@ export class ContentproService {
     typeId?: string;
     unassigned?: string;
     keyword?: string;
+    productNodeId?: string;
     page?: string;
     pageSize?: string;
   }) {
@@ -131,6 +132,7 @@ export class ContentproService {
     const where: Prisma.MaterialImageWhereInput = { brandId: query.brandId };
     if (query.setId) where.setId = Number(query.setId);
     if (query.typeId) where.typeId = Number(query.typeId);
+    if (query.productNodeId) where.productNodeId = Number(query.productNodeId);
     if (query.unassigned === '1') where.AND = [{ setId: null }, { typeId: null }];
     if (query.keyword) where.name = { contains: query.keyword, mode: 'insensitive' };
     const [total, rows] = await Promise.all([
@@ -196,10 +198,11 @@ export class ContentproService {
     return { deleted: ids.length };
   }
 
-  async assignImages(dto: { ids: number[]; setId?: number | null; typeId?: number | null }) {
-    const data: { setId?: number | null; typeId?: number | null } = {};
+  async assignImages(dto: { ids: number[]; setId?: number | null; typeId?: number | null; productNodeId?: number | null }) {
+    const data: { setId?: number | null; typeId?: number | null; productNodeId?: number | null } = {};
     if (dto.setId !== undefined) data.setId = dto.setId;
     if (dto.typeId !== undefined) data.typeId = dto.typeId;
+    if (dto.productNodeId !== undefined) data.productNodeId = dto.productNodeId;
     for (const id of dto.ids) {
       await this.prisma.materialImage.update({ where: { id }, data });
     }

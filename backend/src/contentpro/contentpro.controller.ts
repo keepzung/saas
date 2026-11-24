@@ -110,6 +110,7 @@ export class ContentproController {
       typeId?: string;
       unassigned?: string;
       keyword?: string;
+      productNodeId?: string;
       page?: string;
       pageSize?: string;
     },
