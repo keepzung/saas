@@ -15,6 +15,10 @@
         />
         <a-empty v-else :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无产品树" />
         <div class="tree-footer">
+          <div class="tree-actions">
+            <a-button size="small" type="dashed" @click="openAdd('series')">+ 产品线</a-button>
+            <a-button size="small" type="dashed" @click="openAdd('product')">+ 产品</a-button>
+          </div>
           <span class="tree-hint">在左侧产品树中选择一个产品，开始配置资料</span>
         </div>
       </div>
@@ -85,6 +89,20 @@
         </template>
       </div>
     </div>
+    <a-modal
+      v-model:open="addOpen"
+      :title="addKind === 'series' ? '新增产品线' : '新增产品'"
+      :confirm-loading="addSaving"
+      @ok="confirmAdd"
+    >
+      <div class="add-parent-line">上级：{{ addParentLabel }}</div>
+      <a-input
+        v-model:value="addName"
+        placeholder="输入产品名称"
+        :maxlength="60"
+        @press-enter="confirmAdd"
+      />
+    </a-modal>
   </PageWrapper>
 </template>
 
@@ -99,7 +117,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getProducts, updateProduct } from '../../api/content';
+import { createProduct, getProducts, updateProduct } from '../../api/content';
 
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
@@ -136,6 +154,84 @@ const loadTree = async () => {
   const data = await getProducts({ brandId: brandId.value });
   treeNodes.value = toNodes(data ?? []);
   expandedKeys.value = treeNodes.value.flatMap((n) => [n.key, ...(n.children ?? []).map((c) => c.key)]);
+};
+
+const addOpen = ref(false);
+const addName = ref('');
+const addSaving = ref(false);
+const addKind = ref('product');
+const addParentLabel = ref('');
+
+const findRootRaw = () => {
+  for (const n of treeNodes.value ?? []) {
+    const t = n.raw?.type ?? n.raw?.configType;
+    if (t === 'brand' || n.raw?.parentId == null) return n.raw;
+  }
+  return (treeNodes.value ?? [])[0]?.raw ?? null;
+};
+
+const findRawByPredicate = (pred) => {
+  const walk = (nodes) => {
+    for (const n of nodes ?? []) {
+      if (pred(n.raw)) return n.raw;
+      const hit = walk(n.children);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(treeNodes.value);
+};
+
+const resolveParent = (kind) => {
+  const sel = selectedProduct.value;
+  const selType = sel?.type ?? sel?.configType ?? null;
+  if (kind === 'series' || !sel) {
+    const root = sel && selType === 'brand' ? sel : findRootRaw();
+    if (!root) return null;
+    return { parentId: root.id, configType: 'series', label: root.display_name ?? root.name };
+  }
+  if (selType === 'product') {
+    const parent = sel.parentId != null ? findRawByPredicate((r) => r.id === sel.parentId) : null;
+    return parent
+      ? { parentId: parent.id, configType: 'product', label: parent.display_name ?? parent.name }
+      : null;
+  }
+  const childType = selType === 'brand' ? 'series' : 'product';
+  return { parentId: sel.id, configType: childType, label: sel.display_name ?? sel.name };
+};
+
+const openAdd = (kind) => {
+  addKind.value = kind;
+  const p = resolveParent(kind);
+  if (!p) { message.warning('未找到上级节点'); return; }
+  addParentLabel.value = p.label;
+  addName.value = '';
+  addOpen.value = true;
+};
+
+const confirmAdd = async () => {
+  const name = addName.value.trim();
+  if (!name) { message.warning('请输入产品名称'); return; }
+  const p = resolveParent(addKind.value);
+  if (!p || p.parentId == null) { message.error('未找到上级节点'); return; }
+  addSaving.value = true;
+  try {
+    await createProduct({ name, parentId: p.parentId, configType: p.configType }, brandId.value);
+    message.success('已新增');
+    addOpen.value = false;
+    addName.value = '';
+    await loadTree();
+    const newNode = findRawByPredicate((r) => r.name === name && r.parentId === p.parentId);
+    if (newNode) {
+      selectedKeys.value = [newNode.id];
+      selectedProduct.value = newNode;
+    }
+    expandedKeys.value = (treeNodes.value ?? []).flatMap((n) => [n.key, ...(n.children ?? []).map((c) => c.key)]);
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '新增失败');
+  } finally {
+    addSaving.value = false;
+  }
 };
 
 const onSelect = (keys, { node }) => {
@@ -216,6 +312,18 @@ onMounted(loadTree);
 .tree-footer {
   margin-top: auto;
   padding-top: 12px;
+}
+
+.tree-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.add-parent-line {
+  color: #64748b;
+  font-size: 13px;
+  margin-bottom: 8px;
 }
 
 .tree-hint {
