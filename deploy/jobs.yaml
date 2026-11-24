@@ -62,7 +62,7 @@ jobs:
       line: "/opt/saas/deploy/cron-sync-mdd-notes.sh" }
   - { id: df-notes,           user: deploy, schedule: ["50 5 * * *"], category: sync, needs_cookie: [7],
       desc: "奕境笔记链四步(同 MDD;线索两槽 11-24 新增)",
-      line: "/opt/saas/deploy/cron-sync-df-notes.sh" }
+      line: "/opt/saas/deploy/cron-sync-df-notes.sh >> /opt/saas/logs/df-notes-sync.log 2>&1" }
   - { id: kos-daytier,        user: deploy, schedule: ["0 8 * * *", "0 10 * * *"], category: sync, needs_cookie: all,
       desc: "KOS 分层重算(kos-tier)",
       line: "/opt/saas/deploy/cron-sync-kos-daytier.sh" }
