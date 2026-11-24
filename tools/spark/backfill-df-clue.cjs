@@ -41,7 +41,8 @@ const START = argOf('--start', dayStr(-90));
         });
         const j = await res.json();
         const r = j?.data;
-        if (!res.ok || (r && r.status && r.status !== 'success') || j?.code) {
+        // 后端包络成功时形如 {code:201, message:'success', data:{status:'success',...}},不能拿 code 判错
+          if (!res.ok || (r && r.status && r.status !== 'success')) {
           // clue_acq_tool 是 7 天窗滚动：单日空跑属正常；API 报错（如 cookie 过期）则终止
           const msg = j?.message || j?.msg || JSON.stringify(j).slice(0, 120);
           if (res.status === 401 || /cookie|登录/i.test(String(msg))) {

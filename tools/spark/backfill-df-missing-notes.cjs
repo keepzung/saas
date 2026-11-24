@@ -14,7 +14,7 @@ const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/6
 const BRAND = Number((process.argv.find((a) => a.startsWith('--brand=')) || '--brand=7').split('=')[1]);
 const APPLY = process.argv.includes('--apply');
 const mk = (label) => ({ selected: 1, labelValue: label, labelName: label });
-const TARGETS = ['note_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
+const TARGETS = ['note_id', 'note_title', 'note_publish_time', 'author_name', 'author_id', 'note_link', 'first_file_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
 const dayStr = (offsetDays) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 const pick = (r, code) => {
   if (r[code] !== undefined && r[code] !== null && r[code] !== '') return r[code];
