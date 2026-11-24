@@ -576,6 +576,20 @@ async function main() {
 
       if (anomalies.length) out.push(mk(brandId, [...new Set(anomalies)], detail));
     }
+
+    // ⑧ 调度清单漂移(全局): crontab 与 deploy/jobs.yaml 逐行比对(P2.1 调度收敛的日常执行点)
+    try {
+      const vout = execSync(`node ${JSON.stringify(path.join(__dirname, 'verify-cron.cjs'))} --json 2>/dev/null`, { encoding: 'utf8' });
+      const v = JSON.parse(vout);
+      if (v && v.ok === false && Array.isArray(v.drift) && v.drift.length) {
+        out.push({
+          brandId: null, brand: '服务器', source: 'metric', cookie: '—', lastSuccess: '—', detail: {},
+          anomalies: [`L5 调度清单漂移 ${v.drift.length} 项: ${v.drift.map((d) => `${d.kind}(${d.jobs || ''})`).join(';')}`],
+        });
+      }
+    } catch {
+      /* verify 自身失败(如非 root)不告警,避免噪音 */
+    }
     return out;
   }
 
