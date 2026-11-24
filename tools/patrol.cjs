@@ -534,8 +534,11 @@ async function main() {
           anomalies.push(`L5 获客工具统计停更: 最新 ${acqMax?.day ? shDayStr(acqMax.day) : '无行'} (>2.5天)`);
       }
 
-      // ⑤ 同步日志异常: 近24h 同一(syncType,statDate) 成功>5次 = 锁日误判签名(每小时白拉全量)
+      // ⑤ 同步日志异常: 近24h 同一(syncType,statDate) 成功>5次 且该日早于 T-3 = 锁日误判签名
+      //    (stat-smart-pull 每30分钟+safeSync+pull-t1 多调度器对 T-1~T-3 的重复拉取属设计行为;
+      //     MDD campaign 无日期时按档案连刷近3天同理;锁日 bug 的形态是更老的日被每小时重拉)
       //    例外: keepalive(设计即10分钟一条); brand2 notes(滚动重拉设计,每小时一条)
+      const dupCutoff = daysAgoStr(4); // T-3 之前的日
       const dupWhere = { brandId, status: 'success', createdAt: { gte: ago(1) }, syncType: { not: 'keepalive' } };
       if (brandId === 2) dupWhere.syncType = { notIn: ['keepalive', 'notes'] };
       const dup = await p.sparkSyncLog.groupBy({
@@ -543,7 +546,9 @@ async function main() {
         where: dupWhere,
         _count: { _all: true },
       });
-      const worst = dup.filter((d) => d._count._all > 5).sort((a, b) => b._count._all - a._count._all)[0];
+      const worst = dup
+        .filter((d) => d._count._all > 5 && d.statDate && d.statDate < dupCutoff)
+        .sort((a, b) => b._count._all - a._count._all)[0];
       if (worst) {
         anomalies.push(`L5 同步日志异常: ${worst.syncType} ${worst.statDate ?? '-'} 近24h 成功 ${worst._count._all} 次(疑似锁日失效,反复全量重拉)`);
         detail['日志同日最高重复'] = `${worst.syncType}@${worst.statDate}×${worst._count._all}`;
