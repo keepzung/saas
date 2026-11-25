@@ -28,11 +28,11 @@
           <div class="ed-tip">当前选中的图片全幅铺满封面，标题文字直接压在图上。右侧实时预览，调整满意后点「选用为封面」。</div>
           <div class="ed-field">
             <div class="ed-label">主标题</div>
-            <a-input v-model:value="yzTitle" :maxlength="20" placeholder="默认使用文章标题" />
+            <a-input v-model:value="yzTitle" :maxlength="60" placeholder="默认使用文章标题，过长自动换行" />
           </div>
           <div class="ed-field">
             <div class="ed-label">副标题（选填）</div>
-            <a-input v-model:value="yzSub" :maxlength="30" placeholder="如：实测真香 / 限时优惠" />
+            <a-input v-model:value="yzSub" :maxlength="60" placeholder="如：实测真香 / 限时优惠（过长自动换行）" />
           </div>
           <div class="ed-field">
             <div class="ed-label">文字位置</div>
@@ -124,7 +124,7 @@
           </div>
           <div class="ed-field">
             <div class="ed-label">压字标题（选填，压在拼图上）</div>
-            <a-input v-model:value="ptTitle" :maxlength="20" placeholder="默认使用文章标题" />
+            <a-input v-model:value="ptTitle" :maxlength="60" placeholder="默认使用文章标题，过长自动换行" />
           </div>
         </div>
         <div class="ed-right">
@@ -165,7 +165,7 @@
           </div>
           <div class="ed-field">
             <a-checkbox v-model:checked="scOverlay">生成后压上标题</a-checkbox>
-            <a-input v-if="scOverlay" v-model:value="scTitle" :maxlength="20" style="margin-top: 8px" placeholder="标题（默认用文章标题）" />
+            <a-input v-if="scOverlay" v-model:value="scTitle" :maxlength="40" style="margin-top: 8px" placeholder="标题（默认用文章标题）" />
           </div>
         </div>
         <div class="ed-right">
@@ -358,34 +358,69 @@ const drawText = (ctx, str, x, y, size, color, style) => {
   ctx.restore();
 };
 
+// 按实际渲染宽度自动换行（中文逐字符装箱）
+const wrapByMeasure = (ctx, text, maxWidth) => {
+  const chars = Array.from(text);
+  const lines = [];
+  let cur = '';
+  for (const ch of chars) {
+    const test = cur + ch;
+    if (cur && ctx.measureText(test).width > maxWidth) {
+      lines.push(cur);
+      cur = ch;
+    } else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [''];
+};
+
 const drawYazi = (ctx, W, H) => {
   const img = imgCache.get(baseImage.value);
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, W, H);
   if (img) drawCoverFit(ctx, img, W / 2, H / 2, W, H);
-  const main = (yzTitle.value || props.title || '').slice(0, 20);
-  const sub = yzSub.value.trim().slice(0, 30);
-  const size = W * (main.length > 12 ? 0.072 : 0.085);
-  const blockH = size * (sub ? 2.3 : 1.2);
-  let baseY = yzPos.value === 'top' ? H * 0.16 : yzPos.value === 'middle' ? H * 0.46 : H * 0.78;
+  const main = (yzTitle.value || props.title || '').trim().slice(0, 60);
+  const sub = yzSub.value.trim().slice(0, 60);
+  // 主标题自动换行：超过 4 行自动缩小字号
+  let size = W * (main.length > 24 ? 0.062 : main.length > 12 ? 0.072 : 0.082);
+  const font = (s) => `900 ${s}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.font = font(size);
+  let mainLines = wrapByMeasure(ctx, main, W * 0.88);
+  if (mainLines.length > 4) {
+    size = W * Math.max(0.042, (0.072 * 3.6) / mainLines.length);
+    ctx.font = font(size);
+    mainLines = wrapByMeasure(ctx, main, W * 0.88);
+  }
+  const subSize = size * 0.5;
+  ctx.font = `900 ${subSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  const subLines = sub ? wrapByMeasure(ctx, sub, W * 0.82) : [];
+  const lhM = size * 1.34;
+  const lhS = subSize * 1.5;
+  const blockH = mainLines.length * lhM + (subLines.length ? subLines.length * lhS + size * 0.26 : 0);
+  const centerY = yzPos.value === 'top' ? H * 0.2 : yzPos.value === 'middle' ? H * 0.46 : H * 0.78;
+  const maxTop = H * 0.96 - blockH;
+  const top = Math.max(H * 0.04, Math.min(maxTop, centerY - blockH / 2));
   if (yzStyle.value === 'shade' && yzPos.value === 'bottom') {
-    const grad = ctx.createLinearGradient(0, H * 0.55, 0, H);
+    const gradTop = Math.max(0, Math.min(H * 0.5, top - size * 1.1));
+    const grad = ctx.createLinearGradient(0, gradTop, 0, H);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.72)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.75)');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, H * 0.55, W, H * 0.45);
-    baseY = H * 0.8;
+    ctx.fillRect(0, gradTop, W, H - gradTop);
   }
   if (yzStyle.value === 'band') {
     ctx.fillStyle = 'rgba(15,23,42,0.66)';
-    ctx.fillRect(0, baseY - blockH * 0.62, W, blockH * 1.24);
+    ctx.fillRect(0, top - size * 0.5, W, blockH + size);
   }
-  if (sub) {
-    drawText(ctx, sub, W / 2, baseY - size * 0.72, size * 0.46, '#e2e8f0', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
-    drawText(ctx, main, W / 2, baseY + size * 0.42, size, '#ffffff', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
-  } else {
-    drawText(ctx, main, W / 2, baseY, size, '#ffffff', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
-  }
+  const paint = yzStyle.value === 'stroke' ? 'stroke' : 'plain';
+  // 副标题在上、主标题在下
+  subLines.forEach((ln, i) => {
+    drawText(ctx, ln, W / 2, top + lhS * (i + 0.5), subSize, '#e2e8f0', paint);
+  });
+  const mainTop = top + (subLines.length ? subLines.length * lhS + size * 0.26 : 0);
+  mainLines.forEach((ln, i) => {
+    drawText(ctx, ln, W / 2, mainTop + lhM * (i + 0.5), size, '#ffffff', paint);
+  });
 };
 
 const drawDazibao = (ctx, W, H) => {
