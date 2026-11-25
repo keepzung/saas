@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -15,6 +16,7 @@ import { CaseDto, CoverSceneDto, HookDto, PersonaDto, RuleDto, TemplateDto } fro
 
 @Injectable()
 export class ContentproService {
+  private readonly logger = new Logger('ContentproService');
   constructor(
     private prisma: PrismaService,
     private ai: AiService,
@@ -936,8 +938,9 @@ export class ContentproService {
             where: { id: taskId },
             data: { successCount: { increment: 1 }, status: done >= (task?.targetQty ?? 1) ? 'completed' : 'running' },
           });
-        } catch {
-          // 生成失败：算力退回（按档位）
+        } catch (e) {
+          // 生成失败：算力退回（按档位），记录原因便于排查
+          this.logger.warn(`批量生成 #${taskId} 单篇失败: ${e?.message ?? e}`);
           await this.quota.refund(brandId, pointsPer, userId, `批量生成失败退回 #${taskId}`);
           await this.prisma.batchTask.update({
             where: { id: taskId },
