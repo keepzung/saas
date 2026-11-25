@@ -334,14 +334,21 @@ const loadImage = (url) =>
   new Promise((resolve) => {
     if (!url) return resolve(null);
     if (imgCache.has(url)) return resolve(imgCache.get(url));
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      imgCache.set(url, img);
-      resolve(img);
+    // 大图（AI 生成可达 10MB+）弱网下首次可能失败，自动重试 2 次
+    const attempt = (left) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        imgCache.set(url, img);
+        resolve(img);
+      };
+      img.onerror = () => {
+        if (left > 0) setTimeout(() => attempt(left - 1), 1500);
+        else resolve(null);
+      };
+      img.src = url;
     };
-    img.onerror = () => resolve(null);
-    img.src = url;
+    attempt(2);
   });
 
 const drawCoverFit = (ctx, img, x, y, w, h) => {
@@ -426,6 +433,8 @@ const generatePosterBg = async () => {
     );
     poBg.value = res?.url ?? '';
     message.success('海报背景已生成，标题/标签可继续调整');
+    // 先等大图加载完成再结束 busy 态，避免首帧画成占位符
+    if (poBg.value) await loadImage(poBg.value);
   } catch (e) {
     message.error(e?.response?.data?.msg ?? e?.message ?? 'AI 生成失败');
   } finally {
@@ -844,7 +853,8 @@ const applyCanvas = () => {
   ctx.drawImage(src, 0, 0, out.width, out.height);
   uploading.value = true;
   try {
-    emit('apply', { dataUrl: out.toDataURL('image/png') });
+    // JPEG：海报/压字类封面是照片内容，体积比 PNG 小一个量级
+    emit('apply', { dataUrl: out.toDataURL('image/jpeg', 0.92) });
   } finally {
     uploading.value = false;
   }

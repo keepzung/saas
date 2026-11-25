@@ -759,7 +759,7 @@ const onCoverApply = async ({ dataUrl, remoteUrl, name }) => {
       return;
     }
     const blob = await (await fetch(dataUrl)).blob();
-    const file = new File([blob], 'cover.png', { type: 'image/png' });
+    const file = new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' });
     const res = await uploadMaterialImage(file, brandId.value);
     if (!res?.url) throw new Error(res?.error ?? '封面上传失败');
     images.value.unshift({ url: res.url, name: name ?? '设计封面' });
