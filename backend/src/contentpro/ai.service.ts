@@ -741,22 +741,30 @@ export class AiService {
     return result;
   }
 
-  // ── 素材池：按产品节点 → 品牌 ──
+  // ── 素材池：产品内容只配本产品图 ──
+  // 指定产品时 = 本产品(+所属产品线,不含品牌根)素材在前、未归属素材补位，绝不混其他产品；
+  // 未指定产品(旧路径) = 全品牌池
   private async materialPool(brandId: number, productId?: number) {
-    const productNodeIds: number[] = [];
-    if (productId) {
-      productNodeIds.push(productId);
-      const product = await this.prisma.product.findUnique({ where: { id: productId } });
-      if (product?.parentId) productNodeIds.push(product.parentId);
+    if (!productId) {
+      return this.prisma.materialImage.findMany({ where: { brandId, status: 1 }, take: 500 });
     }
-    const where = {
-      brandId,
-      status: 1,
-      ...(productNodeIds.length
-        ? { OR: [{ productNodeId: { in: productNodeIds } }, { productNodeId: null }] }
-        : {}),
-    };
-    return this.prisma.materialImage.findMany({ where, take: 500 });
+    const productNodeIds: number[] = [productId];
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    const parent = product?.parentId
+      ? await this.prisma.product.findUnique({ where: { id: product.parentId } })
+      : null;
+    if (parent && (parent.configType ?? 'product') !== 'brand') productNodeIds.push(parent.id);
+    const [own, unassigned] = await Promise.all([
+      this.prisma.materialImage.findMany({
+        where: { brandId, status: 1, productNodeId: { in: productNodeIds } },
+        take: 300,
+      }),
+      this.prisma.materialImage.findMany({
+        where: { brandId, status: 1, productNodeId: null },
+        take: 200,
+      }),
+    ]);
+    return [...own, ...unassigned];
   }
 
   private shuffleTake<T>(arr: T[], n: number): T[] {

@@ -126,6 +126,10 @@ export class ContentproService {
     productNodeId?: string;
     /** 1=仅已打类型标签的图（精准编排可用性检查用） */
     typeTagged?: string;
+    /** 1=仅未归属任何产品的图（素材库产品 tab 之外的入口） */
+    noProduct?: string;
+    /** 1=产品过滤时连带未归属素材（产品内容只配本产品图+未归属补位） */
+    includeUnassigned?: string;
     page?: string;
     pageSize?: string;
   }) {
@@ -134,7 +138,13 @@ export class ContentproService {
     const where: Prisma.MaterialImageWhereInput = { brandId: query.brandId };
     if (query.setId) where.setId = Number(query.setId);
     if (query.typeId) where.typeId = Number(query.typeId);
-    if (query.productNodeId) where.productNodeId = Number(query.productNodeId);
+    if (query.noProduct === '1') {
+      where.productNodeId = null;
+    } else if (query.productNodeId && query.includeUnassigned === '1') {
+      where.OR = [{ productNodeId: Number(query.productNodeId) }, { productNodeId: null }];
+    } else if (query.productNodeId) {
+      where.productNodeId = Number(query.productNodeId);
+    }
     if (query.typeTagged === '1') where.typeId = { not: null };
     if (query.unassigned === '1') where.AND = [{ setId: null }, { typeId: null }];
     if (query.keyword) where.name = { contains: query.keyword, mode: 'insensitive' };

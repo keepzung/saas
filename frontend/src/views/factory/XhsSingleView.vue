@@ -252,7 +252,8 @@
           </div>
           <div class="material-panel">
             <div class="mp-head">
-              <PictureOutlined /> 产品素材库
+              <PictureOutlined /> 本产品素材库
+              <span class="mp-scope">仅「{{ productName }}」及未归属素材</span>
               <a-select v-model:value="mpSet" size="small" style="width: 120px" allow-clear placeholder="按套图" :options="setOptions" />
               <a-select v-model:value="mpType" size="small" style="width: 100px" allow-clear placeholder="按标签" :options="typeOptions" />
             </div>
@@ -661,6 +662,7 @@ const confirmArticle = () => {
 
 const toMatch = () => {
   step.value = 4;
+  loadPool();
   if (!images.value.length) matchImages(true);
 };
 
@@ -689,6 +691,8 @@ const loadPool = async () => {
     pageSize: 60,
     setId: mpSet.value ?? undefined,
     typeId: mpType.value ?? undefined,
+    // 产品内容只配本产品图：只显示当前产品+未归属素材，其他产品不出现
+    ...(productId.value ? { productNodeId: productId.value, includeUnassigned: '1' } : {}),
   });
   materialPool.value = res?.list ?? [];
 };
@@ -1404,6 +1408,16 @@ onMounted(async () => {
   font-weight: 600;
   margin-bottom: 10px;
   flex-wrap: wrap;
+}
+
+.mp-scope {
+  color: #94a3b8;
+  font-weight: 400;
+  font-size: 12px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mp-grid {

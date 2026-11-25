@@ -1,5 +1,19 @@
 <template>
   <PageWrapper title="素材库">
+    <div v-if="productLines.length" class="prod-tabs">
+      <div class="pt-row">
+        <span class="pt-label">产品线</span>
+        <a-radio-group v-model:value="activeLineKey" button-style="solid" size="small" @change="onLineChange">
+          <a-radio-button v-for="l in productLines" :key="l.key" :value="l.key">{{ l.name }}</a-radio-button>
+        </a-radio-group>
+      </div>
+      <div v-if="activeLineProducts.length" class="pt-row">
+        <span class="pt-label">型号</span>
+        <a-radio-group v-model:value="activeProductId" button-style="solid" size="small" @change="onProductChange">
+          <a-radio-button v-for="p in activeLineProducts" :key="p.id" :value="p.id">{{ p.name }}</a-radio-button>
+        </a-radio-group>
+      </div>
+    </div>
     <FilterTopbar>
       <a-select
         v-model:value="filterType"
@@ -15,15 +29,6 @@
         allow-clear
         :options="setOptions"
       />
-      <a-select
-        v-model:value="filterProduct"
-        style="width: 160px"
-        placeholder="按产品筛选"
-        allow-clear
-        show-search
-        option-filter-prop="label"
-        :options="productNodeOptions"
-      />
       <a-input-search
         v-model:value="keyword"
         style="width: 200px"
@@ -31,10 +36,11 @@
         allow-clear
         @search="load"
       />
-      <a-checkbox v-model:checked="onlyUnassigned" style="margin-left: 8px">未分类</a-checkbox>
+      <a-checkbox v-model:checked="onlyNoProduct" style="margin-left: 8px">未归属产品</a-checkbox>
+      <a-checkbox v-model:checked="onlyUntagged">未打标</a-checkbox>
     </FilterTopbar>
 
-    <div class="mat-body">
+    <div class="mat-body" :class="{ 'mat-body-flat-top': productLines.length }">
       <div class="mat-toolbar">
         <a-checkbox
           :checked="allChecked"
@@ -81,7 +87,7 @@
               <UploadOutlined /> 上传产品素材
             </a-button>
           </a-upload>
-          <a-button size="small" @click="importOpen = true"><LinkOutlined /> URL 导入</a-button>
+          <a-button size="small" @click="openImport()"><LinkOutlined /> URL 导入</a-button>
           <a-button size="small" @click="manageOpen = true"><TagsOutlined /> 标签/套图管理</a-button>
         </div>
       </div>
@@ -104,7 +110,7 @@
             </div>
           </div>
         </div>
-        <a-empty v-else-if="!loading" description="暂无素材，点击右上角「上传产品素材」或「URL 导入」添加" class="mat-empty" />
+        <a-empty v-else-if="!loading" :description="activeProductId ? `「${activeLineProducts.find((p) => p.id === activeProductId)?.name ?? ''}」暂无素材，点击右上角「上传产品素材」添加（自动归属当前型号）` : '暂无素材，点击右上角「上传产品素材」或「URL 导入」添加'" class="mat-empty" />
       </a-spin>
 
       <div class="mat-footer">
@@ -219,8 +225,16 @@ const checked = ref([]);
 const keyword = ref('');
 const filterType = ref(null);
 const filterSet = ref(null);
-const onlyUnassigned = ref(false);
+const onlyUntagged = ref(false);
+const onlyNoProduct = ref(false);
 const uploading = ref(false);
+
+// 产品线→型号两级 tab（与资料库产品树同构：brand→series→product）
+const productLines = ref([]);
+const activeLineKey = ref(null);
+const activeProductId = ref(null);
+const activeLine = computed(() => productLines.value.find((l) => l.key === activeLineKey.value) ?? null);
+const activeLineProducts = computed(() => activeLine.value?.products ?? []);
 
 const tags = ref([]);
 const sets = ref([]);
@@ -235,7 +249,6 @@ const assignSet = ref(undefined);
 const importOpen = ref(false);
 const importText = ref('');
 const productNodeOptions = ref([]);
-const filterProduct = ref(null);
 const uploadProduct = ref(null);
 const importProduct = ref(null);
 const assignProduct = ref(undefined);
@@ -262,6 +275,40 @@ const loadMeta = async () => {
   sets.value = s?.list ?? [];
 };
 
+const parseTree = (tree) => {
+  // 与资料库同构：brand → series(产品线) → product(型号)；series 可嵌套，产品平铺到所属线
+  const lines = [];
+  const orphans = [];
+  const collectProducts = (node, out) => {
+    for (const c of node.children ?? []) {
+      if ((c.type ?? c.configType ?? "product") === "product") out.push({ id: c.id, name: c.display_name ?? c.name });
+      else collectProducts(c, out);
+    }
+  };
+  const walkRoot = (node) => {
+    for (const c of node.children ?? []) {
+      const t = c.type ?? c.configType ?? "product";
+      if (t === 'product') orphans.push({ id: c.id, name: c.display_name ?? c.name });
+      else {
+        const ps = [];
+        collectProducts(c, ps);
+        lines.push({ key: `l${c.id}`, name: c.display_name ?? c.name, products: ps });
+      }
+    }
+  };
+  for (const root of tree ?? []) {
+    const t = root.type ?? root.configType ?? "product";
+    if (t === 'brand') walkRoot(root);
+    else if (t === 'series') {
+      const ps = [];
+      collectProducts(root, ps);
+      lines.push({ key: `l${root.id}`, name: root.display_name ?? root.name, products: ps });
+    } else orphans.push({ id: root.id, name: root.display_name ?? root.name });
+  }
+  if (orphans.length) lines.push({ key: 'lorphan', name: '未分组', products: orphans });
+  return lines;
+};
+
 const loadProductNodes = async () => {
   try {
     const tree = (await getProducts({ brandId: brandId.value })) ?? [];
@@ -273,9 +320,28 @@ const loadProductNodes = async () => {
       return out;
     };
     productNodeOptions.value = walk(tree, 0);
+    productLines.value = parseTree(tree);
+    if (productLines.value.length) {
+      activeLineKey.value = productLines.value[0].key;
+      activeProductId.value = productLines.value[0].products[0]?.id ?? null;
+      uploadProduct.value = activeProductId.value;
+    }
   } catch {
     // 产品树缺失的工作区允许手动新建
   }
+};
+
+const onLineChange = () => {
+  activeProductId.value = activeLine.value?.products[0]?.id ?? null;
+  uploadProduct.value = activeProductId.value;
+  page.value = 1;
+  load();
+};
+
+const onProductChange = () => {
+  uploadProduct.value = activeProductId.value;
+  page.value = 1;
+  load();
 };
 
 const addProductNode = async (name) => {
@@ -306,8 +372,10 @@ const load = async () => {
       keyword: keyword.value || undefined,
       typeId: filterType.value ?? undefined,
       setId: filterSet.value ?? undefined,
-      productNodeId: filterProduct.value ?? undefined,
-      unassigned: onlyUnassigned.value ? '1' : undefined,
+      // 产品 tab 选中时只看当前型号；勾选"未归属产品"时忽略 tab
+      productNodeId: onlyNoProduct.value ? undefined : activeProductId.value ?? undefined,
+      noProduct: onlyNoProduct.value ? '1' : undefined,
+      unassigned: onlyUntagged.value ? '1' : undefined,
     });
     list.value = data?.list ?? [];
     total.value = data?.total ?? 0;
@@ -366,6 +434,12 @@ const doAssign = async () => {
   message.success('已更新');
   assignOpen.value = false;
   await load();
+};
+
+const openImport = () => {
+  // 默认归属当前选中的型号，可改
+  importProduct.value = activeProductId.value;
+  importOpen.value = true;
 };
 
 const doImport = async () => {
@@ -442,6 +516,35 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.prod-tabs {
+  background: #fff;
+  margin: 0 20px;
+  padding: 12px 20px 4px;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pt-row :deep(.ant-radio-group) {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.pt-label {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 24px;
+  flex-shrink: 0;
+}
+
 .mat-body {
   flex: 1;
   min-height: 0;
@@ -453,6 +556,10 @@ onMounted(async () => {
   border-radius: 16px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   overflow: auto;
+}
+
+.mat-body-flat-top {
+  border-radius: 0 0 16px 16px;
 }
 
 .mat-toolbar {
