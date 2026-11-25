@@ -224,6 +224,14 @@ export class ContentproService {
         selling_points: (s.sellingPoints as unknown as string[]) ?? [],
         audience: (s.audience as unknown as string[]) ?? [],
         content_directions: (s.contentDirections as unknown as { name: string; description?: string }[]) ?? [],
+        prompt: s.prompt ?? '',
+        mode: s.mode ?? 'open',
+        format_text: s.formatText ?? '',
+        required_tags: (s.requiredTags as unknown as string[]) ?? [],
+        forbidden_text: s.forbiddenText ?? '',
+        tone: (s.tone as unknown as string[]) ?? [],
+        visual: (s.visual as unknown) ?? null,
+        bound_product_ids: (s.boundProductIds as unknown as number[]) ?? [],
         enabled: s.enabled,
         sort: s.sort,
         product_id: s.productId,
@@ -242,6 +250,14 @@ export class ContentproService {
         sellingPoints: (dto.selling_points as string[]) ?? (dto.sellingPoints as string[]) ?? [],
         audience: (dto.audience as string[]) ?? [],
         contentDirections: (dto.content_directions as unknown) ?? (dto.contentDirections as unknown) ?? [],
+        prompt: (dto.prompt as string) ?? null,
+        mode: (dto.mode as string) === 'precise' ? 'precise' : 'open',
+        formatText: (dto.formatText as string) ?? null,
+        requiredTags: (dto.required_tags ?? dto.requiredTags ?? []) as unknown as Prisma.InputJsonValue,
+        forbiddenText: (dto.forbidden_text as string) ?? null,
+        tone: (dto.tone ?? dto.tone ?? []) as unknown as Prisma.InputJsonValue,
+        visual: (dto.visual ?? null) as unknown as Prisma.InputJsonValue,
+        boundProductIds: (dto.bound_product_ids ?? dto.boundProductIds ?? []) as unknown as Prisma.InputJsonValue,
         enabled: dto.enabled === undefined ? true : Boolean(dto.enabled),
         sort: Number(dto.sort ?? 99),
         productId: dto.productId ? Number(dto.productId) : null,
@@ -261,6 +277,18 @@ export class ContentproService {
     if (dto.audience !== undefined) data.audience = dto.audience as string[];
     if (dto.content_directions !== undefined || dto.contentDirections !== undefined) {
       data.contentDirections = (dto.content_directions ?? dto.contentDirections) as unknown as Prisma.InputJsonValue;
+    }
+    if (dto.prompt !== undefined) data.prompt = String(dto.prompt);
+    if (dto.mode !== undefined) data.mode = (dto.mode as string) === 'precise' ? 'precise' : 'open';
+    if (dto.format_text !== undefined || dto.formatText !== undefined) data.formatText = (dto.format_text ?? dto.formatText) as string;
+    if (dto.required_tags !== undefined || dto.requiredTags !== undefined) {
+      data.requiredTags = (dto.required_tags ?? dto.requiredTags) as unknown as Prisma.InputJsonValue;
+    }
+    if (dto.forbidden_text !== undefined || dto.forbiddenText !== undefined) data.forbiddenText = (dto.forbidden_text ?? dto.forbiddenText) as string;
+    if (dto.tone !== undefined) data.tone = (dto.tone ?? dto.tone) as unknown as Prisma.InputJsonValue;
+    if (dto.visual !== undefined) data.visual = dto.visual as unknown as Prisma.InputJsonValue;
+    if (dto.bound_product_ids !== undefined || dto.boundProductIds !== undefined) {
+      data.boundProductIds = (dto.bound_product_ids ?? dto.boundProductIds) as unknown as Prisma.InputJsonValue;
     }
     if (dto.enabled !== undefined) data.enabled = Boolean(dto.enabled);
     if (dto.sort !== undefined) data.sort = Number(dto.sort);

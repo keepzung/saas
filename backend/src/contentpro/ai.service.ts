@@ -36,6 +36,14 @@ export interface PreReviewResult {
 export interface StrategyDraftResult {
   name: string;
   description: string;
+  prompt: string;
+  mode: 'precise' | 'open';
+  format_text: string;
+  required_tags: string[];
+  forbidden: string;
+  tone: string[];
+  visual: { mode: string; count: number; set_id: number | null; slots: { tagId?: number; position?: string }[] };
+  bound_product_ids: number[];
   persona: string[];
   selling_points: string[];
   audience: string[];
@@ -150,7 +158,8 @@ export class AiService {
       '你是小红书 KOS（品牌门店员工）的内容策略专家。',
       'KOS 给你：产品信息、写作角度、想表达的观点、必须覆盖的重要要点。',
       '请产出一份可直接使用的写作策略，输出严格 JSON：',
-      '{"name":"人设化策略名(12字内)","description":"一句话概括面向什么客户讲什么重点","persona":["人设1"],"selling_points":["卖点1","..."],"audience":["目标受众1"],"content_directions":[{"name":"内容方向名","description":"方向说明"}]}',
+      '{"name":"人设化策略名(12字内)","description":"一句话概括面向什么客户讲什么重点","mode":"precise或open","prompt":"带【产品卖点】【人设】【目标受众】等占位符的写作要求提示词模板(分段:开头钩子/正文要点/结尾引导,300-500字)","formatText":"格式框定:字数/结构/标题要求","requiredTags":["#必带话题1","#品牌标签"],"forbidden":"绝对不要出现的内容(每行一条,用换行分隔)","tone":["语气1","语气2"],"persona":["人设1"],"selling_points":["卖点1","..."],"audience":["目标受众1"],"content_directions":[{"name":"内容方向名","description":"方向说明"}]}',
+      'prompt 的写法：写成一段带【产品卖点】【人设】【目标受众】【产品知识】等占位符的写作要求(分段：开头钩子/正文要点/结尾引导)，占位符保持原样不要替换；mode 按策略定位选：品牌官号/专业账号=precise，素人/KOC/矩阵号=open；',
       hasKeys
         ? '要求：persona 1-2 条；selling_points 3-5 条且必须自然覆盖用户给的重要要点；audience 1-2 条；content_directions 1-3 个；'
         : '要求：persona 1-2 条；selling_points 3-5 条（从产品资料中提炼核心卖点与差异优势）；audience 1-2 条；content_directions 1-3 个；',
@@ -174,9 +183,31 @@ export class AiService {
           .filter((d) => d.name)
           .slice(0, 3)
       : [];
+    const rawVisual = (draft.visual ?? {}) as Record<string, unknown>;
+    const vCount = Number(rawVisual.count ?? 4);
+    const bound = Array.isArray(draft.bound_product_ids)
+      ? (draft.bound_product_ids as unknown[]).map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0)
+      : input.productId
+        ? [input.productId]
+        : [];
+    const reqTags = asArr(draft.required_tags).slice(0, 8).map((t) => (t.startsWith('#') ? t : '#' + t));
     return {
       name: String(draft.name ?? '').trim().slice(0, 30) || 'AI 生成的写作策略',
       description: String(draft.description ?? '').trim(),
+      prompt: String(draft.prompt ?? '').trim(),
+      mode: draft.mode === 'precise' ? 'precise' : 'open',
+      format_text: String(draft.formatText ?? '').trim(),
+      required_tags: reqTags,
+      forbidden: String(draft.forbidden ?? '').trim(),
+      tone: asArr(draft.tone).slice(0, 4),
+      visual: {
+        mode: rawVisual.mode === 'precise' ? 'precise' : 'random',
+        count: Number.isInteger(vCount) && vCount >= 1 && vCount <= 9 ? vCount : 4,
+        set_id: rawVisual.setId ? Number(rawVisual.setId) : null,
+        slots: Array.isArray(rawVisual.slots)
+          ? (rawVisual.slots as { tagId?: number; position?: string }[]).slice(0, 9) : [],
+        },
+      bound_product_ids: bound,
       persona: asArr(draft.persona).slice(0, 3),
       selling_points: asArr(draft.selling_points).slice(0, 8),
       audience: asArr(draft.audience).slice(0, 3),
@@ -223,6 +254,41 @@ export class AiService {
     const noteKind = input.noteKind && NOTE_KINDS[input.noteKind] ? input.noteKind : null;
     const style = input.style === 'brand' ? 'brand' : input.style === 'kos' ? 'kos' : null;
     const form = input.form === 'video_script' ? 'video_script' : 'image_text';
+    // 策略框定：提示词模板(变量占位符替换) + 格式/必带标签/禁写/语气
+    const sPromptTpl = String((strategy?.prompt as string) ?? '').trim();
+    const sMode = String((strategy as { mode?: string } | null)?.mode ?? 'open');
+    const sFormatText = String((strategy as { formatText?: string } | null)?.formatText ?? '').trim();
+    const sRequiredTags = asArr(strategy?.requiredTags as unknown);
+    const sForbidden = String((strategy as { forbiddenText?: string } | null)?.forbiddenText ?? '').trim();
+    const sTone = asArr(strategy?.tone as unknown);
+    const personaStr = persona.join('；');
+    const spStr = sellingPoints.join('；');
+    const auStr = audience.join('、');
+    const replaceVars = (tpl: string) => {
+      const map: Record<string, string> = {
+        产品名称: productName,
+        产品名: productName,
+        产品卖点: spStr || '（卖点见下）',
+        卖点: spStr || '（卖点见下）',
+        产品知识: knowledge,
+        产品资料: knowledge,
+        人设: personaStr || (strategy?.name ?? ''),
+        写作人设: personaStr || (strategy?.name ?? ''),
+        目标受众: auStr,
+        产品受众: auStr,
+        钩子: '',
+        写作风格: sMode === 'precise' ? '精准写作（约束强、随机性低、表述严格按提示词执行）' : '开放式写作（随机性高、更像素人真人分享）',
+      };
+      return tpl.replace(/【([^】]{1,14})】/g, (mm: string, key: string) => {
+        const k = key.trim();
+        for (const kk of Object.keys(map)) {
+          if (k === kk) return map[kk];
+          if (k.includes(kk) || kk.includes(k)) return map[kk];
+        }
+        return mm;
+      });
+    };
+    const strategyPromptFilled = sPromptTpl ? replaceVars(sPromptTpl) : '';
 
     if (this.enabled()) {
       try {
@@ -243,6 +309,12 @@ export class AiService {
           style,
           form,
           templates,
+          strategyPrompt: strategyPromptFilled,
+          strategyMode: sMode,
+          formatText: sFormatText,
+          requiredTags: sRequiredTags,
+          forbidden: sForbidden,
+          tone: sTone,
         });
       } catch (e) {
         this.logger.warn(`LLM 生成失败回退模板: ${e?.message ?? e}`);
@@ -279,6 +351,12 @@ export class AiService {
     noteKind?: string | null;
     style?: string | null;
     form?: string | null;
+    strategyPrompt?: string;
+    strategyMode?: string;
+    formatText?: string;
+    requiredTags: string[];
+    forbidden?: string;
+    tone: string[];
     templates: { spec: { content: unknown } | null; vehicle: { content: unknown } | null; complianceTpl: { content: unknown } | null };
   }): Promise<GenerateResult> {
     const wc = ctx.wordCount ?? '300-600';
@@ -300,6 +378,9 @@ export class AiService {
     }
     if (kindInfo) sys.push(`本篇是「${kindInfo.label}」：${kindInfo.guidance}`);
     if (ctx.style) sys.push(STYLE_GUIDANCE[ctx.style]);
+    if (ctx.tone.length) sys.push(`语气偏向：${ctx.tone.join('、')}。`);
+    if (ctx.strategyMode === 'precise') sys.push('本策略为「精准写作」：约束强、随机性低，结构与表述严格按策略提示词执行。');
+    else if (ctx.strategyMode === 'open') sys.push('本策略为「开放式写作」：随机性高，更像素人真人随手分享，避免过度工整。');
 
     // 品牌话术规范（全局约束）
     const spec = ctx.templates.spec?.content as
@@ -327,6 +408,10 @@ export class AiService {
       );
     }
     if (ctx.knowledge) user.push(`产品知识（节选）：\n${ctx.knowledge}`);
+    if (ctx.strategyPrompt) user.push(`【策略提示词（最高优先级，逐条严格执行）】\n${ctx.strategyPrompt}`);
+    if (ctx.formatText) user.push(`【格式框定（必须遵守）】\n${ctx.formatText}`);
+    if (ctx.requiredTags.length) user.push(`【必带标签（正文自然提及，文末标签必须全部包含）】${ctx.requiredTags.join(' ')}`);
+    if (ctx.forbidden) user.push(`【绝对禁止出现（违反任何一条即不合格）】\n${ctx.forbidden}`);
 
     // 车型内容模板（结构约束）
     const vehicle = ctx.templates.vehicle?.content as

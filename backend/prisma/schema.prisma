@@ -1065,6 +1065,14 @@ model WritingStrategy {
   productId         Int?
   name              String
   description       String?  @db.Text
+  prompt            String?  @db.Text
+  mode              String   @default("open")
+  formatText        String?  @db.Text
+  requiredTags      Json?
+  forbiddenText     String?  @db.Text
+  tone              Json?
+  visual            Json?
+  boundProductIds   Json?
   persona           Json?
   sellingPoints     Json?
   audience          Json?

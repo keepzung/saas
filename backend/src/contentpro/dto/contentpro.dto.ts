@@ -44,6 +44,14 @@ export class StrategyDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsInt() sort?: number;
   @IsOptional() @IsInt() productId?: number | null;
+  @IsOptional() @IsString() prompt?: string;
+  @IsOptional() @IsString() mode?: string;
+  @IsOptional() @IsString() formatText?: string;
+  @IsOptional() requiredTags?: string[];
+  @IsOptional() @IsString() forbiddenText?: string;
+  @IsOptional() tone?: string[];
+  @IsOptional() visual?: Record<string, unknown>;
+  @IsOptional() boundProductIds?: number[];
 }
 
 // ─── AI 生成 ─────────────────────────────────────────────────────────

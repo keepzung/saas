@@ -79,6 +79,39 @@
         <a-form-item label="策略描述">
           <a-textarea v-model:value="form.description" :rows="3" placeholder="一句话描述这个策略面向什么客户、讲什么重点" />
         </a-form-item>
+        <a-form-item label="策略类型">
+          <a-radio-group v-model:value="form.mode">
+            <a-radio value="open">开放式写作（素人/KOC/矩阵号，随机性高）</a-radio>
+            <a-radio value="precise">精准写作（品牌官号/蓝V，约束强）</a-radio>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item label="写作要求提示词（支持变量占位符）">
+          <div class="var-btns">
+            <a-button
+              v-for="v in varButtons"
+              :key="v"
+              size="small"
+              @click="appendVar(v)"
+            >【{{ v }}】</a-button>
+          </div>
+          <a-textarea
+            v-model:value="form.prompt"
+            :rows="7"
+            placeholder="带【产品卖点】【人设】【目标受众】等占位符的写作要求模板；也可直接写固定要求。生成文章时按此提示词优先执行"
+          />
+        </a-form-item>
+        <a-form-item label="内容格式（字数/结构/标题要求）">
+          <a-textarea v-model:value="form.format_text" :rows="2" placeholder="如：300-600字，3段式，标题≤20字带数字" />
+        </a-form-item>
+        <a-form-item label="必带标签（每行一个，正文自然提及+文末带话题）">
+          <a-textarea v-model:value="form.required_tags_text" :rows="2" placeholder="每行一个，如：#格力中央空调" />
+        </a-form-item>
+        <a-form-item label="绝对不要写（每行一条）">
+          <a-textarea v-model:value="form.forbidden_text" :rows="2" placeholder="每行一条，如：不夸大功效，不做医疗表述，不贬低竞品" />
+        </a-form-item>
+        <a-form-item label="语气偏向（顿号分隔）">
+          <a-input v-model:value="form.tone_text" placeholder="如：亲切、口语化、有生活气" />
+        </a-form-item>
         <a-form-item label="人设（每行一个）">
           <a-textarea v-model:value="form.persona_text" :rows="2" placeholder="每行一个人设，如：从业多年的老销售" />
         </a-form-item>
@@ -97,6 +130,46 @@
           <a-button size="small" @click="form.content_directions.push({ name: '', description: '' })">
             <PlusOutlined /> 添加方向
           </a-button>
+        </a-form-item>
+        <a-form-item label="视觉编排（AI 写完后的取图方式）">
+          <a-radio-group v-model:value="form.visual_mode">
+            <a-radio value="random">智能随机（按数量随机取图，同套图优先）</a-radio>
+            <a-radio value="precise">精准编排（按类型标签逐位取图，需素材已打标）</a-radio>
+          </a-radio-group>
+          <div v-if="form.visual_mode === 'random'" class="visual-row">
+            取图数量：
+            <a-input-number v-model:value="form.visual_count" :min="1" :max="9" />
+            张（建议 3-6，最多 9）
+          </div>
+          <div v-else class="visual-slots">
+            <div v-for="(s, i) in form.visual_slots" :key="i" class="dir-row">
+              <a-input v-model:value="s.position" style="width: 160px" placeholder="图片位置，如：封面/图2" />
+              <a-select
+                v-model:value="s.tagId"
+                style="flex: 1"
+                :options="typeOptions"
+                placeholder="该位置的类型标签"
+                allow-clear
+              />
+              <a-button type="text" danger @click="form.visual_slots.splice(i, 1)"><DeleteOutlined /></a-button>
+            </div>
+            <a-button size="small" @click="form.visual_slots.push({ position: '', tagId: null })">
+              <PlusOutlined /> 添加图片位置
+            </a-button>
+          </div>
+          <div class="visual-row" style="margin-top: 8px">
+            指定套图（选填，限定只从该套图取图）：
+            <a-select v-model:value="form.visual_set" style="width: 220px" allow-clear :options="setOptions" placeholder="不指定，系统自动匹配" />
+          </div>
+        </a-form-item>
+        <a-form-item label="绑定产品（该策略适用的产品，可多选）">
+          <a-select
+            v-model:value="form.bound_products"
+            mode="multiple"
+            :options="productOptions"
+            placeholder="选择适用的产品"
+            allow-clear
+          />
         </a-form-item>
         <a-form-item label="启用">
           <a-switch v-model:checked="form.enabled" />
@@ -144,6 +217,17 @@ const emptyForm = () => ({
   id: null,
   name: '',
   description: '',
+  prompt: '',
+  mode: 'open',
+  format_text: '',
+  required_tags_text: '',
+  forbidden_text: '',
+  tone_text: '',
+  visual_mode: 'random',
+  visual_count: 4,
+  visual_set: null,
+  visual_slots: [],
+  bound_products: [],
   persona: [],
   selling_points: [],
   audience: [],
@@ -153,6 +237,10 @@ const emptyForm = () => ({
   content_directions: [],
   enabled: true,
 });
+const varButtons = ['产品名称', '产品卖点', '产品知识', '人设', '目标受众', '钩子'];
+const appendVar = (v) => {
+  form.value.prompt = (form.value.prompt ? form.value.prompt + '\n' : '') + '【' + v + '】';
+};
 const form = ref(emptyForm());
 const NL = String.fromCharCode(10);
 const productOptions = ref([]);
@@ -191,6 +279,19 @@ const aiGenerate = async () => {
     const d = draft ?? {};
     if (d.name) form.value.name = d.name;
     if (d.description) form.value.description = d.description;
+    if (d.prompt) form.value.prompt = d.prompt;
+    if (d.mode) form.value.mode = d.mode;
+    if (d.format_text) form.value.format_text = d.format_text;
+    if (d.required_tags) form.value.required_tags_text = (d.required_tags ?? []).join('\n');
+    if (d.forbidden) form.value.forbidden_text = d.forbidden;
+    if (d.tone) form.value.tone_text = (d.tone ?? []).join('、');
+    if (d.visual) {
+      form.value.visual_mode = d.visual.mode ?? 'random';
+      form.value.visual_count = d.visual.count ?? 4;
+      form.value.visual_set = d.visual.set_id ?? null;
+      form.value.visual_slots = (d.visual.slots ?? []).map((x) => ({ position: x.position ?? '', tagId: x.tagId ?? null }));
+    }
+    if (d.bound_product_ids) form.value.bound_products = [...(d.bound_product_ids ?? [])];
     form.value.persona = Array.isArray(d.persona) ? d.persona : [];
     form.value.selling_points = Array.isArray(d.selling_points) ? d.selling_points : [];
     form.value.audience = Array.isArray(d.audience) ? d.audience : [];
@@ -222,6 +323,17 @@ const openForm = (s) => {
         id: s.id,
         name: s.name,
         description: s.description ?? '',
+        prompt: s.prompt ?? '',
+        mode: s.mode ?? 'open',
+        format_text: s.format_text ?? '',
+        required_tags_text: (s.required_tags ?? []).join('\n'),
+        forbidden_text: s.forbidden_text ?? '',
+        tone_text: (s.tone ?? []).join('、'),
+        visual_mode: s.visual?.mode ?? 'random',
+        visual_count: s.visual?.count ?? 4,
+        visual_set: s.visual?.setId ?? null,
+        visual_slots: (s.visual?.slots ?? []).map((x) => ({ position: x.position ?? '', tagId: x.tagId ?? null })),
+        bound_products: [...(s.bound_product_ids ?? [])],
         persona: [...s.persona],
         selling_points: [...s.selling_points],
         audience: [...s.audience],
@@ -246,6 +358,17 @@ const save = async () => {
   form.value.persona = toLines(form.value.persona_text);
   form.value.selling_points = toLines(form.value.selling_points_text);
   form.value.audience = toLines(form.value.audience_text);
+  form.value.required_tags = toLines(form.value.required_tags_text);
+  form.value.tone = form.value.tone_text.split(/[、,，]/).map((x) => x.trim()).filter(Boolean);
+  form.value.visual = {
+    mode: form.value.visual_mode,
+    count: form.value.visual_count || 4,
+    setId: form.value.visual_set ?? null,
+    slots: (form.value.visual_slots ?? []).map((s) => ({ position: s.position ?? '', tagId: s.tagId ?? null })),
+  };
+  form.value.boundProductIds = (form.value.bound_products ?? []).map(Number).filter(Number.isInteger);
+  form.value.formatText = form.value.format_text;
+  form.value.forbiddenText = form.value.forbidden_text;
   saving.value = true;
   try {
     if (form.value.id) {
@@ -420,5 +543,28 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.var-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.visual-row {
+  color: #475569;
+  font-size: 13px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.visual-slots {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 </style>
