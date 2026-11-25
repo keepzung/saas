@@ -127,6 +127,9 @@ export const updateHistoryContent = (id, data, params) =>
 export const discardHistories = (ids, params) =>
   request.post('/content-pro/history/discard', { ids }, { params });
 
+export const restoreHistories = (ids, params) =>
+  request.post('/content-pro/history/restore', { ids }, { params });
+
 // ─── 算力配额 / 智能编辑 / 创客贴 ────────────────────────────────────
 export const getQuota = (params) => request.get('/content-pro/quota', { params });
 

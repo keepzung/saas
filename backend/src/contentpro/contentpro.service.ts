@@ -1144,6 +1144,18 @@ export class ContentproService {
     return { discarded: ok.length };
   }
 
+  /** 废弃恢复（已废弃 → 待处理；操作文档 4.2：已废弃 Tab 点恢复即回到待处理） */
+  async restoreHistories(brandId: number, historyIds: number[]) {
+    const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
+    const ok = rows.filter((r) => r.reviewStatus === 'discarded');
+    if (!ok.length) throw new BadRequestException('仅已废弃内容可恢复');
+    await this.prisma.xhsHistory.updateMany({
+      where: { id: { in: ok.map((r) => r.id) } },
+      data: { reviewStatus: 'draft', packageId: null },
+    });
+    return { restored: ok.length };
+  }
+
   /** 轻量编辑（批量结果/包内编辑：只更新内容字段，不动状态与任务归属） */
   async updateHistoryContent(brandId: number, id: number, dto: {
     title?: string;

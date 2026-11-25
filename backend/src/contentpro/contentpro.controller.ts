@@ -324,6 +324,11 @@ export class ContentproController {
     return this.service.discardHistories(Number(brandId ?? 1), body.ids ?? []);
   }
 
+  @Post('content-pro/history/restore')
+  restoreHistories(@Body() body: { ids: number[] }, @Query('brandId') brandId?: string) {
+    return this.service.restoreHistories(Number(brandId ?? 1), body.ids ?? []);
+  }
+
   @Post('content-pro/history/xhs')
   saveHistory(@Body() dto: SaveArticleDto, @Req() req: Request, @Query('brandId') brandId?: string) {
     const user = req.user as { id: number };

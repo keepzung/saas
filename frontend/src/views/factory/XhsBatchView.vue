@@ -124,6 +124,12 @@
             <a-button size="small" danger :disabled="!selectedIds.length">批量废弃</a-button>
           </a-popconfirm>
         </template>
+        <a-button
+          v-if="resTab === 'discarded'"
+          size="small"
+          :disabled="!selectedIds.length"
+          @click="doRestore(selectedIds)"
+        ><UndoOutlined /> 批量恢复到待处理</a-button>
       </div>
 
       <div class="res-layout">
@@ -136,7 +142,7 @@
             @click="currentIndex = i"
           >
             <a-checkbox
-              v-if="resTab === 'pending'"
+              v-if="resTab !== 'moved'"
               :checked="selectedIds.includes(item.id)"
               @click.stop
               @change="toggleSelect(item.id)"
@@ -172,6 +178,9 @@
               </a-popconfirm>
               <a-button v-if="resTab === 'moved' && current.package_id" size="small" @click="goPackage(current.package_id)">
                 查看内容包 <RightOutlined />
+              </a-button>
+              <a-button v-if="resTab === 'discarded'" size="small" @click="doRestore([current.id])">
+                <UndoOutlined /> 恢复到待处理
               </a-button>
             </div>
             <div class="rd-nav">
@@ -238,6 +247,7 @@ import {
   InboxOutlined,
   LeftOutlined,
   RightOutlined,
+  UndoOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '../../stores/auth';
 import { getProducts } from '../../api/content';
@@ -248,6 +258,7 @@ import {
   getXhsHistory,
   updateHistoryContent,
   discardHistories,
+  restoreHistories,
   getQuota,
   getPackagesPro,
   createPackagePro,
@@ -523,6 +534,16 @@ const doDiscard = async (ids) => {
     loadResults();
   } catch (e) {
     message.error(e?.response?.data?.msg ?? '废弃失败');
+  }
+};
+
+const doRestore = async (ids) => {
+  try {
+    const res = await restoreHistories(ids, { brandId: brandId.value });
+    message.success(`已恢复 ${res?.restored ?? 0} 篇到待处理`);
+    loadResults();
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '恢复失败');
   }
 };
 
