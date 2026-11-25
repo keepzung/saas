@@ -195,6 +195,15 @@
             <a-button type="primary" block :loading="poBusy" :disabled="!baseImage" @click="generatePosterBg">
               {{ poBg ? '重新生成海报背景（⚡2）' : poMode === 'pure' ? 'AI 生成整图海报（⚡2）' : 'AI 生成海报背景（⚡2）' }}
             </a-button>
+            <div class="limit-row">
+              <span class="limit-badge">今日 AI 生图：剩余 {{ posterLimit.remaining }}/{{ posterLimit.limit }} 次</span>
+              <template v-if="posterLimit.canManage">
+                <span class="limit-manage">每人每日限额</span>
+                <a-input-number v-model:value="limitDraft" :min="1" :max="500" size="small" style="width: 76px" />
+                <span class="limit-manage">次</span>
+                <a-button size="small" type="primary" @click="saveLimit">保存</a-button>
+              </template>
+            </div>
           </div>
           <div class="ed-field">
             <div class="ed-label">主标题</div>
@@ -306,6 +315,8 @@ import {
   getChuangkitConfig,
   importChuangkitImage,
   generateCoverScene,
+  getCoverSceneLimit,
+  setCoverSceneLimit,
 } from '../../api/contentpro';
 
 const props = defineProps({
@@ -592,6 +603,33 @@ const onCanvasPointerDown = (e) => {
 };
 const poBg = ref('');
 
+// ── AI 生图每日限额（AI 海报/场景共用）
+const posterLimit = ref({ limit: 20, used: 0, remaining: 20, canManage: false });
+const limitDraft = ref(20);
+const loadPosterLimit = async () => {
+  try {
+    const st = await getCoverSceneLimit({ brandId: brandId.value });
+    posterLimit.value = {
+      limit: st?.limit ?? 20,
+      used: st?.used ?? 0,
+      remaining: st?.remaining ?? 20,
+      canManage: !!st?.canManage,
+    };
+    limitDraft.value = posterLimit.value.limit;
+  } catch {
+    /* 限额接口异常不阻塞设计器 */
+  }
+};
+const saveLimit = async () => {
+  try {
+    await setCoverSceneLimit({ limit: limitDraft.value }, { brandId: brandId.value });
+    message.success(`已保存：每人每日 ${limitDraft.value} 次`);
+    loadPosterLimit();
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '保存失败');
+  }
+};
+
 const generatePosterBg = async () => {
   if (!baseImage.value) return message.warning('请先在配图步骤选定产品底图');
   poBusy.value = true;
@@ -620,6 +658,7 @@ const generatePosterBg = async () => {
     message.success('海报背景已生成，标题/标签可继续调整');
     // 先等大图加载完成再结束 busy 态，避免首帧画成占位符
     if (poBg.value) await loadImage(poBg.value);
+    loadPosterLimit();
   } catch (e) {
     message.error(e?.response?.data?.msg ?? e?.message ?? 'AI 生成失败');
   } finally {
@@ -1074,6 +1113,7 @@ watch(
       poPreset.value = 0;
       poFx.value = 'gold';
       loadEditorMeta();
+      loadPosterLimit();
       nextTick(() => drawPreview());
     }
   },
@@ -1185,6 +1225,28 @@ watch(
 
 .ed-field {
   margin-bottom: 14px;
+}
+
+.limit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.limit-badge {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.limit-manage {
+  color: #64748b;
 }
 
 .shape-add-row {

@@ -14,6 +14,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
@@ -279,6 +280,26 @@ export class ContentproController {
   generateCoverScene(@Body() dto: CoverSceneDto, @Req() req: Request, @Query('brandId') brandId?: string) {
     const user = req.user as { id: number };
     return this.service.generateCoverScene(Number(brandId ?? 1), user.id, dto);
+  }
+
+  @Get('content-pro/ai/cover-scene-limit')
+  coverSceneLimit(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.coverSceneLimitStatus(Number(brandId ?? 1), user.id);
+  }
+
+  @Put('content-pro/ai/cover-scene-limit')
+  setCoverSceneLimit(
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Body() body?: { limit?: number },
+  ) {
+    const user = req.user as { id: number };
+    const limit = Math.round(Number(body?.limit ?? 0));
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new BadRequestException('限额需为 1-500 的整数');
+    }
+    return this.service.coverSceneSetLimit(Number(brandId ?? 1), user.id, limit);
   }
 
   @Get('content-pro/ai/random-images')

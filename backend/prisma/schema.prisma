@@ -1226,6 +1226,26 @@ model CoverEditUsage {
   @@unique([userId, day])
 }
 
+// AI 海报/场景生图：每用户每日次数（限额按工作区配置，默认 20）
+model AiPosterUsage {
+  id      Int    @id @default(autoincrement())
+  brandId Int
+  userId  Int
+  day     String
+  count   Int    @default(0)
+
+  @@unique([userId, day])
+  @@index([brandId, day])
+}
+
+model AiPosterLimit {
+  id           Int      @id @default(autoincrement())
+  brandId      Int      @unique
+  limitPerUser Int      @default(20)
+  updatedById  Int?
+  updatedAt    DateTime @updatedAt
+}
+
 // ─── 内容创作任务（任务分发）───────────────────────────────────────────
 
 model ContentTask {

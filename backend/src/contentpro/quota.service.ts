@@ -128,4 +128,58 @@ export class QuotaService {
     });
     return { ...st, used: st.used + 1, remaining: st.remaining - 1 };
   }
+
+  // ── AI 海报/场景生图：每用户每日次数（限额按工作区配置，默认 20）──
+  readonly AI_POSTER_DEFAULT_LIMIT = 20;
+  /** 可调整限额的权限码：授予 User.actions（许林等），ADMIN 角色天然可调 */
+  readonly AI_POSTER_LIMIT_ACTION = 'ai_poster_limit_set';
+
+  async aiPosterStatus(brandId: number, userId: number) {
+    const day = localDay();
+    const [limitRow, usageRow] = await Promise.all([
+      this.prisma.aiPosterLimit.findUnique({ where: { brandId } }),
+      this.prisma.aiPosterUsage.findUnique({ where: { userId_day: { userId, day } } }),
+    ]);
+    const limit = limitRow?.limitPerUser ?? this.AI_POSTER_DEFAULT_LIMIT;
+    const used = usageRow?.count ?? 0;
+    return { day, limit, used, remaining: Math.max(0, limit - used) };
+  }
+
+  async aiPosterConsume(brandId: number, userId: number) {
+    const st = await this.aiPosterStatus(brandId, userId);
+    if (st.remaining <= 0) {
+      throw new BadRequestException(`今日 AI 生图次数已用完（${st.limit} 次/天），明天再来或联系管理员调整限额`);
+    }
+    const day = st.day;
+    await this.prisma.aiPosterUsage.upsert({
+      where: { userId_day: { userId, day } },
+      create: { brandId, userId, day, count: 1 },
+      update: { count: { increment: 1 } },
+    });
+    return { ...st, used: st.used + 1, remaining: st.remaining - 1 };
+  }
+
+  /** 生成失败不占当日次数 */
+  async aiPosterRelease(brandId: number, userId: number) {
+    const day = localDay();
+    const row = await this.prisma.aiPosterUsage.findUnique({ where: { userId_day: { userId, day } } });
+    if (!row || row.count <= 0) return;
+    await this.prisma.aiPosterUsage.update({ where: { userId_day: { userId, day } }, data: { count: { decrement: 1 } } });
+  }
+
+  async aiPosterSetLimit(brandId: number, limit: number, updatedById: number) {
+    const row = await this.prisma.aiPosterLimit.upsert({
+      where: { brandId },
+      create: { brandId, limitPerUser: limit, updatedById },
+      update: { limitPerUser: limit, updatedById },
+    });
+    return { brandId, limitPerUser: row.limitPerUser };
+  }
+
+  /** 限额设置权限：ADMIN 角色 或 持 ai_poster_limit_set 权限码的用户 */
+  async aiPosterCanManage(userId: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, actions: true } });
+    if (!user) return false;
+    return user.role === 'ADMIN' || (user.actions ?? []).includes(this.AI_POSTER_LIMIT_ACTION);
+  }
 }

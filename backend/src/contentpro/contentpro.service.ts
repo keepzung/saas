@@ -611,12 +611,13 @@ export class ContentproService {
     return this.ai.health();
   }
 
-  /** AI 封面场景（换背景）：产品图重绘场景。通道优先级：sparkhub 免费模型(SPARKHUB_IMAGE_MODEL 配置后) → 设计平台图片模型。
-   *  计费均按文档"图片生成 2 算力/张" */
+  /** AI 封面场景（换背景）：产品图重绘场景。计费按文档"图片生成 2 算力/张"；
+   *  每用户每日次数限额见 aiPoster*（生成失败不占当日次数、退算力） */
   async generateCoverScene(brandId: number, userId: number, dto: CoverSceneDto) {
     const base = (process.env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, '');
     const abs = /^https?:\/\//.test(dto.imageUrl) ? dto.imageUrl : base ? `${base}${dto.imageUrl}` : '';
     if (!/^https?:\/\//.test(abs)) throw new BadRequestException('素材地址无法被生成服务访问，请先上传素材后再试');
+    await this.quota.aiPosterConsume(brandId, userId);
     await this.quota.assertEnough(brandId, 2);
     await this.quota.consume(brandId, 2, userId, 'AI 封面场景生成');
     try {
@@ -641,8 +642,23 @@ export class ContentproService {
       return { url: localUrl, channel: 'design-platform', source_url: gen.url, cost: gen.cost ?? null };
     } catch (e) {
       await this.quota.refund(brandId, 2, userId, 'AI 封面场景生成失败退回');
+      await this.quota.aiPosterRelease(brandId, userId);
       throw e;
     }
+  }
+
+  /** AI 生图每日限额：当前用户状态 + 是否有设置权限 */
+  async coverSceneLimitStatus(brandId: number, userId: number) {
+    const [st, canManage] = await Promise.all([
+      this.quota.aiPosterStatus(brandId, userId),
+      this.quota.aiPosterCanManage(userId),
+    ]);
+    return { ...st, canManage };
+  }
+
+  async coverSceneSetLimit(brandId: number, userId: number, limit: number) {
+    if (!(await this.quota.aiPosterCanManage(userId))) throw new ForbiddenException('无限额设置权限');
+    return this.quota.aiPosterSetLimit(brandId, limit, userId);
   }
 
   /** AI 生成图落盘到 /uploads/ai-cover/{brandId}/，返回站内相对路径 */

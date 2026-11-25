@@ -107,6 +107,13 @@ export const getRandomImages = (params) =>
 export const generateCoverScene = (data, params) =>
   request.post('/content-pro/ai/cover-scene', data, { params, timeout: 300000 });
 
+// AI 生图每日限额（AI 海报/场景共用）：状态含 canManage（限额设置权限）
+export const getCoverSceneLimit = (params) =>
+  request.get('/content-pro/ai/cover-scene-limit', { params });
+
+export const setCoverSceneLimit = (data, params) =>
+  request.put('/content-pro/ai/cover-scene-limit', data, { params });
+
 export const getXhsHistory = (params) =>
   request.get('/content-pro/history/xhs', { params });
 
