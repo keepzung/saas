@@ -103,6 +103,10 @@ export const generateArticle = (data, params) =>
 export const getRandomImages = (params) =>
   request.get('/content-pro/ai/random-images', { params });
 
+// AI 封面场景（换背景）：产品图经图片模型重绘场景，2 算力/次，60-120 秒
+export const generateCoverScene = (data, params) =>
+  request.post('/content-pro/ai/cover-scene', data, { params, timeout: 300000 });
+
 export const getXhsHistory = (params) =>
   request.get('/content-pro/history/xhs', { params });
 

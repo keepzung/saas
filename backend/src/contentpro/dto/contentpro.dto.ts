@@ -122,10 +122,20 @@ export class BatchGenerateDto {
   @IsOptional() @IsString() taskName?: string;
   @IsOptional() @IsString() extra?: string;
   @IsOptional() @IsString() imageMode?: string;
+  /** 配图档位（操作文档计费）：false=纯文章 1/篇不挂图；true/缺省=带图 3/篇 */
+  @IsOptional() @IsBoolean() withImages?: boolean;
   @IsOptional() @IsString() noteKind?: string | null;
   @IsOptional() @IsString() style?: string | null;
   @IsOptional() @IsString() form?: string | null;
   @IsOptional() items?: BatchGenerateItemDto[];
+}
+
+/** AI 封面场景生成（换背景，经设计平台图片模型） */
+export class CoverSceneDto {
+  @IsString() imageUrl: string;
+  @IsString() @MaxLength(500) prompt: string;
+  @IsOptional() @IsInt() width?: number;
+  @IsOptional() @IsInt() height?: number;
 }
 
 export class BatchGenerateItemDto {

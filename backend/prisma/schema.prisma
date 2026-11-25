@@ -1148,11 +1148,13 @@ model XhsHistory {
   aiScore        Int? // AI 预审总分 0-100
   aiAudit        Json? // 五维评分明细 + 命中合规规则
   scriptJson     Json? // 短视频口播/分镜脚本（contentForm=video_script 时）
+  copiedFromId   Int? // 素材包副本的底稿来源（移入=复制留底稿，移出=删副本）
 
   @@index([brandId, uploadTime])
   @@index([contentTaskId])
   @@index([packageId, reviewStatus])
   @@index([batchTaskId])
+  @@index([copiedFromId])
 }
 
 // ─── 内容包 Pro（生成 → 审核 → 领用/分发 闭环）────────────────────────

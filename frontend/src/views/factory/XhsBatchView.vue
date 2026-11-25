@@ -67,6 +67,14 @@
             </div>
             <a-empty v-if="!matrix.length" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无启用的创作策略，请先到「创作策略Pro」创建" />
           </div>
+          <div class="tier-card">
+            <span class="tier-label">配图档位</span>
+            <a-radio-group v-model:value="withImages" button-style="solid" size="small">
+              <a-radio-button :value="true">带图 · ⚡3/篇（智能配图）</a-radio-button>
+              <a-radio-button :value="false">纯文章 · ⚡1/篇（不配图）</a-radio-button>
+            </a-radio-group>
+            <span class="tier-tip">带图档每篇智能匹配产品素材图；纯文章档不挂图，出稿更快更省算力</span>
+          </div>
         </div>
 
         <div class="overview-card">
@@ -74,10 +82,10 @@
           <div class="oc-sub">提交后进入后台并发队列，结果回到批量任务草稿</div>
           <div class="oc-row"><FileDoneOutlined /> 已选策略<b>{{ plannedStrategy }}</b></div>
           <div class="oc-row"><FileTextOutlined /> 计划生成<b>{{ plannedCount }} 篇</b></div>
+          <div class="oc-row"><PictureOutlined /> 配图档位<b>{{ withImages ? '带图（智能配图）' : '纯文章（不配图）' }}</b></div>
           <div class="oc-row"><ClockCircleOutlined /> 预计耗时<b>约 {{ Math.max(1, Math.ceil(plannedCount * 8 / 60)) }} 分钟</b></div>
-          <div class="oc-row"><ThunderboltOutlined /> 预计消耗<b class="oc-cost">⚡ {{ plannedCount }} 算力</b></div>
+          <div class="oc-row"><ThunderboltOutlined /> 预计消耗<b class="oc-cost">⚡ {{ plannedPoints }} 算力</b></div>
           <div class="oc-row"><GiftOutlined /> 产品<b>{{ productName || '未选择' }}</b></div>
-          <div class="oc-row"><PictureOutlined /> 配图<b>精准编排</b></div>
           <div v-if="quota" class="oc-quota">当前可用 ⚡ {{ quotaText }}</div>
         </div>
       </div>
@@ -149,8 +157,13 @@
             />
             <img :src="item.img_list?.[0] ?? item.cover_url" class="rl-cover" @error="$event.target.style.visibility = 'hidden'" />
             <div class="rl-body">
-              <div class="rl-title">{{ item.title }}</div>
-              <div class="rl-meta">{{ fmtTime(item.upload_time) }}<a-tag v-if="item.strategy_name || item.direction_name" class="rl-tag" color="blue">{{ item.direction_name || item.strategy_name }}</a-tag></div>
+            <div class="rl-title">{{ item.title }}</div>
+            <div class="rl-meta">
+              {{ fmtTime(item.upload_time) }}
+              <a-tag v-if="item.strategy_name || item.direction_name" class="rl-tag" color="blue">{{ item.direction_name || item.strategy_name }}</a-tag>
+              <a-tag v-if="resTab === 'pending' && item.has_copy" class="rl-tag" color="green">已入库</a-tag>
+              <a-tag v-if="resTab === 'moved'" class="rl-tag" color="orange">副本</a-tag>
+            </div>
             </div>
             <span class="rl-status" :class="statusClass(item)">{{ statusText(item) }}</span>
           </div>
@@ -169,6 +182,7 @@
           <div class="rd-tags">
             <span v-for="t in current.tags ?? []" :key="t" class="rd-tag">#{{ t }}</span>
           </div>
+          <div v-if="resTab === 'moved'" class="rd-copy-hint">此为素材包中的副本，移出即删除副本回退；底稿仍保留在工作区「待处理」列表（含 AI 原始产出）</div>
           <div class="rd-footer">
             <div class="rd-ops">
               <a-button v-if="resTab === 'pending'" size="small" @click="openEditModal(current)"><EditOutlined /> 编辑内容</a-button>
@@ -288,6 +302,9 @@ const matrix = ref([]);
 
 const productName = computed(() => productOptions.value.find((o) => o.value === productId.value)?.label ?? '');
 const plannedCount = computed(() => matrix.value.filter((r) => r.checked).reduce((s, r) => s + (r.count ?? 0), 0));
+// 配图档位（操作文档计费）：带图 3/篇，纯文章 1/篇
+const withImages = ref(true);
+const plannedPoints = computed(() => plannedCount.value * (withImages.value ? 3 : 1));
 const plannedStrategy = computed(() => matrix.value.filter((r) => r.checked).length);
 
 const flattenProducts = (nodes, out = []) => {
@@ -332,7 +349,7 @@ const create = async () => {
   creating.value = true;
   try {
     const res = await batchGenerate(
-      { productId: productId.value, taskName: taskName.value || undefined, items },
+      { productId: productId.value, taskName: taskName.value || undefined, items, withImages: withImages.value },
       { brandId: brandId.value },
     );
     message.success(`任务已创建：计划生成 ${res?.target_quantity ?? 0} 篇`);
@@ -670,6 +687,26 @@ onMounted(() => {
 .oc-cost { color: #d97706 !important; }
 .oc-quota { margin-top: 10px; font-size: 12px; color: #d97706; text-align: center; }
 
+.tier-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-top: 1px solid #eef2f7;
+}
+
+.tier-label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tier-tip {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .bottom-bar {
   display: flex;
   align-items: center;
@@ -752,6 +789,15 @@ onMounted(() => {
 .rd-content { white-space: pre-wrap; font-size: 13px; color: #334155; line-height: 1.8; }
 .rd-tags { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .rd-tag { color: #3456e6; font-size: 13px; }
+.rd-copy-hint {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 12.5px;
+}
 .rd-footer {
   margin-top: auto;
   padding-top: 14px;

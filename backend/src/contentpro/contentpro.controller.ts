@@ -29,6 +29,7 @@ import {
   ClaimDto,
   ContentTaskDto,
   ChuangkitImportDto,
+  CoverSceneDto,
   DispatchDto,
   GenerateArticleDto,
   GenerateStrategyDto,
@@ -274,6 +275,12 @@ export class ContentproController {
     return this.service.generateStrategyDraft({ ...dto, brandId: Number(brandId ?? 1) });
   }
 
+  @Post('content-pro/ai/cover-scene')
+  generateCoverScene(@Body() dto: CoverSceneDto, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.generateCoverScene(Number(brandId ?? 1), user.id, dto);
+  }
+
   @Get('content-pro/ai/random-images')
   randomImages(
     @Query('brandId') brandId?: string,
@@ -444,9 +451,11 @@ export class ContentproController {
   moveToPackage(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: MoveToPackageDto,
+    @Req() req: Request,
     @Query('brandId') brandId?: string,
   ) {
-    return this.service.moveToPackage(Number(brandId ?? 1), id, dto.historyIds ?? []);
+    const user = req.user as { id: number };
+    return this.service.moveToPackage(Number(brandId ?? 1), id, dto.historyIds ?? [], user.id);
   }
 
   @Post('content-pro/packages/move-out')

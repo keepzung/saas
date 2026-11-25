@@ -4,12 +4,13 @@ import { ContentproService } from './contentpro.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
 import { BrandAccessGuard } from './brand-access.guard';
+import { DesignPlatformClient } from './design-platform.client';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
   imports: [PrismaModule],
   controllers: [ContentproController],
-  providers: [ContentproService, AiService, QuotaService, BrandAccessGuard],
+  providers: [ContentproService, AiService, QuotaService, BrandAccessGuard, DesignPlatformClient],
   exports: [QuotaService, AiService],
 })
 export class ContentproModule {}

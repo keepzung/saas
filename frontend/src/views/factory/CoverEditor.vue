@@ -4,8 +4,7 @@
       <div class="ce-topbar">
         <div class="ce-brand">
           <PictureOutlined />
-          <span class="ce-name">智能编辑</span>
-          <span v-if="coverStatus" class="ce-quota">今日还可使用 ★ {{ coverStatus.remaining }}/{{ coverStatus.limit }}</span>
+          <span class="ce-name">封面设计</span>
         </div>
         <div class="ce-tabs">
           <button
@@ -22,63 +21,173 @@
         <button class="ce-close" type="button" @click="$emit('close')">关闭</button>
       </div>
 
-      <!-- 模板选择 -->
-      <div v-if="stage === 'gallery'" class="ce-body">
-        <div class="ce-hint">
-          <AppstoreOutlined /> 选择一个模板，基于当前选中的图片进行编辑
+      <!-- ── 压字：当前图全幅做底，标题压在图上 ── -->
+      <div v-if="activeTab === 'yazi'" class="ce-body editor">
+        <div class="ed-left">
+          <div class="ed-section-label">压字设置</div>
+          <div class="ed-tip">当前选中的图片全幅铺满封面，标题文字直接压在图上。右侧实时预览，调整满意后点「选用为封面」。</div>
+          <div class="ed-field">
+            <div class="ed-label">主标题</div>
+            <a-input v-model:value="yzTitle" :maxlength="20" placeholder="默认使用文章标题" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">副标题（选填）</div>
+            <a-input v-model:value="yzSub" :maxlength="30" placeholder="如：实测真香 / 限时优惠" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">文字位置</div>
+            <a-radio-group v-model:value="yzPos" button-style="solid" size="small">
+              <a-radio-button value="top">上方</a-radio-button>
+              <a-radio-button value="middle">居中</a-radio-button>
+              <a-radio-button value="bottom">下方</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">压字样式</div>
+            <a-radio-group v-model:value="yzStyle" button-style="solid" size="small">
+              <a-radio-button value="stroke">白描边</a-radio-button>
+              <a-radio-button value="band">色块横条</a-radio-button>
+              <a-radio-button value="shade">底部渐变遮罩</a-radio-button>
+            </a-radio-group>
+          </div>
         </div>
-        <div class="tpl-grid">
-          <div
-            v-for="tpl in templates"
-            :key="tpl.id"
-            class="tpl-card"
-            :class="{ selected: tpl.id === selectedTpl }"
-            @click="selectTpl(tpl)"
-          >
-            <canvas class="tpl-canvas" :ref="(el) => setTplCanvas(tpl.id, el)" width="270" height="360"></canvas>
-            <div class="tpl-name">{{ tpl.name }}</div>
+        <div class="ed-right">
+          <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
+          <div class="ed-actions">
+            <a-button type="primary" size="large" class="use-btn" :loading="uploading" @click="applyCanvas">选用为封面</a-button>
           </div>
         </div>
       </div>
 
-      <!-- 编辑 -->
-      <div v-else-if="stage === 'editor'" class="ce-body editor">
+      <!-- ── 大字报：配色底 + 超大标题 ── -->
+      <div v-else-if="activeTab === 'dazibao'" class="ce-body editor">
         <div class="ed-left">
-          <button class="back-btn" type="button" @click="stage = 'gallery'">← 重新选择模板</button>
-          <div class="ed-section-label">背景图</div>
+          <div class="ed-section-label">大字报设置</div>
+          <div class="ed-tip">纯色/渐变底 + 超大字标语，产品图可选放底部小窗。适合促销、活动、观点型封面。</div>
+          <div class="ed-field">
+            <div class="ed-label">大字主标题（≤16 字，自动分两行）</div>
+            <a-input v-model:value="dzTitle" :maxlength="16" placeholder="如：装修必看 空调这样选" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">小字副标（选填）</div>
+            <a-input v-model:value="dzSub" :maxlength="24" placeholder="如：格力门店老销售的建议" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">配色</div>
+            <div class="swatch-row">
+              <div
+                v-for="(t, i) in DZ_THEMES"
+                :key="i"
+                class="swatch"
+                :class="{ selected: dzTheme === i }"
+                :style="{ background: `linear-gradient(135deg, ${t.bg[0]}, ${t.bg[1]})` }"
+                @click="dzTheme = i"
+              />
+            </div>
+          </div>
+          <div class="ed-field">
+            <a-checkbox v-model:checked="dzShowProduct">底部放产品图小窗</a-checkbox>
+          </div>
+        </div>
+        <div class="ed-right">
+          <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
+          <div class="ed-actions">
+            <a-button type="primary" size="large" class="use-btn" :loading="uploading" @click="applyCanvas">选用为封面</a-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 拼图：多图宫格 + 压字 ── -->
+      <div v-else-if="activeTab === 'pintu'" class="ce-body editor">
+        <div class="ed-left">
+          <div class="ed-section-label">拼图设置</div>
+          <div class="ed-tip">从本篇已选图片中挑 2-4 张拼成宫格封面，再压上标题。点击下方小图勾选（第 1 张为封面位）。</div>
+          <div class="pick-grid">
+            <div
+              v-for="(img, i) in images"
+              :key="img.url"
+              class="pick-cell"
+              :class="{ selected: pickSet.includes(i) }"
+              @click="togglePick(i)"
+            >
+              <img :src="img.url" />
+              <span v-if="pickSet.includes(i)" class="pick-idx">{{ pickSet.indexOf(i) + 1 }}</span>
+            </div>
+          </div>
+          <div class="ed-field" style="margin-top: 12px">
+            <div class="ed-label">拼图布局（{{ pickSet.length }} 张已选）</div>
+            <a-radio-group v-model:value="ptLayout" button-style="solid" size="small">
+              <a-radio-button v-if="pickSet.length >= 2" value="v2">上下两图</a-radio-button>
+              <a-radio-button v-if="pickSet.length >= 3" value="big3">一大两小</a-radio-button>
+              <a-radio-button v-if="pickSet.length >= 4" value="grid4">四宫格</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">压字标题（选填，压在拼图上）</div>
+            <a-input v-model:value="ptTitle" :maxlength="20" placeholder="默认使用文章标题" />
+          </div>
+        </div>
+        <div class="ed-right">
+          <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
+          <div class="ed-actions">
+            <a-button type="primary" size="large" class="use-btn" :loading="uploading" @click="applyCanvas" :disabled="pickSet.length < 2">选用为封面</a-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── AI 场景：产品图换背景（经图片模型重绘，可选压字） ── -->
+      <div v-else-if="activeTab === 'scene'" class="ce-body editor">
+        <div class="ed-left">
+          <div class="ed-section-label">AI 场景（换背景）</div>
+          <div class="ed-tip">把产品图交给 AI 模型重新绘制场景（产品保持原样），生成后再决定是否压字。⚡ 2 算力/次，约 60-120 秒，失败自动退回算力。</div>
           <div class="bg-row">
             <div class="bg-info">
-              <div class="bg-title">图片预览</div>
-              <div class="bg-sub">已自动填充当前背景图</div>
+              <div class="bg-title">产品底图</div>
+              <div class="bg-sub">使用当前封面图作为参考</div>
             </div>
-            <img v-if="bgImage" :src="bgImage" class="bg-thumb" />
-            <div v-else class="bg-thumb placeholder">产品底图</div>
+            <img v-if="baseImage" :src="baseImage" class="bg-thumb" />
           </div>
-          <div class="ed-tip">请填充合适长度的文字，以确保设计效果美观</div>
-          <div v-for="(f, i) in textFieldDefs" :key="i" class="ed-field">
-            <div class="ed-label">{{ f.label }}</div>
-            <a-input v-model:value="texts[i]" :maxlength="100" :placeholder="f.placeholder" />
+          <div class="ed-field" style="margin-top: 12px">
+            <div class="ed-label">场景一键预设</div>
+            <div class="scene-chips">
+              <a-tag
+                v-for="s in SCENE_PRESETS"
+                :key="s.prompt"
+                class="scene-chip"
+                :class="{ active: scPrompt === s.prompt }"
+                @click="scPrompt = s.prompt"
+              >{{ s.name }}</a-tag>
+            </div>
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">场景描述（可自定义）</div>
+            <a-textarea v-model:value="scPrompt" :rows="3" :maxlength="300" placeholder="例如：放在浅色原木台面上，米白简约客厅背景，柔和自然光，产品保持原样" />
+          </div>
+          <div class="ed-field">
+            <a-checkbox v-model:checked="scOverlay">生成后压上标题</a-checkbox>
+            <a-input v-if="scOverlay" v-model:value="scTitle" :maxlength="20" style="margin-top: 8px" placeholder="标题（默认用文章标题）" />
           </div>
         </div>
         <div class="ed-right">
           <div class="preview-wrap">
-            <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
-            <span class="gen-badge" v-if="generated">生成结果</span>
+            <a-spin v-if="scBusy" class="scene-spin" tip="AI 正在绘制场景，约 60-120 秒…" size="large" />
+            <img v-if="scResult && !scBusy" :src="scResult" class="scene-result" />
+            <canvas v-else-if="!scBusy" ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
           </div>
           <div class="ed-actions">
-            <template v-if="generated">
-              <a-button @click="generated = false">继续编辑</a-button>
-              <a-button type="primary" class="use-btn" :loading="uploading" @click="apply">选 用</a-button>
+            <template v-if="scResult">
+              <a-button @click="useAsBase">拿去压字</a-button>
+              <a-button type="primary" class="use-btn" @click="applyScene">选用为封面</a-button>
             </template>
-            <a-button v-else type="primary" block class="gen-btn" @click="render">
-              ✦ 智能生成设计 ✦
+            <a-button v-else type="primary" size="large" class="gen-btn" :loading="scBusy" :disabled="!baseImage || !scPrompt.trim()" @click="generateScene">
+              ✦ AI 生成场景（⚡2）✦
             </a-button>
           </div>
         </div>
       </div>
 
       <!-- 创客贴模板（CHUANGKIT_APP_KEY 配置后出现） -->
-      <div v-else-if="stage === 'chuangkit'" class="ce-body editor">
+      <div v-else-if="activeTab === 'chuangkit'" class="ce-body editor">
         <iframe :src="chuangkitUrl" class="ck-frame" allow="clipboard-write" />
         <div class="ck-side">
           <div class="ck-title">创客贴设计</div>
@@ -94,60 +203,59 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { AppstoreOutlined, PictureOutlined } from '@ant-design/icons-vue';
+import { PictureOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import { useAuthStore } from '../../stores/auth';
 import {
-  getCoverEditStatus,
-  useCoverEdit,
   getChuangkitConfig,
   importChuangkitImage,
+  generateCoverScene,
 } from '../../api/contentpro';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   bgImage: { type: String, default: '' },
   title: { type: String, default: '' },
+  images: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['close', 'apply']);
 
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
 
-const tabs = [
-  { key: 'free', name: '自由设计' },
-  { key: 'batch', name: '智能批量设计' },
-];
-const activeTab = ref('free');
-const stage = ref('gallery');
-const selectedTpl = ref(null);
-const generated = ref(false);
-const uploading = ref(false);
 const previewCanvas = ref(null);
-const tplCanvases = {};
+const uploading = ref(false);
 
-// ── 智能编辑每日配额（5 次）+ 创客贴开关
-const coverStatus = ref(null);
+// ── 页签
+const tabs = [
+  { key: 'yazi', name: '压字' },
+  { key: 'dazibao', name: '大字报' },
+  { key: 'pintu', name: '拼图' },
+  { key: 'scene', name: 'AI 场景' },
+];
 const ckEnabled = ref(false);
 const chuangkitUrl = ref('');
 const ckUrl = ref('');
 const ckImporting = ref(false);
-
+const activeTab = ref('yazi');
 const tabsVisible = computed(() =>
   ckEnabled.value ? [...tabs, { key: 'chuangkit', name: '创客贴模板' }] : tabs,
 );
 
+// 底图可被 AI 生成结果覆盖（拿去压字）
+const bgOverride = ref('');
+const baseImage = computed(() => bgOverride.value || props.bgImage || props.images?.[0]?.url || '');
+const images = computed(() => {
+  const list = props.images ?? [];
+  if (list.length) return list;
+  return baseImage.value ? [{ url: baseImage.value, name: '' }] : [];
+});
+
 const loadEditorMeta = async () => {
-  coverStatus.value = await getCoverEditStatus({ brandId: brandId.value }).then((r) => r).catch(() => null);
   const ck = await getChuangkitConfig().then((r) => r).catch(() => null);
   ckEnabled.value = Boolean(ck?.enabled && ck?.editor_url);
   chuangkitUrl.value = ck?.editor_url ?? '';
 };
-
-watch(activeTab, (v) => {
-  if (v === 'chuangkit') stage.value = 'chuangkit';
-  else stage.value = stage.value === 'chuangkit' ? 'gallery' : stage.value;
-});
 
 const importCk = async () => {
   if (!/^https?:\/\//.test(ckUrl.value)) return message.warning('请粘贴合法的图片链接');
@@ -163,196 +271,281 @@ const importCk = async () => {
   }
 };
 
-// 5 段文字：主标题 / 副标题 / 小字政策1-3
-const textFieldDefs = [
-  { label: '文本1（主标题）', placeholder: '这是主标题' },
-  { label: '文本2（副标题）', placeholder: '这是副标题' },
-  { label: '文本3', placeholder: '小字政策1' },
-  { label: '文本4', placeholder: '小字政策2' },
-  { label: '文本5', placeholder: '小字政策3' },
-];
-const texts = ref(['', '', '', '', '']);
-
-// 简版模板：渐变底 + 文字排版（绘制按画布实际尺寸，位置为比例坐标）
-const templates = [
-  {
-    id: 'poster',
-    name: '主标题型',
-    bg: ['#dbeafe', '#ede9fe'],
-    draw(ctx, W, H, t) {
-      h.text(ctx, t[0] || '这是主标题', W / 2, H * 0.16, W * 0.085, '#1e293b', true);
-      h.text(ctx, t[1] || '这是副标题副标题副标题', W / 2, H * 0.26, W * 0.05, '#334155', false);
-      h.thumb(ctx, W / 2, H * 0.5, W * 0.5, H * 0.34);
-      h.pills(ctx, [t[2], t[3], t[4]], W * 0.1, H * 0.78, W * 0.04);
-    },
-  },
-  {
-    id: 'promo',
-    name: '促销大字型',
-    bg: ['#fef3c7', '#fecaca'],
-    draw(ctx, W, H, t) {
-      h.text(ctx, t[0] || '此处修改标题', W / 2, H * 0.22, W * 0.1, '#b91c1c', true);
-      h.text(ctx, t[1] || '限时权益一览', W / 2, H * 0.34, W * 0.055, '#7c2d12', false);
-      h.pills(ctx, [t[2], t[3], t[4]], W * 0.12, H * 0.62, W * 0.048);
-      h.thumb(ctx, W / 2, H * 0.85, W * 0.42, H * 0.14);
-    },
-  },
-  {
-    id: 'clean',
-    name: '知识清单型',
-    bg: ['#dcfce7', '#dbeafe'],
-    draw(ctx, W, H, t) {
-      h.text(ctx, t[0] || '产品干货篇', W / 2, H * 0.12, W * 0.078, '#14532d', true);
-      h.text(ctx, t[1] || '每天一个使用小知识', W / 2, H * 0.2, W * 0.044, '#166534', false);
-      h.pills(ctx, [t[2], t[3], t[4]], W * 0.14, H * 0.42, W * 0.042);
-      h.thumb(ctx, W / 2, H * 0.78, W * 0.56, H * 0.28);
-    },
-  },
-  {
-    id: 'tech',
-    name: '科技蓝型',
-    bg: ['#e0f2fe', '#e0e7ff'],
-    draw(ctx, W, H, t) {
-      h.text(ctx, t[0] || '智能配置大盘点', W / 2, H * 0.14, W * 0.082, '#1e3a8a', true);
-      h.text(ctx, t[1] || '看得见的安全感', W / 2, H * 0.24, W * 0.048, '#3730a3', false);
-      h.pills(ctx, [t[2], t[3], t[4]], W * 0.12, H * 0.66, W * 0.042);
-      h.thumb(ctx, W / 2, H * 0.47, W * 0.52, H * 0.3);
-    },
-  },
-];
-
-const h = {
-  text(ctx, str, x, y, size, color, stroke) {
-    ctx.save();
-    ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    if (stroke) {
-      ctx.lineWidth = size / 7;
-      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-      ctx.lineJoin = 'round';
-      ctx.strokeText(String(str).slice(0, 14), x, y);
-    }
-    ctx.fillStyle = color;
-    ctx.fillText(String(str).slice(0, 14), x, y);
-    ctx.restore();
-  },
-  pills(ctx, items, x, y, size) {
-    const list = items.filter(Boolean).slice(0, 3);
-    list.forEach((s, i) => {
-      const py = y + i * size * 1.7;
-      ctx.save();
-      ctx.fillStyle = 'rgba(15,23,42,0.78)';
-      const w = Math.min(W_PILL_MAX(size), size * String(s).length * 1.05 + size * 2);
-      ctx.beginPath();
-      ctx.roundRect(x, py - size * 0.72, w, size * 1.44, size * 0.72);
-      ctx.fill();
-      ctx.font = `700 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(s).slice(0, 16), x + size * 0.9, py);
-      ctx.restore();
-    });
-  },
-  thumb(ctx, x, y, w, hh) {
-    const img = bgLoad.value;
-    ctx.save();
-    if (img) {
-      const scale = Math.max(w / img.width, hh / img.height);
-      const dw = img.width * scale;
-      const dh = img.height * scale;
-      ctx.beginPath();
-      ctx.roundRect(x - w / 2, y - hh / 2, w, hh, w * 0.06);
-      ctx.clip();
-      ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh);
-    } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.beginPath();
-      ctx.roundRect(x - w / 2, y - hh / 2, w, hh, w * 0.06);
-      ctx.fill();
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = `600 ${w * 0.09}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('产品底图', x, y);
-    }
-    ctx.restore();
-  },
-};
-
-const W_PILL_MAX = (size) => size * 20;
-
-const bgLoad = ref(null);
-const loadBg = () =>
+// ── 图片缓存
+const imgCache = new Map();
+const loadImage = (url) =>
   new Promise((resolve) => {
-    if (!props.bgImage) {
-      bgLoad.value = null;
-      resolve(null);
-      return;
-    }
+    if (!url) return resolve(null);
+    if (imgCache.has(url)) return resolve(imgCache.get(url));
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      bgLoad.value = img;
+      imgCache.set(url, img);
       resolve(img);
     };
-    img.onerror = () => {
-      bgLoad.value = null;
-      resolve(null);
-    };
-    img.src = props.bgImage;
+    img.onerror = () => resolve(null);
+    img.src = url;
   });
 
-const setTplCanvas = (id, el) => {
-  if (el) tplCanvases[id] = el;
+const drawCoverFit = (ctx, img, x, y, w, h) => {
+  const scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh);
 };
 
-const drawTpl = (canvas, tpl) => {
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
+// 统一画布坐标：所有绘制按 (ctx, W, H) 相对布局，预览 540×720 与导出 1080×1440 共用
+const SCENE_PRESETS = [
+  { name: '原木家居', prompt: '把这个产品放在浅色原木台面上，米白色简约客厅背景，柔和自然光，产品外观保持原样不变' },
+  { name: '纯白影棚', prompt: '把这个产品放在纯白色影棚背景中央，柔和顶光，轻微倒影，商业摄影质感，产品外观保持原样不变' },
+  { name: '大理石台面', prompt: '把这个产品放在浅灰色大理石台面上，高级质感背景，柔和灯光，产品外观保持原样不变' },
+  { name: '户外庭院', prompt: '把这个产品放在阳光明媚的户外庭院环境中，绿植背景虚化，自然光，产品外观保持原样不变' },
+  { name: '现代厨房', prompt: '把这个产品放在干净明亮的现代厨房环境中，浅色橱柜背景，产品外观保持原样不变' },
+  { name: '节日礼盒', prompt: '把这个产品放在节日礼盒氛围场景中，暖色调灯光，丝带与礼盒点缀背景，产品外观保持原样不变' },
+];
+
+// ── 压字
+const yzTitle = ref('');
+const yzSub = ref('');
+const yzPos = ref('bottom');
+const yzStyle = ref('shade');
+
+// ── 大字报
+const DZ_THEMES = [
+  { bg: ['#fef3c7', '#fca5a5'], main: '#b91c1c', sub: '#7c2d12' },
+  { bg: ['#dbeafe', '#c7d2fe'], main: '#1d4ed8', sub: '#3730a3' },
+  { bg: ['#dcfce7', '#a7f3d0'], main: '#047857', sub: '#065f46' },
+  { bg: ['#f3e8ff', '#e9d5ff'], main: '#7e22ce', sub: '#6b21a8' },
+  { bg: ['#1e293b', '#334155'], main: '#facc15', sub: '#e2e8f0' },
+];
+const dzTitle = ref('');
+const dzSub = ref('');
+const dzTheme = ref(0);
+const dzShowProduct = ref(true);
+
+// ── 拼图
+const pickSet = ref([0]);
+const ptLayout = ref('v2');
+const ptTitle = ref('');
+const togglePick = (i) => {
+  const idx = pickSet.value.indexOf(i);
+  if (idx > -1) pickSet.value.splice(idx, 1);
+  else if (pickSet.value.length < 4) pickSet.value.push(i);
+  else message.warning('最多选 4 张');
+};
+
+// ── AI 场景
+const scPrompt = ref('');
+const scOverlay = ref(false);
+const scTitle = ref('');
+const scBusy = ref(false);
+const scResult = ref('');
+
+// ── 绘制
+const drawText = (ctx, str, x, y, size, color, style) => {
+  ctx.save();
+  ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (style === 'stroke') {
+    ctx.lineWidth = size / 6;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineJoin = 'round';
+    ctx.strokeText(str, x, y);
+  }
+  ctx.fillStyle = color;
+  ctx.fillText(str, x, y);
+  ctx.restore();
+};
+
+const drawYazi = (ctx, W, H) => {
+  const img = imgCache.get(baseImage.value);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, W, H);
+  if (img) drawCoverFit(ctx, img, W / 2, H / 2, W, H);
+  const main = (yzTitle.value || props.title || '').slice(0, 20);
+  const sub = yzSub.value.trim().slice(0, 30);
+  const size = W * (main.length > 12 ? 0.072 : 0.085);
+  const blockH = size * (sub ? 2.3 : 1.2);
+  let baseY = yzPos.value === 'top' ? H * 0.16 : yzPos.value === 'middle' ? H * 0.46 : H * 0.78;
+  if (yzStyle.value === 'shade' && yzPos.value === 'bottom') {
+    const grad = ctx.createLinearGradient(0, H * 0.55, 0, H);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.72)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, H * 0.55, W, H * 0.45);
+    baseY = H * 0.8;
+  }
+  if (yzStyle.value === 'band') {
+    ctx.fillStyle = 'rgba(15,23,42,0.66)';
+    ctx.fillRect(0, baseY - blockH * 0.62, W, blockH * 1.24);
+  }
+  if (sub) {
+    drawText(ctx, sub, W / 2, baseY - size * 0.72, size * 0.46, '#e2e8f0', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
+    drawText(ctx, main, W / 2, baseY + size * 0.42, size, '#ffffff', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
+  } else {
+    drawText(ctx, main, W / 2, baseY, size, '#ffffff', yzStyle.value === 'stroke' ? 'stroke' : 'plain');
+  }
+};
+
+const drawDazibao = (ctx, W, H) => {
+  const t = DZ_THEMES[dzTheme.value];
   const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, tpl.bg[0]);
-  grad.addColorStop(1, tpl.bg[1]);
+  grad.addColorStop(0, t.bg[0]);
+  grad.addColorStop(1, t.bg[1]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  tpl.draw(ctx, W, H, texts.value);
-};
-
-const renderGallery = async () => {
-  await loadBg();
-  await nextTick();
-  templates.forEach((tpl) => drawTpl(tplCanvases[tpl.id], tpl));
-};
-
-const render = async () => {
-  // 每日 5 次配额（模板预览免费，生成设计消耗 1 次）
-  try {
-    coverStatus.value = await useCoverEdit({ brandId: brandId.value }).then((r) => r);
-  } catch (e) {
-    message.warning(e?.response?.data?.msg ?? '今日次数已用完');
-    return;
+  // 装饰圆点
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.arc(W * (0.12 + i * 0.38), H * 0.08, W * 0.02, 0, Math.PI * 2);
+    ctx.fill();
   }
-  drawTpl(previewCanvas.value, templates.find((t) => t.id === selectedTpl.value));
-  generated.value = true;
+  const main = (dzTitle.value || props.title || '').slice(0, 16);
+  const mid = Math.ceil(main.length / 2);
+  const lines = main.length <= 8 ? [main] : [main.slice(0, mid), main.slice(mid)];
+  const size = W * (lines.length > 1 ? 0.135 : 0.17);
+  const startY = H * (dzShowProduct.value ? 0.3 : 0.42) - (lines.length - 1) * size * 0.6;
+  lines.forEach((ln, i) => {
+    drawText(ctx, ln, W / 2, startY + i * size * 1.18, size, t.main, 'stroke');
+  });
+  const sub = dzSub.value.trim().slice(0, 24);
+  if (sub) {
+    ctx.fillStyle = t.sub;
+    ctx.font = `600 ${W * 0.045}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sub, W / 2, startY + lines.length * size * 1.18 + W * 0.05);
+  }
+  if (dzShowProduct.value) {
+    const img = imgCache.get(images.value[0]?.url ?? '');
+    const w = W * 0.56;
+    const hh = H * 0.22;
+    const y = H * 0.8;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - w / 2, y - hh / 2, w, hh, w * 0.05);
+    ctx.fill();
+    ctx.clip();
+    if (img) drawCoverFit(ctx, img, W / 2, y, w, hh);
+    ctx.restore();
+  }
 };
 
-const selectTpl = (tpl) => {
-  selectedTpl.value = tpl.id;
-  if (!texts.value[0]) texts.value[0] = props.title ?? '';
-  stage.value = 'editor';
-  generated.value = false;
-  nextTick(() => drawTpl(previewCanvas.value, tpl));
+const drawPintu = (ctx, W, H) => {
+  const urls = pickSet.value.map((i) => images.value[i]?.url).filter(Boolean);
+  const imgs = urls.map((u) => imgCache.get(u)).filter(Boolean);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  const gap = W * 0.015;
+  const cells = [];
+  if (imgs.length >= 4) {
+    const cw = (W - gap * 3) / 2;
+    const ch = (H - gap * 3) / 2;
+    imgs.slice(0, 4).forEach((img, i) => {
+      cells.push({ img, x: gap + cw / 2 + (i % 2) * (cw + gap), y: gap + ch / 2 + Math.floor(i / 2) * (ch + gap), w: cw, h: ch });
+    });
+  } else if (imgs.length === 3) {
+    const topH = H * 0.55;
+    const bw = (W - gap * 3) / 2;
+    cells.push({ img: imgs[0], x: W / 2, y: gap + topH / 2, w: W - gap * 2, h: topH });
+    cells.push({ img: imgs[1], x: gap + bw / 2, y: gap * 2 + topH + (H - gap * 3 - topH) / 2, w: bw, h: H - gap * 3 - topH });
+    cells.push({ img: imgs[2], x: gap * 2 + bw + bw / 2, y: gap * 2 + topH + (H - gap * 3 - topH) / 2, w: bw, h: H - gap * 3 - topH });
+  } else if (imgs.length === 2) {
+    const ch = (H - gap * 3) / 2;
+    cells.push({ img: imgs[0], x: W / 2, y: gap + ch / 2, w: W - gap * 2, h: ch });
+    cells.push({ img: imgs[1], x: W / 2, y: gap * 2 + ch + ch / 2, w: W - gap * 2, h: ch });
+  }
+  cells.forEach((c) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(c.x - c.w / 2, c.y - c.h / 2, c.w, c.h, W * 0.012);
+    ctx.clip();
+    drawCoverFit(ctx, c.img, c.x, c.y, c.w, c.h);
+    ctx.restore();
+  });
+  const title = (ptTitle.value || '').trim().slice(0, 20);
+  if (title) {
+    const size = W * 0.075;
+    const bandH = size * 1.7;
+    ctx.fillStyle = 'rgba(15,23,42,0.66)';
+    ctx.fillRect(0, H * 0.44 - bandH / 2, W, bandH);
+    drawText(ctx, title, W / 2, H * 0.44, size, '#ffffff', 'plain');
+  }
 };
 
-const apply = async () => {
+const drawPreview = async () => {
+  if (activeTab.value === 'scene' && scResult.value) return;
+  const need = [];
+  if (activeTab.value === 'yazi') need.push(baseImage.value);
+  if (activeTab.value === 'dazibao' && dzShowProduct.value) need.push(images.value[0]?.url);
+  if (activeTab.value === 'pintu') need.push(...pickSet.value.map((i) => images.value[i]?.url));
+  await Promise.all(need.filter(Boolean).map((u) => loadImage(u)));
+  await nextTick();
+  const canvas = previewCanvas.value;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (activeTab.value === 'yazi') drawYazi(ctx, canvas.width, canvas.height);
+  else if (activeTab.value === 'dazibao') drawDazibao(ctx, canvas.width, canvas.height);
+  else if (activeTab.value === 'pintu') drawPintu(ctx, canvas.width, canvas.height);
+};
+
+watch(
+  [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle],
+  () => drawPreview(),
+  { deep: true },
+);
+watch(scResult, (v) => {
+  if (v) loadImage(v);
+});
+
+// ── AI 场景
+const generateScene = async () => {
+  if (!baseImage.value) return message.warning('请先在配图步骤选定产品底图');
+  if (!scPrompt.value.trim()) return message.warning('请选择或填写场景描述');
+  scBusy.value = true;
+  scResult.value = '';
+  try {
+    const res = await generateCoverScene(
+      { imageUrl: baseImage.value, prompt: scPrompt.value.trim(), width: 1080, height: 1440 },
+      { brandId: brandId.value },
+    );
+    scResult.value = res?.url ?? '';
+    message.success('AI 场景已生成');
+    await loadImage(scResult.value);
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? e?.message ?? 'AI 生成失败');
+  } finally {
+    scBusy.value = false;
+  }
+};
+
+const useAsBase = () => {
+  bgOverride.value = scResult.value;
+  scResult.value = '';
+  yzTitle.value = scOverlay.value ? scTitle.value || yzTitle.value : yzTitle.value;
+  activeTab.value = 'yazi';
+  message.success('已设为底图，继续压字');
+};
+
+const applyScene = () => {
+  emit('apply', { remoteUrl: scResult.value, name: 'AI 场景封面' });
+};
+
+// ── 导出：预览 540×720 同比例放大到 1080×1440
+const applyCanvas = () => {
+  const src = previewCanvas.value;
+  if (!src) return;
+  const out = document.createElement('canvas');
+  out.width = 1080;
+  out.height = 1440;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(src, 0, 0, out.width, out.height);
   uploading.value = true;
   try {
-    const canvas = previewCanvas.value;
-    const dataUrl = canvas.toDataURL('image/png');
-    emit('apply', { dataUrl });
+    emit('apply', { dataUrl: out.toDataURL('image/png') });
   } finally {
     uploading.value = false;
   }
@@ -362,12 +555,21 @@ watch(
   () => props.open,
   (v) => {
     if (v) {
-      stage.value = 'gallery';
-      activeTab.value = 'free';
-      generated.value = false;
-      texts.value = ['', '', '', '', ''];
-      renderGallery();
+      activeTab.value = 'yazi';
+      bgOverride.value = '';
+      scResult.value = '';
+      scBusy.value = false;
+      scPrompt.value = SCENE_PRESETS[0].prompt;
+      scOverlay.value = true;
+      scTitle.value = props.title ?? '';
+      yzTitle.value = props.title ?? '';
+      yzSub.value = '';
+      dzTitle.value = props.title ?? '';
+      dzSub.value = '';
+      pickSet.value = props.images?.length ? [0] : [];
+      ptTitle.value = props.title ?? '';
       loadEditorMeta();
+      nextTick(() => drawPreview());
     }
   },
 );
@@ -400,48 +602,6 @@ watch(
 
 .ce-name {
   font-weight: 600;
-}
-
-.ce-quota {
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: rgba(250, 204, 21, 0.16);
-  color: #facc15;
-  font-size: 12px;
-}
-
-.ck-frame {
-  flex: 1;
-  border: none;
-  background: #f8fafc;
-}
-
-.ck-side {
-  width: 300px;
-  padding: 18px 16px;
-  border-left: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: #fff;
-}
-
-.ck-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.ck-tip {
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.7;
-}
-
-.ck-hint {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-top: auto;
 }
 
 .ce-tabs {
@@ -494,76 +654,89 @@ watch(
   background: #f8fafc;
 }
 
-.ce-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #475569;
-  font-size: 13px;
-  margin-bottom: 16px;
-}
-
-.tpl-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 18px;
-}
-
-.tpl-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 12px;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.2s;
-}
-
-.tpl-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
-}
-
-.tpl-card.selected {
-  border-color: #3456e6;
-}
-
-.tpl-canvas {
-  width: 100%;
-  border-radius: 8px;
-  display: block;
-}
-
-.tpl-name {
-  margin-top: 8px;
-  text-align: center;
-  color: #475569;
-  font-size: 13px;
-}
-
 .ce-body.editor {
   display: flex;
   gap: 28px;
 }
 
 .ed-left {
-  width: 400px;
-  flex: 0 0 400px;
-}
-
-.back-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  border-radius: 8px;
-  padding: 6px 14px;
-  cursor: pointer;
-  color: #475569;
-  margin-bottom: 18px;
+  width: 420px;
+  flex: 0 0 420px;
 }
 
 .ed-section-label {
   font-weight: 600;
   color: #1e293b;
   margin-bottom: 8px;
+  font-size: 15px;
+}
+
+.ed-tip {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.ed-field {
+  margin-bottom: 14px;
+}
+
+.ed-label {
+  color: #475569;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.ed-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.preview-wrap {
+  position: relative;
+}
+
+.preview-canvas {
+  width: min(420px, 100%);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.scene-result {
+  width: min(420px, 100%);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+  display: block;
+}
+
+.scene-spin {
+  width: min(420px, 100%);
+  height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ed-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 12px;
+}
+
+.gen-btn {
+  width: min(420px, 80vw);
+  height: 46px;
+  background: linear-gradient(90deg, #6366f1, #a78bfa);
+  border: none;
+}
+
+.use-btn {
+  background: #f59e0b;
+  border: none;
+  padding: 0 40px;
 }
 
 .bg-row {
@@ -599,75 +772,117 @@ watch(
   border-radius: 8px;
 }
 
-.bg-thumb.placeholder {
+.scene-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scene-chip {
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+}
+
+.scene-chip.active {
+  border-color: #3456e6;
+  background: #eef4ff;
+  color: #3456e6;
+}
+
+.swatch-row {
+  display: flex;
+  gap: 10px;
+}
+
+.swatch {
+  width: 44px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.swatch.selected {
+  border-color: #3456e6;
+}
+
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pick-cell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  aspect-ratio: 1;
+}
+
+.pick-cell.selected {
+  border-color: #3456e6;
+}
+
+.pick-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pick-idx {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #3456e6;
+  color: #fff;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e2e8f0;
-  color: #94a3b8;
-  font-size: 12px;
 }
 
-.ed-tip {
-  margin: 14px 0 10px;
-  color: #7c5cf0;
-  font-size: 12.5px;
-}
-
-.ed-field {
-  margin-bottom: 12px;
-}
-
-.ed-label {
-  color: #475569;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-
-.ed-right {
+.ck-frame {
   flex: 1;
+  border: none;
+  background: #f8fafc;
+}
+
+.ck-side {
+  width: 300px;
+  padding: 18px 16px;
+  border-left: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-}
-
-.preview-wrap {
-  position: relative;
-}
-
-.preview-canvas {
-  width: min(400px, 100%);
-  border-radius: 14px;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
-}
-
-.gen-badge {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #16a34a;
-  color: #fff;
-  font-size: 12px;
-}
-
-.ed-actions {
-  margin-top: 18px;
-  display: flex;
   gap: 12px;
+  background: #fff;
 }
 
-.gen-btn {
-  width: min(400px, 80vw);
-  height: 46px;
-  background: linear-gradient(90deg, #6366f1, #a78bfa);
-  border: none;
+.ck-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
 }
 
-.use-btn {
-  background: #f59e0b;
-  border: none;
-  padding: 0 40px;
+.ck-tip {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.7;
+}
+
+.ck-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: auto;
 }
 </style>

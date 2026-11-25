@@ -234,8 +234,9 @@
               @dragstart="onDragStart($event, i)"
               @dragover.prevent
               @drop="onDrop(i)"
+              @click="i === 0 && (coverOpen = true)"
             >
-              <span v-if="i === 0" class="cover-tag">封面</span>
+              <span v-if="i === 0" class="cover-tag">封面 · 点击设计</span>
               <img :src="img.url" class="sel-img" draggable="false" />
               <div class="sel-ops">
                 <span class="op-btn" title="前移一位" @mousedown.stop @click.stop="move(i, -1)"><ArrowLeftOutlined /></span>
@@ -270,7 +271,7 @@
         </div>
         <div class="bottom-bar">
           <a-space>
-            <a-button @click="coverOpen = true"><HighlightOutlined /> 添加文字封面</a-button>
+            <a-button @click="coverOpen = true"><HighlightOutlined /> 封面设计（压字/大字报/拼图/AI 场景）</a-button>
             <a-upload :show-upload-list="false" :before-upload="uploadLocal" accept=".png,.jpg,.jpeg,.webp">
               <a-button><UploadOutlined /> 上传本地图片</a-button>
             </a-upload>
@@ -283,6 +284,7 @@
         <CoverEditor
           :open="coverOpen"
           :bg-image="images[0]?.url ?? ''"
+          :images="images"
           :title="titles[selectedTitle]"
           @close="coverOpen = false"
           @apply="onCoverApply"
@@ -747,21 +749,21 @@ const uploadLocal = async (file) => {
   return false;
 };
 
-const onCoverApply = async ({ dataUrl, remoteUrl }) => {
+const onCoverApply = async ({ dataUrl, remoteUrl, name }) => {
   try {
     if (remoteUrl) {
-      images.value.unshift({ url: remoteUrl, name: '创客贴封面' });
+      images.value.unshift({ url: remoteUrl, name: name ?? '设计封面' });
       coverOpen.value = false;
-      message.success('创客贴封面已添加');
+      message.success('封面已添加');
       return;
     }
     const blob = await (await fetch(dataUrl)).blob();
     const file = new File([blob], 'cover.png', { type: 'image/png' });
     const res = await uploadMaterialImage(file, brandId.value);
     if (!res?.url) throw new Error(res?.error ?? '封面上传失败');
-    images.value.unshift({ url: res.url, name: '文字封面' });
+    images.value.unshift({ url: res.url, name: name ?? '设计封面' });
     coverOpen.value = false;
-    message.success('文字封面已添加');
+    message.success('封面已添加');
   } catch (e) {
     message.error(e?.message ?? '封面上传失败');
   }

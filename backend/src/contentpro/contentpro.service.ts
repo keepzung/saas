@@ -10,7 +10,8 @@ import { ZipArchive } from 'archiver';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
-import { CaseDto, HookDto, PersonaDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
+import { DesignPlatformClient } from './design-platform.client';
+import { CaseDto, CoverSceneDto, HookDto, PersonaDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
 
 @Injectable()
 export class ContentproService {
@@ -18,6 +19,7 @@ export class ContentproService {
     private prisma: PrismaService,
     private ai: AiService,
     private quota: QuotaService,
+    private design: DesignPlatformClient,
   ) {}
 
   /** 上传根目录（与 contentpro.controller.ts 保持一致；zip 打包本地 /uploads/ 文件用） */
@@ -387,8 +389,21 @@ export class ContentproService {
         take: pageSize,
       }),
     ]);
+    // 待处理列表标注哪些底稿已有素材包副本（复制语义的"已入库"徽标）
+    let copySourceIds = new Set<number>();
+    if (rows.length) {
+      const copies = await this.prisma.xhsHistory.findMany({
+        where: {
+          brandId: query.brandId,
+          copiedFromId: { in: rows.map((r) => r.id) },
+          packageId: { not: null },
+        },
+        select: { copiedFromId: true },
+      });
+      copySourceIds = new Set(copies.map((c) => c.copiedFromId).filter((x): x is number => x != null));
+    }
     return {
-      list: rows.map((h) => this.mapHistory(h)),
+      list: rows.map((h) => ({ ...this.mapHistory(h), has_copy: copySourceIds.has(h.id), copied_from_id: h.copiedFromId ?? null })),
       total,
       page,
       page_size: pageSize,
@@ -593,6 +608,29 @@ export class ContentproService {
     return this.ai.health();
   }
 
+  /** AI 封面场景（换背景）：产品图经设计平台图片模型重绘场景。计费按文档"图片生成 2 算力/张" */
+  async generateCoverScene(brandId: number, userId: number, dto: CoverSceneDto) {
+    if (!this.design.enabled()) throw new BadRequestException('AI 场景生成通道未配置（DESIGN_PLATFORM_*）');
+    const base = (process.env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, '');
+    const abs = /^https?:\/\//.test(dto.imageUrl) ? dto.imageUrl : base ? `${base}${dto.imageUrl}` : '';
+    if (!/^https?:\/\//.test(abs)) throw new BadRequestException('素材地址无法被生成服务访问，请先上传素材后再试');
+    await this.quota.assertEnough(brandId, 2);
+    await this.quota.consume(brandId, 2, userId, 'AI 封面场景生成');
+    try {
+      const gen = await this.design.generateScene({
+        prompt: dto.prompt.trim(),
+        referenceImageUrl: abs,
+        width: dto.width ?? 1080,
+        height: dto.height ?? 1440,
+      });
+      const localUrl = await this.design.downloadToUploads(gen.url, brandId);
+      return { url: localUrl, source_url: gen.url, cost: gen.cost ?? null };
+    } catch (e) {
+      await this.quota.refund(brandId, 2, userId, 'AI 封面场景生成失败退回');
+      throw e;
+    }
+  }
+
   // ─── 算力配额 ──────────────────────────────────────────────────────
   /** KOS 填空 → AI 生成写作策略草稿（透传 AI 服务，不扣算力） */
   generateStrategyDraft(input: {
@@ -756,6 +794,7 @@ export class ContentproService {
     noteKind?: string | null;
     style?: string | null;
     form?: string | null;
+    withImages?: boolean;
     items?: { strategyId?: number | null; directionName?: string | null; count: number; wordCount?: string | null }[];
   }, userId: number) {
     let product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
@@ -791,8 +830,10 @@ export class ContentproService {
       ).map((s) => [s.id, s.name]),
     );
 
-    // 算力预检
-    await this.quota.assertEnough(brandId, totalQty);
+    // 算力预检（操作文档计费分档：纯文章 1/篇，带图 3/篇）
+    const withImages = dto.withImages !== false;
+    const pointsPer = withImages ? 3 : 1;
+    await this.quota.assertEnough(brandId, totalQty * pointsPer);
 
     const task = await this.prisma.batchTask.create({
       data: {
@@ -806,7 +847,7 @@ export class ContentproService {
         targetQty: totalQty,
         model: 'random',
         config: {
-          imageMode: dto.imageMode ?? 'auto_match',
+          imageMode: withImages ? (dto.imageMode ?? 'auto_match') : 'none',
           extra: dto.extra ?? '',
           items: items.map((it) => ({
             strategy_id: it.strategyId ?? null,
@@ -817,12 +858,12 @@ export class ContentproService {
           })),
         } as unknown as Prisma.InputJsonValue,
         brandId,
-        pointsTotal: totalQty,
+        pointsTotal: totalQty * pointsPer,
         createdById: userId,
       },
     });
     this.runBatch(task.id, brandId, { ...dto, productId: product.id, items }, userId).catch(() => undefined);
-    return { id: task.id, status: 'pending', target_quantity: totalQty, points_total: totalQty };
+    return { id: task.id, status: 'pending', target_quantity: totalQty, points_total: totalQty * pointsPer };
   }
 
   private async runBatch(taskId: number, brandId: number, dto: {
@@ -836,6 +877,10 @@ export class ContentproService {
   }, userId: number) {
     await this.prisma.batchTask.update({ where: { id: taskId }, data: { status: 'running' } });
     const task = await this.prisma.batchTask.findUnique({ where: { id: taskId } });
+    // 计费分档（操作文档）：纯文章(imageMode=none) 1/篇不挂图；带图 3/篇挂图
+    const cfg = (task?.config ?? null) as { imageMode?: string } | null;
+    const pointsPer = cfg?.imageMode === 'none' ? 1 : 3;
+    const withImages = pointsPer === 3;
     const items = dto.items?.length
       ? dto.items
       : [{ strategyId: dto.strategyId ?? null, directionName: null, count: task?.targetQty ?? 1, wordCount: null }];
@@ -861,9 +906,11 @@ export class ContentproService {
             content: result.content,
             noteKind: dto.noteKind,
           }).catch(() => null);
-          // 按策略视觉编排取图；策略未配编排时回退智能随机
-          const imgs = await this.ai.pickImages(brandId, dto.productId, item.strategyId, 4);
-          await this.quota.consume(brandId, 1, userId, `批量生成 #${taskId}`);
+          // 带图档：按策略视觉编排取图，策略未配编排时回退智能随机；纯文章档不挂图
+          const imgs = withImages
+            ? await this.ai.pickImages(brandId, dto.productId, item.strategyId, 4)
+            : { list: [] };
+          await this.quota.consume(brandId, pointsPer, userId, `批量生成 #${taskId}`);
           await this.prisma.xhsHistory.create({
             data: {
               brandId,
@@ -890,8 +937,8 @@ export class ContentproService {
             data: { successCount: { increment: 1 }, status: done >= (task?.targetQty ?? 1) ? 'completed' : 'running' },
           });
         } catch {
-          // 生成失败：算力退回
-          await this.quota.refund(brandId, 1, userId, `批量生成失败退回 #${taskId}`);
+          // 生成失败：算力退回（按档位）
+          await this.quota.refund(brandId, pointsPer, userId, `批量生成失败退回 #${taskId}`);
           await this.prisma.batchTask.update({
             where: { id: taskId },
             data: {
@@ -1116,30 +1163,52 @@ export class ContentproService {
   }
 
   /** 批量移入内容包（待处理 → 包内草稿；已废弃不可移） */
-  async moveToPackage(brandId: number, packageId: number, historyIds: number[]) {
+  /** 移入素材包 = 复制（底稿留在工作区作审计依据，操作文档 4.2），可移出（删副本）回退 */
+  async moveToPackage(brandId: number, packageId: number, historyIds: number[], userId?: number) {
     if (!historyIds.length) throw new BadRequestException('请选择要移动的内容');
     const pkg = await this.prisma.factoryPackage.findFirst({ where: { id: packageId, brandId, deletedAt: null } });
     if (!pkg) throw new NotFoundException('内容包不存在');
     const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
     const movable = rows.filter((r) => r.reviewStatus !== 'discarded');
-    if (!movable.length) throw new BadRequestException('所选内容均已废弃，不可移动');
-    await this.prisma.xhsHistory.updateMany({
-      where: { id: { in: movable.map((r) => r.id) } },
-      data: { packageId, reviewStatus: 'draft', rejectReason: null },
-    });
+    if (!movable.length) throw new BadRequestException('所选内容均已废弃，不可入库');
+    for (const r of movable) {
+      await this.prisma.xhsHistory.create({
+        data: {
+          brandId,
+          title: r.title,
+          content: r.content,
+          tags: r.tags,
+          imgList: r.imgList,
+          coverUrl: r.coverUrl,
+          batchTaskId: r.batchTaskId,
+          status: r.status,
+          source: `${r.source}:copied`,
+          contentForm: r.contentForm,
+          strategyId: r.strategyId,
+          directionName: r.directionName,
+          noteKind: r.noteKind,
+          style: r.style,
+          aiScore: r.aiScore,
+          aiAudit: r.aiAudit as Prisma.InputJsonValue ?? undefined,
+          scriptJson: r.scriptJson as Prisma.InputJsonValue ?? undefined,
+          packageId,
+          reviewStatus: 'draft',
+          rejectReason: null,
+          copiedFromId: r.id,
+          createdById: userId ?? r.createdById,
+        },
+      });
+    }
     return { moved: movable.length };
   }
 
-  /** 从内容包移出（回到待处理） */
+  /** 从内容包移出 = 删除包内副本回退（底稿仍在工作区，编辑内容不保留） */
   async moveOutOfPackage(brandId: number, historyIds: number[]) {
     const rows = await this.prisma.xhsHistory.findMany({ where: { id: { in: historyIds }, brandId } });
-    const movable = rows.filter((r) => r.packageId && ['draft', 'rejected'].includes(r.reviewStatus));
-    if (!movable.length) throw new BadRequestException('仅包内草稿/被驳回内容可移出');
-    await this.prisma.xhsHistory.updateMany({
-      where: { id: { in: movable.map((r) => r.id) } },
-      data: { packageId: null, rejectReason: null },
-    });
-    return { moved: movable.length };
+    const removable = rows.filter((r) => r.packageId && ['draft', 'rejected'].includes(r.reviewStatus));
+    if (!removable.length) throw new BadRequestException('仅包内草稿/被驳回副本可移出');
+    await this.prisma.xhsHistory.deleteMany({ where: { id: { in: removable.map((r) => r.id) } } });
+    return { moved: removable.length };
   }
 
   /** 批量废弃（待处理/包内草稿可废弃；已进入审核或被领用的不可废弃） */
