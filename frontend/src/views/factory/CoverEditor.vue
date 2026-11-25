@@ -45,9 +45,7 @@
           <div class="ed-field">
             <div class="ed-label">压字样式</div>
             <a-radio-group v-model:value="yzStyle" button-style="solid" size="small">
-              <a-radio-button value="stroke">白描边</a-radio-button>
-              <a-radio-button value="band">色块横条</a-radio-button>
-              <a-radio-button value="shade">底部渐变遮罩</a-radio-button>
+              <a-radio-button v-for="s in YZ_STYLES" :key="s.value" :value="s.value">{{ s.label }}</a-radio-button>
             </a-radio-group>
           </div>
         </div>
@@ -358,6 +356,85 @@ const drawText = (ctx, str, x, y, size, color, style) => {
   ctx.restore();
 };
 
+// 压字特效样式清单
+const YZ_STYLES = [
+  { value: 'stroke', label: '白描边' },
+  { value: 'band', label: '色块横条' },
+  { value: 'shade', label: '渐变遮罩' },
+  { value: 'highlight', label: '荧光高亮' },
+  { value: 'gold', label: '金色大字' },
+  { value: 'shadow3d', label: '立体投影' },
+  { value: 'neon', label: '霓虹发光' },
+  { value: 'hollow', label: '镂空描边' },
+];
+
+// 特效字：按样式渲染单行文字（坐标为画布单位，预览/导出等比缩放）
+const paintFx = (ctx, str, x, y, size, style, isSub) => {
+  ctx.save();
+  ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  switch (style) {
+    case 'highlight':
+      ctx.fillStyle = isSub ? '#334155' : '#0f172a';
+      ctx.fillText(str, x, y);
+      break;
+    case 'gold': {
+      const g = ctx.createLinearGradient(0, y - size * 0.55, 0, y + size * 0.55);
+      g.addColorStop(0, '#fff8d6');
+      g.addColorStop(0.45, '#fbbf24');
+      g.addColorStop(1, '#d97706');
+      ctx.lineWidth = Math.max(1, size / 12);
+      ctx.strokeStyle = 'rgba(120,53,15,0.9)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(str, x, y);
+      ctx.fillStyle = g;
+      ctx.fillText(str, x, y);
+      break;
+    }
+    case 'shadow3d': {
+      ctx.fillStyle = '#475569';
+      const depth = Math.max(2, Math.round(size * 0.07));
+      for (let i = depth; i >= 1; i--) ctx.fillText(str, x + i, y + i * 0.9);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(str, x, y);
+      break;
+    }
+    case 'neon': {
+      ctx.shadowColor = '#22d3ee';
+      ctx.lineWidth = Math.max(1, size / 10);
+      ctx.strokeStyle = 'rgba(34,211,238,0.85)';
+      ctx.lineJoin = 'round';
+      for (const blur of [size * 0.5, size * 0.28, size * 0.12]) {
+        ctx.shadowBlur = blur;
+        ctx.fillStyle = '#f0fdff';
+        ctx.fillText(str, x, y);
+      }
+      ctx.shadowBlur = 0;
+      ctx.strokeText(str, x, y);
+      break;
+    }
+    case 'hollow':
+      ctx.lineWidth = Math.max(1.5, size / 7);
+      ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(str, x, y);
+      break;
+    case 'stroke':
+      ctx.lineWidth = size / 6;
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(str, x, y);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(str, x, y);
+      break;
+    default:
+      ctx.fillStyle = isSub ? '#e2e8f0' : '#ffffff';
+      ctx.fillText(str, x, y);
+  }
+  ctx.restore();
+};
+
 // 按实际渲染宽度自动换行（中文逐字符装箱）
 const wrapByMeasure = (ctx, text, maxWidth) => {
   const chars = Array.from(text);
@@ -400,7 +477,8 @@ const drawYazi = (ctx, W, H) => {
   const centerY = yzPos.value === 'top' ? H * 0.2 : yzPos.value === 'middle' ? H * 0.46 : H * 0.78;
   const maxTop = H * 0.96 - blockH;
   const top = Math.max(H * 0.04, Math.min(maxTop, centerY - blockH / 2));
-  if (yzStyle.value === 'shade' && yzPos.value === 'bottom') {
+  const style = yzStyle.value;
+  if (style === 'shade' && yzPos.value === 'bottom') {
     const gradTop = Math.max(0, Math.min(H * 0.5, top - size * 1.1));
     const grad = ctx.createLinearGradient(0, gradTop, 0, H);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
@@ -408,18 +486,33 @@ const drawYazi = (ctx, W, H) => {
     ctx.fillStyle = grad;
     ctx.fillRect(0, gradTop, W, H - gradTop);
   }
-  if (yzStyle.value === 'band') {
+  if (style === 'band') {
     ctx.fillStyle = 'rgba(15,23,42,0.66)';
     ctx.fillRect(0, top - size * 0.5, W, blockH + size);
   }
-  const paint = yzStyle.value === 'stroke' ? 'stroke' : 'plain';
+  const mainTop = top + (subLines.length ? subLines.length * lhS + size * 0.26 : 0);
+  // 荧光高亮：先铺每行荧光色块，再压深色文字
+  if (style === 'highlight') {
+    const drawBlock = (ln, y, s) => {
+      const w = ctx.measureText(ln).width + s * 0.9;
+      ctx.save();
+      ctx.fillStyle = 'rgba(253,224,71,0.92)';
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - w / 2, y - s * 0.58, w, s * 1.16, s * 0.16);
+      ctx.fill();
+      ctx.restore();
+    };
+    ctx.font = font(subSize);
+    subLines.forEach((ln, i) => drawBlock(ln, top + lhS * (i + 0.5), subSize));
+    ctx.font = font(size);
+    mainLines.forEach((ln, i) => drawBlock(ln, mainTop + lhM * (i + 0.5), size));
+  }
   // 副标题在上、主标题在下
   subLines.forEach((ln, i) => {
-    drawText(ctx, ln, W / 2, top + lhS * (i + 0.5), subSize, '#e2e8f0', paint);
+    paintFx(ctx, ln, W / 2, top + lhS * (i + 0.5), subSize, style, true);
   });
-  const mainTop = top + (subLines.length ? subLines.length * lhS + size * 0.26 : 0);
   mainLines.forEach((ln, i) => {
-    drawText(ctx, ln, W / 2, mainTop + lhM * (i + 0.5), size, '#ffffff', paint);
+    paintFx(ctx, ln, W / 2, mainTop + lhM * (i + 0.5), size, style, false);
   });
 };
 
