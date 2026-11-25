@@ -241,7 +241,6 @@ const importProduct = ref(null);
 const assignProduct = ref(undefined);
 const uploadSearch = ref('');
 const creatingNode = ref(false);
-const productFilter = ref(null);
 
 const typeOptions = computed(() => tags.value.map((t) => ({ label: t.name, value: t.id })));
 const setOptions = computed(() => sets.value.map((s) => ({ label: s.name, value: s.id })));
