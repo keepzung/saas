@@ -133,6 +133,63 @@
         </div>
       </div>
 
+      <!-- ── AI 海报：AI 出背景+产品，标题/标签本地特效合成 ── -->
+      <div v-else-if="activeTab === 'poster'" class="ce-body editor">
+        <div class="ed-left">
+          <div class="ed-section-label">AI 海报</div>
+          <div class="ed-tip">AI 先把产品重绘成海报场景背景（⚡2/次，约 1-2 分钟，失败自动退回算力），标题、副标题、功能标签用本地特效字合成——文字永远清晰可编辑。</div>
+          <div class="ed-field">
+            <div class="ed-label">海报场景</div>
+            <div class="scene-chips">
+              <a-tag
+                v-for="(s, i) in POSTER_PRESETS"
+                :key="i"
+                class="scene-chip"
+                :class="{ active: poPreset === i }"
+                @click="poPreset = i"
+              >{{ s.name }}</a-tag>
+            </div>
+          </div>
+          <div class="ed-field">
+            <a-button type="primary" block :loading="poBusy" :disabled="!baseImage" @click="generatePosterBg">
+              {{ poBg ? '重新生成海报背景（⚡2）' : 'AI 生成海报背景（⚡2）' }}
+            </a-button>
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">主标题</div>
+            <a-input v-model:value="poTitle" :maxlength="40" placeholder="默认使用文章标题，过长自动换行" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">标题特效</div>
+            <a-radio-group v-model:value="poFx" button-style="solid" size="small">
+              <a-radio-button value="gold">金色大字</a-radio-button>
+              <a-radio-button value="neon">霓虹发光</a-radio-button>
+              <a-radio-button value="shadow3d">立体投影</a-radio-button>
+              <a-radio-button value="stroke">白描边</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">副标题（选填，默认用产品名）</div>
+            <a-input v-model:value="poSub" :maxlength="30" placeholder="如：格力Star5 AI家庭中央空调" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">功能标签（最多 3 个，留空跳过）</div>
+            <a-input v-model:value="poTags[0]" :maxlength="8" style="margin-bottom: 6px" placeholder="如：高能效省电" />
+            <a-input v-model:value="poTags[1]" :maxlength="8" style="margin-bottom: 6px" placeholder="如：全屋舒适" />
+            <a-input v-model:value="poTags[2]" :maxlength="8" placeholder="如：十年包修" />
+          </div>
+        </div>
+        <div class="ed-right">
+          <div class="preview-wrap">
+            <a-spin v-if="poBusy" class="scene-spin" tip="AI 正在绘制海报背景，约 1-2 分钟…" size="large" />
+            <canvas v-show="!poBusy" ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
+          </div>
+          <div class="ed-actions">
+            <a-button type="primary" size="large" class="use-btn" :loading="uploading" @click="applyCanvas">选用为封面</a-button>
+          </div>
+        </div>
+      </div>
+
       <!-- ── AI 场景：产品图换背景（经图片模型重绘，可选压字） ── -->
       <div v-else-if="activeTab === 'scene'" class="ce-body editor">
         <div class="ed-left">
@@ -215,6 +272,7 @@ const props = defineProps({
   bgImage: { type: String, default: '' },
   title: { type: String, default: '' },
   images: { type: Array, default: () => [] },
+  productName: { type: String, default: '' },
 });
 const emit = defineEmits(['close', 'apply']);
 
@@ -229,6 +287,7 @@ const tabs = [
   { key: 'yazi', name: '压字' },
   { key: 'dazibao', name: '大字报' },
   { key: 'pintu', name: '拼图' },
+  { key: 'poster', name: 'AI 海报' },
   { key: 'scene', name: 'AI 场景' },
 ];
 const ckEnabled = ref(false);
@@ -338,6 +397,41 @@ const scOverlay = ref(false);
 const scTitle = ref('');
 const scBusy = ref(false);
 const scResult = ref('');
+
+// ── AI 海报：AI 出背景+产品，标题/副标题/功能标签本地特效合成
+const POSTER_PRESETS = [
+  { name: '科技蓝舞台', scene: '发光的深蓝色科技舞台上，背景有蓝色发光电路纹理、光束和粒子光效' },
+  { name: '聚光展台', scene: '深色高级展台聚光灯下，背景有暖金色光斑虚化' },
+  { name: '原木家居', scene: '浅色原木台面上，米白色简约客厅背景' },
+  { name: '红金节日', scene: '红金配色的节日礼盒氛围中，暖色灯带背景' },
+];
+const poPreset = ref(0);
+const poTitle = ref('');
+const poSub = ref('');
+const poTags = ref(['高能效省电', '全屋舒适', '十年包修']);
+const poFx = ref('gold');
+const poBusy = ref(false);
+const poBg = ref('');
+
+const generatePosterBg = async () => {
+  if (!baseImage.value) return message.warning('请先在配图步骤选定产品底图');
+  poBusy.value = true;
+  poBg.value = '';
+  try {
+    const preset = POSTER_PRESETS[poPreset.value];
+    const prompt = `电商风格产品营销海报背景：把这个产品放在${preset.scene}，产品居中偏下完整展示，产品外观保持原样不变，画面顶部三分之一和左侧留出干净区域用于排版标题文字，高清商业广告摄影`;
+    const res = await generateCoverScene(
+      { imageUrl: baseImage.value, prompt, width: 1080, height: 1440 },
+      { brandId: brandId.value },
+    );
+    poBg.value = res?.url ?? '';
+    message.success('海报背景已生成，标题/标签可继续调整');
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? e?.message ?? 'AI 生成失败');
+  } finally {
+    poBusy.value = false;
+  }
+};
 
 // ── 绘制
 const drawText = (ctx, str, x, y, size, color, style) => {
@@ -610,6 +704,7 @@ const drawPreview = async () => {
   if (activeTab.value === 'yazi') need.push(baseImage.value);
   if (activeTab.value === 'dazibao' && dzShowProduct.value) need.push(images.value[0]?.url);
   if (activeTab.value === 'pintu') need.push(...pickSet.value.map((i) => images.value[i]?.url));
+  if (activeTab.value === 'poster' && poBg.value) need.push(poBg.value);
   await Promise.all(need.filter(Boolean).map((u) => loadImage(u)));
   await nextTick();
   const canvas = previewCanvas.value;
@@ -618,10 +713,86 @@ const drawPreview = async () => {
   if (activeTab.value === 'yazi') drawYazi(ctx, canvas.width, canvas.height);
   else if (activeTab.value === 'dazibao') drawDazibao(ctx, canvas.width, canvas.height);
   else if (activeTab.value === 'pintu') drawPintu(ctx, canvas.width, canvas.height);
+  else if (activeTab.value === 'poster') drawPoster(ctx, canvas.width, canvas.height);
+};
+
+// AI 海报排版：顶部标题区 + 左侧功能标签 + AI 背景图
+const drawPoster = (ctx, W, H) => {
+  const img = poBg.value ? imgCache.get(poBg.value) : null;
+  ctx.fillStyle = '#0b1220';
+  ctx.fillRect(0, 0, W, H);
+  if (img) {
+    drawCoverFit(ctx, img, W / 2, H / 2, W, H);
+  } else {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#0e1a33');
+    g.addColorStop(1, '#123a6b');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `600 ${W * 0.042}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('点左侧「AI 生成海报背景」开始（⚡2/次）', W / 2, H / 2);
+  }
+  // 顶部主标题（自动换行 ≤3 行）
+  const title = (poTitle.value || props.title || '').trim().slice(0, 40);
+  if (title) {
+    let size = W * (title.length > 20 ? 0.07 : title.length > 10 ? 0.082 : 0.094);
+    const font = (s) => `900 ${s}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    ctx.font = font(size);
+    let lines = wrapByMeasure(ctx, title, W * 0.9);
+    if (lines.length > 3) {
+      size = W * Math.max(0.05, (0.082 * 2.6) / lines.length);
+      ctx.font = font(size);
+      lines = wrapByMeasure(ctx, title, W * 0.9);
+    }
+    const lh = size * 1.28;
+    const startY = H * 0.06 + size * 0.6;
+    lines.forEach((ln, i) => paintFx(ctx, ln, W / 2, startY + i * lh, size, poFx.value, false));
+    // 副标题（默认产品名）
+    const sub = (poSub.value || props.productName || '').trim().slice(0, 30);
+    if (sub) {
+      const subSize = W * 0.048;
+      ctx.font = `900 ${subSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+      paintFx(ctx, sub, W / 2, startY + lines.length * lh + subSize * 0.2, subSize, 'band', false);
+    }
+  }
+  // 左侧功能标签（发光描边圆角药丸）
+  const tags = poTags.value.map((t) => (t ?? '').trim()).filter(Boolean).slice(0, 3);
+  if (tags.length) {
+    const tagSize = W * 0.048;
+    ctx.textBaseline = 'middle';
+    tags.forEach((t, i) => {
+      ctx.font = `700 ${tagSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+      const tw = ctx.measureText(t).width;
+      const pw = tw + tagSize * 1.7;
+      const ph = tagSize * 1.7;
+      const px = W * 0.06;
+      const py = H * 0.46 + i * ph * 1.5;
+      ctx.save();
+      ctx.shadowColor = 'rgba(56,189,248,0.95)';
+      ctx.shadowBlur = tagSize * 0.55;
+      ctx.fillStyle = 'rgba(13,42,84,0.55)';
+      ctx.beginPath();
+      ctx.roundRect(px, py - ph / 2, pw, ph, ph / 2);
+      ctx.fill();
+      ctx.shadowBlur = tagSize * 0.35;
+      ctx.strokeStyle = 'rgba(125,211,252,0.95)';
+      ctx.lineWidth = Math.max(1.5, tagSize * 0.08);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${tagSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText(t, px + tagSize * 0.85, py + tagSize * 0.06);
+    });
+  }
 };
 
 watch(
-  [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle],
+  [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value],
   () => drawPreview(),
   { deep: true },
 );
@@ -696,6 +867,12 @@ watch(
       dzSub.value = '';
       pickSet.value = props.images?.length ? [0] : [];
       ptTitle.value = props.title ?? '';
+      poTitle.value = props.title ?? '';
+      poSub.value = props.productName ?? '';
+      poBg.value = '';
+      poBusy.value = false;
+      poPreset.value = 0;
+      poFx.value = 'gold';
       loadEditorMeta();
       nextTick(() => drawPreview());
     }

@@ -286,6 +286,7 @@
           :bg-image="images[0]?.url ?? ''"
           :images="images"
           :title="titles[selectedTitle]"
+          :product-name="productName"
           @close="coverOpen = false"
           @apply="onCoverApply"
         />
