@@ -10,7 +10,7 @@ import { ZipArchive } from 'archiver';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
-import { CaseDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
+import { CaseDto, HookDto, PersonaDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
 
 @Injectable()
 export class ContentproService {
@@ -124,6 +124,8 @@ export class ContentproService {
     unassigned?: string;
     keyword?: string;
     productNodeId?: string;
+    /** 1=仅已打类型标签的图（精准编排可用性检查用） */
+    typeTagged?: string;
     page?: string;
     pageSize?: string;
   }) {
@@ -133,6 +135,7 @@ export class ContentproService {
     if (query.setId) where.setId = Number(query.setId);
     if (query.typeId) where.typeId = Number(query.typeId);
     if (query.productNodeId) where.productNodeId = Number(query.productNodeId);
+    if (query.typeTagged === '1') where.typeId = { not: null };
     if (query.unassigned === '1') where.AND = [{ setId: null }, { typeId: null }];
     if (query.keyword) where.name = { contains: query.keyword, mode: 'insensitive' };
     const [total, rows] = await Promise.all([
@@ -252,9 +255,9 @@ export class ContentproService {
         contentDirections: (dto.content_directions as unknown) ?? (dto.contentDirections as unknown) ?? [],
         prompt: (dto.prompt as string) ?? null,
         mode: (dto.mode as string) === 'precise' ? 'precise' : 'open',
-        formatText: (dto.formatText as string) ?? null,
+        formatText: ((dto.format_text ?? dto.formatText) as string) ?? null,
         requiredTags: (dto.required_tags ?? dto.requiredTags ?? []) as unknown as Prisma.InputJsonValue,
-        forbiddenText: (dto.forbidden_text as string) ?? null,
+        forbiddenText: ((dto.forbidden_text ?? dto.forbiddenText) as string) ?? null,
         tone: (dto.tone ?? dto.tone ?? []) as unknown as Prisma.InputJsonValue,
         visual: (dto.visual ?? null) as unknown as Prisma.InputJsonValue,
         boundProductIds: (dto.bound_product_ids ?? dto.boundProductIds ?? []) as unknown as Prisma.InputJsonValue,
@@ -528,6 +531,8 @@ export class ContentproService {
     noteKind?: string | null;
     style?: string | null;
     form?: string | null;
+    personaId?: number | null;
+    hookIds?: number[] | null;
   }, userId?: number) {
     await this.quota.assertEnough(input.brandId, 1);
     await this.quota.consume(input.brandId, 1, userId, '单篇生成');
@@ -634,8 +639,96 @@ export class ContentproService {
     return { url: `/uploads/materials/${brandId}/${filename}` };
   }
 
-  randomImages(brandId: number, productId?: string, num?: string) {
-    return this.ai.randomImages(brandId, productId ? Number(productId) : undefined, num ? Number(num) : 6);
+  randomImages(brandId: number, query: { productId?: string; num?: string; strategyId?: string }) {
+    // 传 strategyId 时按策略视觉编排取图（编排数量优先于 num），返回体保持数组兼容旧前端
+    return this.ai
+      .pickImages(
+        brandId,
+        query.productId ? Number(query.productId) : undefined,
+        query.strategyId ? Number(query.strategyId) : null,
+        query.num ? Number(query.num) : 6,
+      )
+      .then((r) => r.list);
+  }
+
+  // ─── 人设资源池 ─────────────────────────────────────────────────────
+  async personas(brandId: number) {
+    const list = await this.prisma.writingPersona.findMany({
+      where: { brandId },
+      orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+    });
+    return {
+      list: list.map((p) => ({ id: p.id, name: p.name, content: p.content ?? '', enabled: p.enabled, sort: p.sort })),
+    };
+  }
+
+  async savePersona(brandId: number, dto: PersonaDto, id?: number) {
+    if (id) {
+      const data: Prisma.WritingPersonaUpdateInput = { name: dto.name };
+      if (dto.content !== undefined) data.content = dto.content;
+      if (dto.enabled !== undefined) data.enabled = dto.enabled;
+      if (dto.sort !== undefined) data.sort = dto.sort;
+      await this.prisma.writingPersona.update({ where: { id }, data });
+      return { id };
+    }
+    const row = await this.prisma.writingPersona.create({
+      data: {
+        brandId,
+        name: dto.name,
+        content: dto.content ?? null,
+        enabled: dto.enabled === undefined ? true : dto.enabled,
+        sort: dto.sort ?? 99,
+      },
+    });
+    return { id: row.id };
+  }
+
+  async deletePersona(id: number) {
+    await this.prisma.writingPersona.delete({ where: { id } });
+    return { id };
+  }
+
+  // ─── 钩子资源池 ─────────────────────────────────────────────────────
+  async hooks(brandId: number) {
+    const list = await this.prisma.writingHook.findMany({
+      where: { brandId },
+      orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+    });
+    return {
+      list: list.map((h) => ({
+        id: h.id,
+        text: h.text,
+        position: h.position,
+        enabled: h.enabled,
+        sort: h.sort,
+      })),
+    };
+  }
+
+  async saveHook(brandId: number, dto: HookDto, id?: number) {
+    const position = dto.position === 'opening' || dto.position === 'closing' ? dto.position : 'any';
+    if (id) {
+      const data: Prisma.WritingHookUpdateInput = { text: dto.text, position };
+      if (dto.enabled !== undefined) data.enabled = dto.enabled;
+      if (dto.sort !== undefined) data.sort = dto.sort;
+      await this.prisma.writingHook.update({ where: { id }, data });
+      return { id };
+    }
+    const row = await this.prisma.writingHook.create({
+      data: {
+        brandId,
+        text: dto.text,
+        position,
+        enabled: dto.enabled === undefined ? true : dto.enabled,
+        sort: dto.sort ?? 99,
+      },
+    });
+    return { id: row.id };
+  }
+
+  async deleteHook(id: number) {
+    await this.prisma.writingHook.delete({ where: { id } });
+    return { id };
   }
 
   /**
@@ -758,7 +851,8 @@ export class ContentproService {
             content: result.content,
             noteKind: dto.noteKind,
           }).catch(() => null);
-          const imgs = await this.ai.randomImages(brandId, dto.productId, 4);
+          // 按策略视觉编排取图；策略未配编排时回退智能随机
+          const imgs = await this.ai.pickImages(brandId, dto.productId, item.strategyId, 4);
           await this.quota.consume(brandId, 1, userId, `批量生成 #${taskId}`);
           await this.prisma.xhsHistory.create({
             data: {
@@ -766,7 +860,7 @@ export class ContentproService {
               title: result.titles[i % result.titles.length] ?? result.titles[0],
               content: result.content,
               tags: result.tags,
-              imgList: imgs.map((x) => x.url),
+              imgList: imgs.list.map((x) => x.url),
               source: `batch:${result.source}`,
               batchTaskId: taskId,
               strategyId: item.strategyId ?? null,

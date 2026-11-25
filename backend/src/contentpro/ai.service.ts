@@ -252,6 +252,8 @@ export class AiService {
     noteKind?: string | null;
     style?: string | null;
     form?: string | null;
+    personaId?: number | null;
+    hookIds?: number[] | null;
   }): Promise<GenerateResult> {
     let product = await this.prisma.product.findUnique({ where: { id: input.productId } });
     if (!product) {
@@ -288,9 +290,21 @@ export class AiService {
     const sRequiredTags = asArr(strategy?.requiredTags as unknown);
     const sForbidden = String((strategy as { forbiddenText?: string } | null)?.forbiddenText ?? '').trim();
     const sTone = asArr(strategy?.tone as unknown);
+    // 人设/钩子资源池：写作时由用户从池里选人设、勾钩子填入占位符（操作文档 2.2.2）
+    const poolPersona = input.personaId
+      ? await this.prisma.writingPersona.findFirst({ where: { id: input.personaId, brandId: input.brandId } })
+      : null;
+    const poolHooks = input.hookIds?.length
+      ? await this.prisma.writingHook.findMany({
+          where: { id: { in: input.hookIds }, brandId: input.brandId, enabled: true },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+        })
+      : [];
     const personaStr = persona.join('；');
     const spStr = sellingPoints.join('；');
     const auStr = audience.join('、');
+    const personaText = (poolPersona?.content ?? '').trim() || personaStr || (strategy?.name ?? '');
+    const hooksText = poolHooks.map((h) => (h.text ?? '').trim()).filter(Boolean).join('\n');
     const replaceVars = (tpl: string) => {
       const map: Record<string, string> = {
         产品名称: productName,
@@ -299,13 +313,16 @@ export class AiService {
         卖点: spStr || '（卖点见下）',
         产品知识: knowledge,
         产品资料: knowledge,
-        人设: personaStr || (strategy?.name ?? ''),
-        写作人设: personaStr || (strategy?.name ?? ''),
+        人设: personaText,
+        写作人设: personaText,
         目标受众: auStr,
         产品受众: auStr,
-        钩子: '',
-        写作风格: sMode === 'precise' ? '精准写作（约束强、随机性低、表述严格按提示词执行）' : '开放式写作（随机性高、更像素人真人分享）',
+        钩子: hooksText,
+        内容钩子: hooksText,
+        开头钩子: poolHooks[0]?.text?.trim() ?? hooksText,
+        结尾钩子: poolHooks[poolHooks.length - 1]?.text?.trim() ?? hooksText,
       };
+      // 【写作风格】按文档不替换：插入后作为提示词的一部分原样保留
       return tpl.replace(/【([^】]{1,14})】/g, (mm: string, key: string) => {
         const k = key.trim();
         for (const kk of Object.keys(map)) {
@@ -316,6 +333,9 @@ export class AiService {
       });
     };
     const strategyPromptFilled = sPromptTpl ? replaceVars(sPromptTpl) : '';
+    const effectivePersona = poolPersona
+      ? [(poolPersona.content ?? '').trim() || poolPersona.name]
+      : persona;
 
     if (this.enabled()) {
       try {
@@ -323,7 +343,7 @@ export class AiService {
           productName,
           knowledge,
           strategyName: strategy?.name,
-          persona,
+          persona: effectivePersona,
           sellingPoints,
           audience,
           directionName,
@@ -350,7 +370,7 @@ export class AiService {
     const fallback = this.templateCompose({
       productName,
       strategyName: strategy?.name,
-      persona,
+      persona: effectivePersona,
       sellingPoints,
       audience,
       directionName,
@@ -721,9 +741,8 @@ export class AiService {
     return result;
   }
 
-  // ── 智能配图：按产品节点 → 品牌（东风/格力素材池小，先品牌内随机）────
-  async randomImages(brandId: number, productId?: number, num = 6) {
-    const take = Math.min(12, Math.max(1, num));
+  // ── 素材池：按产品节点 → 品牌 ──
+  private async materialPool(brandId: number, productId?: number) {
     const productNodeIds: number[] = [];
     if (productId) {
       productNodeIds.push(productId);
@@ -737,16 +756,109 @@ export class AiService {
         ? { OR: [{ productNodeId: { in: productNodeIds } }, { productNodeId: null }] }
         : {}),
     };
-    const pool = await this.prisma.materialImage.findMany({ where, take: 200 });
-    // 打乱后取前 N（优先已分类的图）
-    const sorted = pool.sort((a, b) => {
-      const ap = (a.setId ?? 0) * 2 + (a.typeId ?? 0);
-      const bp = (b.setId ?? 0) * 2 + (b.typeId ?? 0);
-      return bp - ap;
-    });
-    const classified = sorted.slice(0, Math.ceil(take * 1.5));
-    const rest = pool.filter((x) => !classified.includes(x));
-    const picked = [...classified.sort(() => Math.random() - 0.5), ...rest.sort(() => Math.random() - 0.5)].slice(0, take);
+    return this.prisma.materialImage.findMany({ where, take: 500 });
+  }
+
+  private shuffleTake<T>(arr: T[], n: number): T[] {
+    return [...arr].sort(() => Math.random() - 0.5).slice(0, Math.max(0, n));
+  }
+
+  // ── 智能配图（无编排时兜底）：优先已分类素材，品牌池随机 ──
+  async randomImages(brandId: number, productId?: number, num = 6) {
+    const take = Math.min(12, Math.max(1, num));
+    const pool = await this.materialPool(brandId, productId);
+    const classified = pool.filter((x) => x.setId != null || x.typeId != null);
+    const picked = this.shuffleTake(classified, take);
+    if (picked.length < take) {
+      const taken = new Set(picked.map((x) => x.id));
+      const rest = pool.filter((x) => x.setId == null && x.typeId == null && !taken.has(x.id));
+      picked.push(...this.shuffleTake(rest, take - picked.length));
+    }
     return picked.map((x) => ({ id: x.id, url: x.url, name: x.name, setId: x.setId, typeId: x.typeId }));
+  }
+
+  // ── 按策略视觉编排取图（操作文档 2.2.3）：random=智能随机(count/指定套图) precise=精准编排(位置×类型标签) ──
+  async pickImages(
+    brandId: number,
+    productId: number | undefined,
+    strategyId?: number | null,
+    fallbackNum = 4,
+  ): Promise<{
+    list: { id: number; url: string; name: string | null; setId: number | null; typeId: number | null }[];
+    orchestrated: boolean;
+    degraded: boolean;
+    hint: string;
+  }> {
+    const strategy = strategyId
+      ? await this.prisma.writingStrategy.findUnique({ where: { id: strategyId } })
+      : null;
+    const visual = (strategy?.visual ?? null) as
+      | { mode?: string; count?: number; setId?: number | null; slots?: { tagId?: number | null; position?: string }[] }
+      | null;
+    const hasVisual = !!visual && (!!visual.setId || !!visual.count || !!(visual.slots?.length));
+    if (!hasVisual) {
+      return { list: await this.randomImages(brandId, productId, fallbackNum), orchestrated: false, degraded: false, hint: '' };
+    }
+    const pool = await this.materialPool(brandId, productId);
+    const toDto = (x: { id: number; url: string; name: string | null; setId: number | null; typeId: number | null }) => ({
+      id: x.id,
+      url: x.url,
+      name: x.name,
+      setId: x.setId,
+      typeId: x.typeId,
+    });
+    const used = new Set<number>();
+    const list: ReturnType<typeof toDto>[] = [];
+    let degraded = false;
+    let hint = '';
+
+    if (visual.mode === 'precise' && Array.isArray(visual.slots) && visual.slots.length) {
+      // 精准编排：逐位按类型标签取图，已归属产品的素材优先
+      const slots = visual.slots.filter((s) => s?.tagId).slice(0, 9);
+      for (const slot of slots) {
+        const scoped = pool.filter((x) => x.typeId === slot.tagId && !used.has(x.id) && x.productNodeId != null);
+        const global = pool.filter((x) => x.typeId === slot.tagId && !used.has(x.id));
+        const pick = this.shuffleTake(scoped.length ? scoped : global, 1)[0];
+        if (pick) {
+          used.add(pick.id);
+          list.push(toDto(pick));
+        }
+      }
+      if (list.length < slots.length) {
+        // 文档 Q3：素材未打标取不到图 → 回退智能随机补足，不空手而归
+        degraded = true;
+        hint = '部分类型标签下暂无已打标素材，已回退智能随机补足；请到素材库给图片打标';
+        const rest = pool.filter((x) => !used.has(x.id));
+        list.push(...this.shuffleTake(rest, slots.length - list.length).map(toDto));
+      }
+    } else {
+      // 智能随机：按数量取；指定套图=限定只从该套图取；未指定=同套图优先保证视觉统一
+      const count = Math.min(9, Math.max(1, Number(visual.count ?? fallbackNum)));
+      if (visual.setId) {
+        const inSet = pool.filter((x) => x.setId === visual.setId);
+        list.push(...this.shuffleTake(inSet, count).map(toDto));
+        if (list.length < count) {
+          if (!inSet.length) {
+            degraded = true;
+            hint = '指定套图下暂无素材，已回退品牌池智能随机';
+            list.push(...this.shuffleTake(pool, count).map(toDto));
+          } else {
+            degraded = true;
+            hint = '指定套图素材不足配置数量，仅返回套图内现有素材';
+          }
+        }
+      } else {
+        const inSets = pool.filter((x) => x.setId != null);
+        for (const p of this.shuffleTake(inSets, count)) {
+          used.add(p.id);
+          list.push(toDto(p));
+        }
+        if (list.length < count) {
+          const rest = pool.filter((x) => !used.has(x.id));
+          list.push(...this.shuffleTake(rest, count - list.length).map(toDto));
+        }
+      }
+    }
+    return { list, orchestrated: true, degraded, hint };
   }
 }

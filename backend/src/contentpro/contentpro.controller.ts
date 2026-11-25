@@ -32,6 +32,7 @@ import {
   DispatchDto,
   GenerateArticleDto,
   GenerateStrategyDto,
+  HookDto,
   ImagesZipDto,
   MaterialImageAssignDto,
   MaterialImageImportDto,
@@ -39,6 +40,7 @@ import {
   MaterialTagDto,
   MoveToPackageDto,
   PackageDto,
+  PersonaDto,
   QuotaGrantDto,
   RejectDto,
   RuleDto,
@@ -213,6 +215,48 @@ export class ContentproController {
     return this.service.deleteStrategy(id);
   }
 
+  // ─── 人设资源池 ──────────────────────────────────────────────────
+  @Get('content-pro/personas')
+  personas(@Query('brandId') brandId?: string) {
+    return this.service.personas(Number(brandId ?? 1));
+  }
+
+  @Post('content-pro/personas')
+  createPersona(@Body() dto: PersonaDto, @Query('brandId') brandId?: string) {
+    return this.service.savePersona(Number(brandId ?? 1), dto);
+  }
+
+  @Put('content-pro/personas/:id')
+  updatePersona(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<PersonaDto>) {
+    return this.service.savePersona(0, dto as PersonaDto, id);
+  }
+
+  @Delete('content-pro/personas/:id')
+  deletePersona(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deletePersona(id);
+  }
+
+  // ─── 钩子资源池 ──────────────────────────────────────────────────
+  @Get('content-pro/hooks')
+  hooks(@Query('brandId') brandId?: string) {
+    return this.service.hooks(Number(brandId ?? 1));
+  }
+
+  @Post('content-pro/hooks')
+  createHook(@Body() dto: HookDto, @Query('brandId') brandId?: string) {
+    return this.service.saveHook(Number(brandId ?? 1), dto);
+  }
+
+  @Put('content-pro/hooks/:id')
+  updateHook(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<HookDto>) {
+    return this.service.saveHook(0, dto as HookDto, id);
+  }
+
+  @Delete('content-pro/hooks/:id')
+  deleteHook(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteHook(id);
+  }
+
   // ─── AI 生成 / 历史 ──────────────────────────────────────────────
   @Get('content-pro/ai/health')
   aiHealth() {
@@ -235,8 +279,9 @@ export class ContentproController {
     @Query('brandId') brandId?: string,
     @Query('productId') productId?: string,
     @Query('num') num?: string,
+    @Query('strategyId') strategyId?: string,
   ) {
-    return this.service.randomImages(Number(brandId ?? 1), productId, num);
+    return this.service.randomImages(Number(brandId ?? 1), { productId, num, strategyId });
   }
 
   @Get('content-pro/history/xhs')

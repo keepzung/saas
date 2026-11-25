@@ -261,6 +261,16 @@ const routes = [
         meta: { title: '创作策略Pro' },
       },
       {
+        path: '/content-pro/config/personas',
+        component: () => import('../views/factory/PersonaPoolView.vue'),
+        meta: { title: '人设管理', poolTab: 'persona' },
+      },
+      {
+        path: '/content-pro/config/hooks',
+        component: () => import('../views/factory/PersonaPoolView.vue'),
+        meta: { title: '钩子管理', poolTab: 'hook' },
+      },
+      {
         path: '/content-pro/config/templates',
         component: () => import('../views/factory/TemplateLibraryView.vue'),
         meta: { title: '模板库' },

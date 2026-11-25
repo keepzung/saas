@@ -36,9 +36,9 @@
         />
         <div class="two-col">
           <div class="col-card">
-            <div class="col-head"><BulbOutlined /> 创作策略 ({{ strategies.length }})</div>
+            <div class="col-head"><BulbOutlined /> 创作策略 ({{ applicableStrategies.length }})</div>
             <div
-              v-for="s in strategies"
+              v-for="s in applicableStrategies"
               :key="s.id"
               class="strategy-item"
               :class="{ selected: s.id === strategyId, disabled: !s.enabled }"
@@ -50,7 +50,7 @@
               </div>
               <div class="si-desc">{{ s.description }}</div>
             </div>
-            <a-empty v-if="!strategies.length" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无创作策略，请先到「创作策略Pro」创建" />
+            <a-empty v-if="!applicableStrategies.length" :image="Empty.PRESENTED_IMAGE_SIMPLE" description="该产品暂无适用创作策略，请到「创作策略Pro」新建或绑定该产品" />
           </div>
           <div class="col-card">
             <div class="col-head"><AimOutlined /> 内容方向 ({{ currentDirections.length }})</div>
@@ -83,6 +83,29 @@
           <div class="kind-item">
             <span class="kind-label">内容形态</span>
             <a-select v-model:value="contentForm" :options="FORM_OPTIONS" />
+          </div>
+        </div>
+        <div class="sec-title" style="margin-top: 18px"><span class="bar" /> 写作人设与内容钩子（选填）</div>
+        <div class="kind-row">
+          <div class="kind-item">
+            <span class="kind-label">写作人设（选 1）</span>
+            <a-select
+              v-model:value="personaId"
+              :options="personaOptions"
+              allow-clear
+              placeholder="不指定，用策略内人设"
+            />
+          </div>
+          <div class="kind-item" style="flex: 2">
+            <span class="kind-label">内容钩子（可多选）</span>
+            <a-select
+              v-model:value="hookIds"
+              mode="multiple"
+              :options="hookOptions"
+              allow-clear
+              :max-tag-count="3"
+              placeholder="不指定，用策略提示词里的固定钩子"
+            />
           </div>
         </div>
         <div class="sec-title" style="margin-top: 18px"><span class="bar" /> 额外写作要求</div>
@@ -199,6 +222,7 @@
           <span>已智能匹配<span class="hl">{{ productName }}</span>的图片</span>
           <a-tag color="blue">已选择 {{ images.length }}/最多12</a-tag>
         </div>
+        <div v-if="orchestrationHint" class="match-hint orchestration-tip">{{ orchestrationHint }}</div>
         <div class="match-hint">拖动图片可以调整顺序，也可以从右侧素材库查找添加指定的产品素材图片</div>
         <div class="match-layout">
           <div class="selected-grid">
@@ -374,6 +398,8 @@ import {
   createPackagePro,
   moveToPackage,
   downloadImagesZip,
+  getPersonas,
+  getHooks,
 } from '../../api/contentpro';
 import CoverEditor from './CoverEditor.vue';
 
@@ -400,6 +426,11 @@ const strategies = ref([]);
 const strategyId = ref(null);
 const directionIndex = ref(0);
 const extra = ref('');
+// 人设/钩子资源池（写作时由用户选择，填入策略提示词占位符）
+const personaPool = ref([]);
+const hookPool = ref([]);
+const personaId = ref(null);
+const hookIds = ref([]);
 const generating = ref(false);
 // 智能内容四分类 + 双风格 + 形态（东风日产建设项）
 const noteKind = ref('');
@@ -462,6 +493,31 @@ const currentDirections = computed(() => {
   const s = strategies.value.find((x) => x.id === strategyId.value);
   return s?.content_directions ?? [];
 });
+// 策略绑定产品后仅对该产品适用；未绑定产品=通用策略
+const applicableStrategies = computed(() => {
+  const pid = productId.value;
+  return strategies.value.filter((s) => {
+    const bp = Array.isArray(s.bound_product_ids) ? s.bound_product_ids : [];
+    return !bp.length || bp.includes(pid);
+  });
+});
+const currentStrategy = computed(() => strategies.value.find((x) => x.id === strategyId.value));
+const orchestrationHint = computed(() => {
+  const v = currentStrategy.value?.visual;
+  if (!v) return '';
+  if (v.mode === 'precise' && v.slots?.length) return '已按策略「精准编排」取图：按类型标签逐位取图，素材未打标时会自动回退智能随机';
+  if (v.setId || v.count) return `已按策略「智能随机」取图${v.count ? ` ${v.count} 张` : ''}${v.setId ? '，限定指定套图' : ''}`;
+  return '';
+});
+const personaOptions = computed(() =>
+  personaPool.value.filter((p) => p.enabled).map((p) => ({ value: p.id, label: p.name })),
+);
+const hookOptions = computed(() =>
+  hookPool.value.filter((h) => h.enabled).map((h) => ({
+    value: h.id,
+    label: (h.position === 'opening' ? '[开头] ' : h.position === 'closing' ? '[结尾] ' : '') + h.text.slice(0, 30),
+  })),
+);
 const productName = computed(() => {
   for (const opt of productOptions.value) {
     if (opt.value === productId.value) return opt.label;
@@ -483,19 +539,23 @@ const flattenProducts = (nodes, out = []) => {
 };
 
 const loadBase = async () => {
-  const [products, st, h, q] = await Promise.all([
+  const [products, st, h, q, pp, hk] = await Promise.all([
     getProducts({ brandId: brandId.value }),
     getStrategies({ brandId: brandId.value }),
     aiHealth(),
     getQuota({ brandId: brandId.value }).catch(() => null),
+    getPersonas({ brandId: brandId.value }).catch(() => null),
+    getHooks({ brandId: brandId.value }).catch(() => null),
   ]);
   productOptions.value = flattenProducts(products);
   if (!productId.value && productOptions.value.length) productId.value = productOptions.value[0].value;
   strategies.value = st?.list ?? [];
   if (!strategyId.value && strategies.value.length) {
-    const first = strategies.value.find((s) => s.enabled) ?? strategies.value[0];
-    strategyId.value = first.id;
+    const first = applicableStrategies.value.find((s) => s.enabled) ?? applicableStrategies.value[0];
+    strategyId.value = first?.id ?? null;
   }
+  personaPool.value = pp?.list ?? [];
+  hookPool.value = hk?.list ?? [];
   health.value = h ?? health.value;
   quota.value = q ?? null;
 };
@@ -538,6 +598,8 @@ const generate = async () => {
         noteKind: noteKind.value || null,
         style: style.value || null,
         form: contentForm.value || null,
+        personaId: personaId.value ?? null,
+        hookIds: hookIds.value?.length ? hookIds.value : null,
       },
       { brandId: brandId.value },
     );
@@ -575,6 +637,8 @@ const regenerate = async () => {
         noteKind: noteKind.value || null,
         style: style.value || null,
         form: contentForm.value || null,
+        personaId: personaId.value ?? null,
+        hookIds: hookIds.value?.length ? hookIds.value : null,
       },
       { brandId: brandId.value },
     );
@@ -604,7 +668,13 @@ const matchImages = async (force) => {
   matching.value = true;
   try {
     const num = force ? 4 : Math.min(12 - images.value.length, 4);
-    const res = await getRandomImages({ brandId: brandId.value, productId: productId.value, num });
+    // 首次整组匹配/重新匹配时按策略视觉编排取图；增量追加仍走智能随机
+    const res = await getRandomImages({
+      brandId: brandId.value,
+      productId: productId.value,
+      num,
+      ...(force && strategyId.value ? { strategyId: strategyId.value } : {}),
+    });
     const urls = (res ?? []).map((x) => ({ url: x.url, name: x.name }));
     images.value = force ? urls : [...images.value, ...urls].slice(0, 12);
   } finally {
@@ -831,6 +901,8 @@ const resetAll = () => {
   tags.value = [];
   images.value = [];
   extra.value = '';
+  personaId.value = null;
+  hookIds.value = [];
   regenPrompt.value = '';
   relayUrl.value = '';
   relayQr.value = '';
@@ -839,6 +911,13 @@ const resetAll = () => {
 
 const goHistory = () => router.push('/content-pro/history');
 
+// 切换产品后，当前策略若不适用于新产品则自动切到第一个可用策略
+watch(productId, () => {
+  if (!strategyId.value) return;
+  if (applicableStrategies.value.some((s) => s.id === strategyId.value)) return;
+  const first = applicableStrategies.value.find((s) => s.enabled) ?? applicableStrategies.value[0];
+  strategyId.value = first?.id ?? null;
+});
 watch(mpSet, loadPool);
 watch(mpType, loadPool);
 
@@ -1226,6 +1305,13 @@ onMounted(async () => {
   padding: 8px 12px;
   color: #94a3b8;
   font-size: 12.5px;
+}
+
+.orchestration-tip {
+  margin-bottom: 0;
+  color: #2563eb;
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .match-layout {

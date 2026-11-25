@@ -34,6 +34,8 @@ const FACTORY_CATEGORY = {
         { name: '资料库', path: '/content-pro/config/products' },
         { name: '素材库', path: '/content-pro/config/material' },
         { name: '创作策略Pro', path: '/content-pro/config/strategies' },
+        { name: '人设管理', path: '/content-pro/config/personas' },
+        { name: '钩子管理', path: '/content-pro/config/hooks' },
       ],
     },
     {

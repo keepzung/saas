@@ -54,6 +54,22 @@ export class StrategyDto {
   @IsOptional() boundProductIds?: number[];
 }
 
+// ─── 人设/钩子资源池 ─────────────────────────────────────────────────
+export class PersonaDto {
+  @IsString() @MaxLength(60) name: string;
+  @IsOptional() @IsString() content?: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsInt() sort?: number;
+}
+
+export class HookDto {
+  @IsString() text: string;
+  /** opening 开头 | closing 结尾 | any 不限 */
+  @IsOptional() @IsString() position?: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsInt() sort?: number;
+}
+
 // ─── AI 生成 ─────────────────────────────────────────────────────────
 export class GenerateArticleDto {
   @IsInt() productId: number;
@@ -68,6 +84,10 @@ export class GenerateArticleDto {
   @IsOptional() @IsString() style?: string | null;
   /** 形态：image_text 图文（默认）| video_script 短视频口播脚本 */
   @IsOptional() @IsString() form?: string | null;
+  /** 写作人设：从人设资源池选 1 个，填入策略提示词【人设】占位符 */
+  @IsOptional() @IsInt() personaId?: number | null;
+  /** 内容钩子：从钩子资源池勾选 N 个，填入【钩子】占位符 */
+  @IsOptional() hookIds?: number[] | null;
 }
 
 export class GenerateStrategyDto {

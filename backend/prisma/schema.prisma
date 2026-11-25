@@ -1086,6 +1086,34 @@ model WritingStrategy {
   @@index([brandId])
 }
 
+// 人设资源池：AI 写作时扮演的角色身份（策略级变量，写作时由用户从池里选 1 个）
+model WritingPersona {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @default(7)
+  name      String
+  content   String?  @db.Text
+  enabled   Boolean  @default(true)
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId])
+}
+
+// 钩子资源池：文章首尾用于引导互动的短句（策略级变量，写作时勾选 N 个填入）
+model WritingHook {
+  id        Int      @id @default(autoincrement())
+  brandId   Int      @default(7)
+  text      String   @db.Text
+  position  String   @default("any")
+  enabled   Boolean  @default(true)
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId])
+}
+
 model XhsHistory {
   id             Int             @id @default(autoincrement())
   brandId        Int             @default(7)

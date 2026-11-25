@@ -142,6 +142,13 @@
             张（建议 3-6，最多 9）
           </div>
           <div v-else class="visual-slots">
+            <a-alert
+              v-if="typeTaggedCount === 0"
+              type="warning"
+              show-icon
+              class="visual-alert"
+              message="当前工作区还没有已打类型标签的素材，精准编排将取不到图（生成时会自动回退智能随机）。请先到素材库给图片打标。"
+            />
             <div v-for="(s, i) in form.visual_slots" :key="i" class="dir-row">
               <a-input v-model:value="s.position" style="width: 160px" placeholder="图片位置，如：封面/图2" />
               <a-select
@@ -205,6 +212,9 @@ import {
   updateStrategy,
   toggleStrategy,
   deleteStrategy,
+  getMaterialTags,
+  getMaterialSets,
+  getMaterialImages,
 } from '../../api/contentpro';
 
 const auth = useAuthStore();
@@ -246,6 +256,27 @@ const NL = String.fromCharCode(10);
 const productOptions = ref([]);
 const aiFill = ref({ productId: null, angle: '', viewpoint: '', keyPoints: '' });
 const aiGenerating = ref(false);
+
+// 视觉编排下拉数据源（0d60511 漏定义导致下拉为空的修复）
+const mpTags = ref([]);
+const mpSets = ref([]);
+const typeTaggedCount = ref(0);
+const typeOptions = computed(() => mpTags.value.map((t) => ({ label: t.name, value: t.id })));
+const setOptions = computed(() => mpSets.value.map((s) => ({ label: s.name, value: s.id })));
+const loadMaterialMeta = async () => {
+  try {
+    const [t, s, tagged] = await Promise.all([
+      getMaterialTags({ brandId: brandId.value }),
+      getMaterialSets({ brandId: brandId.value }),
+      getMaterialImages({ brandId: brandId.value, typeTagged: 1, page: 1, pageSize: 1 }),
+    ]);
+    mpTags.value = t?.list ?? [];
+    mpSets.value = s?.list ?? [];
+    typeTaggedCount.value = tagged?.total ?? 0;
+  } catch {
+    // 标签加载失败不阻塞策略表单
+  }
+};
 
 const loadProducts = async () => {
   try {
@@ -405,6 +436,7 @@ const remove = (s) => {
 onMounted(() => {
   load();
   loadProducts();
+  loadMaterialMeta();
 });
 </script>
 
@@ -566,5 +598,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.visual-alert {
+  margin-bottom: 4px;
 }
 </style>

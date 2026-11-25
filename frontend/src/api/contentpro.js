@@ -66,6 +66,31 @@ export const toggleStrategy = (id, enabled) =>
 export const deleteStrategy = (id) =>
   request.delete(`/content-pro/strategies/${id}`);
 
+// ─── 人设/钩子资源池 ───────────────────────────────────────────────
+export const getPersonas = (params) =>
+  request.get('/content-pro/personas', { params });
+
+export const createPersona = (data, params) =>
+  request.post('/content-pro/personas', data, { params });
+
+export const updatePersona = (id, data) =>
+  request.put(`/content-pro/personas/${id}`, data);
+
+export const deletePersona = (id) =>
+  request.delete(`/content-pro/personas/${id}`);
+
+export const getHooks = (params) =>
+  request.get('/content-pro/hooks', { params });
+
+export const createHook = (data, params) =>
+  request.post('/content-pro/hooks', data, { params });
+
+export const updateHook = (id, data) =>
+  request.put(`/content-pro/hooks/${id}`, data);
+
+export const deleteHook = (id) =>
+  request.delete(`/content-pro/hooks/${id}`);
+
 // ─── AI / 历史 / 批量 ───────────────────────────────────────────────
 export const aiHealth = () => request.get('/content-pro/ai/health');
 
