@@ -45,8 +45,12 @@ async function createTask(apiName: string, prompt: string, kwargs: Record<string
   return taskId;
 }
 
-/** 轮询任务直到 completed / 失败，返回 result 对象（audios / videos） */
-async function waitTaskResult(taskId: string, timeoutMs = TASK_TIMEOUT_MS): Promise<Record<string, unknown>> {
+/** 轮询任务直到 completed / 失败，返回 result 对象（audios / videos / images） */
+async function waitTaskResult(
+  taskId: string,
+  timeoutMs = TASK_TIMEOUT_MS,
+  mediaKey: 'audios' | 'videos' | 'images' = 'audios',
+): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   let last = '';
   while (Date.now() < deadline) {
@@ -55,8 +59,9 @@ async function waitTaskResult(taskId: string, timeoutMs = TASK_TIMEOUT_MS): Prom
     const data = (json.data ?? {}) as Record<string, unknown>;
     const status = String(data.status ?? '').toLowerCase();
     if (status === 'completed') {
-      const result = (data.result ?? {}) as { audios?: string[]; videos?: string[] };
-      if (!result.audios?.length && !result.videos?.length) throw new Error('任务完成但未返回媒体文件');
+      const result = (data.result ?? {}) as Record<string, string[]>;
+      const list = result[mediaKey] ?? [];
+      if (!list.length) throw new Error('任务完成但未返回媒体文件');
       return result;
     }
     if (status.includes('fail') || status === 'error') {
@@ -134,6 +139,42 @@ export async function sparkSeedanceGenerate(prompt: string, opts?: SeedanceOpts)
 
 /** Seedance 视频生成超时上限比音频长（视模型与分辨率可能 2-5 分钟/段） */
 const SEEDANCE_TIMEOUT_MS = Number(process.env.SPARKHUB_VIDEO_TIMEOUT_MS ?? 600000);
+
+// ───────────────────────── 图片生成（SPARKHUB_IMAGE_MODEL 配置后启用）─────────────────────────
+
+/** sparkhub 是否配置了图片模型（封面 AI 场景优先走这里，未配置回退设计平台） */
+export const sparkImageConfigured = (): boolean =>
+  Boolean(sparkApiKey() && (process.env.SPARKHUB_IMAGE_MODEL ?? '').trim());
+
+/** 图片生成（模型 SPARKHUB_IMAGE_MODEL）。传 imageUrl 时为图生图/换背景（参考图须 spark-hub 服务器可访问），
+ *  返回图片 Buffer。2026-11-25 盘点：平台尚未上架图片模型（各类命名 create_task 均 Model not found），
+ *  模型上架/开通后配置 SPARKHUB_IMAGE_MODEL 即生效 */
+export async function sparkImageGenerate(prompt: string, opts?: { imageUrl?: string | null; timeoutMs?: number }): Promise<Buffer> {
+  const body: Record<string, unknown> = {
+    api_name: (process.env.SPARKHUB_IMAGE_MODEL ?? '').trim(),
+    prompt,
+    kwargs: {},
+  };
+  if (opts?.imageUrl) body.image_url = opts.imageUrl;
+  const res = await fetch(`${BASE}/task/create_task`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(`图片任务提交 http ${res.status}: ${text.slice(0, 160)}`);
+  }
+  const data = (json.data ?? {}) as Record<string, unknown>;
+  const taskId = String(data.task_id ?? '');
+  if (!taskId) throw new Error(`图片任务提交失败: ${json.error ?? text.slice(0, 160)}`);
+  const result = await waitTaskResult(taskId, opts?.timeoutMs ?? SEEDANCE_TIMEOUT_MS, 'images');
+  const list = (result.images ?? []) as string[];
+  return download(list[0]);
+}
 
 // ───────────────────────── 音色列表（带内存缓存） ─────────────────────────
 

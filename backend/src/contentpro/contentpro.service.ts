@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from './ai.service';
 import { QuotaService } from './quota.service';
 import { DesignPlatformClient } from './design-platform.client';
+import { sparkImageConfigured, sparkImageGenerate } from '../hotspot/spark.tts';
 import { CaseDto, CoverSceneDto, HookDto, PersonaDto, RuleDto, TemplateDto } from './dto/contentpro.dto';
 
 @Injectable()
@@ -610,15 +611,26 @@ export class ContentproService {
     return this.ai.health();
   }
 
-  /** AI 封面场景（换背景）：产品图经设计平台图片模型重绘场景。计费按文档"图片生成 2 算力/张" */
+  /** AI 封面场景（换背景）：产品图重绘场景。通道优先级：sparkhub 免费模型(SPARKHUB_IMAGE_MODEL 配置后) → 设计平台图片模型。
+   *  计费均按文档"图片生成 2 算力/张" */
   async generateCoverScene(brandId: number, userId: number, dto: CoverSceneDto) {
-    if (!this.design.enabled()) throw new BadRequestException('AI 场景生成通道未配置（DESIGN_PLATFORM_*）');
     const base = (process.env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, '');
     const abs = /^https?:\/\//.test(dto.imageUrl) ? dto.imageUrl : base ? `${base}${dto.imageUrl}` : '';
     if (!/^https?:\/\//.test(abs)) throw new BadRequestException('素材地址无法被生成服务访问，请先上传素材后再试');
     await this.quota.assertEnough(brandId, 2);
     await this.quota.consume(brandId, 2, userId, 'AI 封面场景生成');
     try {
+      // 通道一：sparkhub 图片模型（免费模型上架后配 SPARKHUB_IMAGE_MODEL 即切换）
+      if (sparkImageConfigured()) {
+        try {
+          const buf = await sparkImageGenerate(dto.prompt.trim(), { imageUrl: abs });
+          const url = this.writeAiCoverBuffer(buf, brandId);
+          return { url, channel: 'sparkhub', source_url: null, cost: null };
+        } catch (e) {
+          this.logger.warn(`sparkhub 图片通道失败，回退设计平台: ${e?.message ?? e}`);
+        }
+      }
+      // 通道二：设计平台（api.lk888.ai / tt-image-2.6）
       const gen = await this.design.generateScene({
         prompt: dto.prompt.trim(),
         referenceImageUrl: abs,
@@ -626,11 +638,22 @@ export class ContentproService {
         height: dto.height ?? 1440,
       });
       const localUrl = await this.design.downloadToUploads(gen.url, brandId);
-      return { url: localUrl, source_url: gen.url, cost: gen.cost ?? null };
+      return { url: localUrl, channel: 'design-platform', source_url: gen.url, cost: gen.cost ?? null };
     } catch (e) {
       await this.quota.refund(brandId, 2, userId, 'AI 封面场景生成失败退回');
       throw e;
     }
+  }
+
+  /** AI 生成图落盘到 /uploads/ai-cover/{brandId}/，返回站内相对路径 */
+  private writeAiCoverBuffer(buf: Buffer, brandId: number): string {
+    const fsSync = require('fs');
+    const pathSync = require('path');
+    const dir = pathSync.join(this.uploadRoot(), 'ai-cover', String(brandId));
+    fsSync.mkdirSync(dir, { recursive: true });
+    const filename = `gen_${Date.now()}_${randomUUID().slice(0, 6)}.png`;
+    fsSync.writeFileSync(pathSync.join(dir, filename), buf);
+    return `/uploads/ai-cover/${brandId}/${filename}`;
   }
 
   // ─── 算力配额 ──────────────────────────────────────────────────────
