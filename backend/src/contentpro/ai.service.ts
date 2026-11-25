@@ -92,25 +92,52 @@ export class AiService {
   }
 
   /** 通用 chatJson：LLM 输出严格 JSON 并解析（预审/评分等共用） */
+  /** 从 LLM 输出中提取 JSON 对象：剥代码栅栏 → 整体解析 → 反引号修复 → 再解析 */
+  private tryParseLoose(text: string): Record<string, unknown> | null {
+    const candidates: string[] = [];
+    let t = String(text ?? '').trim();
+    const fence = t.match(/```(?:json)?([\s\S]*?)```/);
+    if (fence) candidates.push(fence[1].trim(), fence[1].trim().replace(/`/g, '"'));
+    candidates.push(t.replace(/```/g, ''));
+    const m = t.match(/\{[\s\S]*\}/);
+    if (m) candidates.push(m[0], m[0].replace(/`/g, '"'));
+    for (const c of candidates) {
+      try {
+        const v = JSON.parse(c);
+        if (v && typeof v === 'object') return v as Record<string, unknown>;
+      } catch {}
+    }
+    return null;
+  }
+
   async chatJson<T>(system: string, user: string, temperature = 0.3): Promise<T> {
-    const res = await fetch(`${this.llmBase()}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: this.llmModel(),
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        temperature,
-      }),
-    });
-    if (!res.ok) throw new Error(`LLM http ${res.status}`);
-    const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const text = j.choices?.[0]?.message?.content ?? '';
+    const call = async (strict: boolean): Promise<string> => {
+      const res = await fetch(`${this.llmBase()}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: this.llmModel(),
+          messages: [
+            { role: 'system', content: strict ? system + ' 再次强调：只输出一个合法 JSON 对象，所有字符串值使用双引号，不得使用反引号/模板字符串/Markdown 代码块。' : system },
+            { role: 'user', content: user },
+          ],
+          temperature,
+        }),
+      });
+      if (!res.ok) throw new Error(`LLM http ${res.status}`);
+      const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      return j.choices?.[0]?.message?.content ?? '';
+    };
+    let text = await call(false);
+    let parsed = this.tryParseLoose(text);
+    if (!parsed) {
+      text = await call(true);
+      parsed = this.tryParseLoose(text);
+    }
+    if (!parsed) throw new Error('LLM 输出解析失败');
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('LLM 输出解析失败');
     return JSON.parse(m[0]) as T;
