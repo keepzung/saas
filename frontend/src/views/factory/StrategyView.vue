@@ -126,6 +126,7 @@ import PageWrapper from '../../components/PageWrapper.vue';
 import { useAuthStore } from '../../stores/auth';
 import { getProducts } from '../../api/content';
 import {
+  generateStrategy,
   getStrategies,
   createStrategy,
   updateStrategy,
