@@ -48,9 +48,39 @@
               <a-radio-button v-for="s in YZ_STYLES" :key="s.value" :value="s.value">{{ s.label }}</a-radio-button>
             </a-radio-group>
           </div>
+          <div class="ed-field">
+            <div class="ed-label">字体</div>
+            <a-select v-model:value="designerFont" :options="FONT_OPTIONS" />
+          </div>
+          <div class="ed-field">
+            <div class="ed-label">装饰形状/线条（画布上按住拖动可移位置）</div>
+            <div class="shape-add-row">
+              <a-button v-for="t in SHAPE_TYPES" :key="t.value" size="small" @click="addShape(t.value)">＋{{ t.label }}</a-button>
+              <a-button v-if="shapes.length" size="small" type="text" danger @click="shapes = []">清空</a-button>
+            </div>
+            <div v-for="s in shapes" :key="s.id" class="shape-row">
+              <span class="shape-name">{{ (SHAPE_TYPES.find((t) => t.value === s.type) || {}).label }}</span>
+              <span
+                v-for="c in SHAPE_COLORS"
+                :key="c"
+                class="color-dot"
+                :class="{ on: s.color === c }"
+                :style="{ background: c }"
+                @click="s.color = c"
+              />
+              <a-select
+                :value="s.scale"
+                size="small"
+                style="width: 64px"
+                :options="[{ label: '小', value: 0.6 }, { label: '中', value: 1 }, { label: '大', value: 1.5 }]"
+                @change="(v) => (s.scale = v)"
+              />
+              <a-button size="small" type="text" danger @click="removeShape(s.id)">删除</a-button>
+            </div>
+          </div>
         </div>
         <div class="ed-right">
-          <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
+          <canvas ref="previewCanvas" width="540" height="720" class="preview-canvas" @pointerdown="onCanvasPointerDown"></canvas>
           <div class="ed-actions">
             <a-button type="primary" size="large" class="use-btn" :loading="uploading" @click="applyCanvas">选用为封面</a-button>
           </div>
@@ -418,6 +448,136 @@ const poSub = ref('');
 const poTags = ref(['高能效省电', '全屋舒适', '十年包修']);
 const poFx = ref('gold');
 const poBusy = ref(false);
+
+// ── 字体（压字 + AI 海报标题共用）：含手写体；霞鹜文楷为本地自托管 webfont
+const FONT_OPTIONS = [
+  { label: '默认雅黑', value: '"Microsoft YaHei"' },
+  { label: '楷体（手写感）', value: 'KaiTi, STKaiti' },
+  { label: '华文行楷（手写）', value: 'STXingkai, KaiTi' },
+  { label: '霞鹜文楷（手写）', value: '"LXGW WenKai", KaiTi' },
+  { label: '隶书', value: 'LiSu, KaiTi' },
+  { label: '幼圆', value: 'YouYuan, "Microsoft YaHei"' },
+  { label: '宋体', value: 'SimSun, serif' },
+];
+const designerFont = ref('"Microsoft YaHei"');
+const designerFontCss = () => `${designerFont.value}, "PingFang SC", "Microsoft YaHei", sans-serif`;
+const fontStr = (size, family) => `${family && family.includes('LXGW') ? 700 : 900} ${size}px ${family || designerFontCss()}`;
+// 选霞鹜文楷时按需注入自托管 css 并等待字体就绪
+const FONT_CSS = { '"LXGW WenKai", KaiTi': '/fonts/lxgw/lxgwwenkai-bold.css' };
+let loadedFontCss = '';
+watch(designerFont, async () => {
+  const href = FONT_CSS[designerFont.value];
+  if (href && loadedFontCss !== href) {
+    loadedFontCss = href;
+    await new Promise((resolve) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      link.onload = () => resolve();
+      link.onerror = () => resolve();
+      document.head.appendChild(link);
+      setTimeout(resolve, 5000);
+    });
+    try {
+      await Promise.race([document.fonts.load('700 40px "LXGW WenKai"'), new Promise((r) => setTimeout(r, 4000))]);
+    } catch {}
+  }
+  drawPreview();
+});
+
+// ── 装饰形状/线条（压字页签，画布可拖动）
+const SHAPE_TYPES = [
+  { value: 'rect', label: '矩形' },
+  { value: 'circle', label: '圆形' },
+  { value: 'star', label: '星星' },
+  { value: 'line', label: '横线' },
+  { value: 'arrow', label: '箭头' },
+];
+const SHAPE_COLORS = ['#facc15', '#f87171', '#60a5fa', '#34d399', '#ffffff', '#111827'];
+const shapes = ref([]);
+const addShape = (type) => {
+  shapes.value.push({ id: Date.now() + Math.random(), type, x: 0.5, y: 0.42, scale: 1, color: SHAPE_COLORS[0] });
+};
+const removeShape = (id) => {
+  shapes.value = shapes.value.filter((s) => s.id !== id);
+};
+const drawShapes = (ctx, W, H) => {
+  for (const s of shapes.value) {
+    const base = W * 0.14 * s.scale;
+    const cx = s.x * W;
+    const cy = s.y * H;
+    ctx.save();
+    ctx.fillStyle = s.color;
+    ctx.strokeStyle = s.color;
+    ctx.lineJoin = 'round';
+    if (s.type === 'rect') {
+      ctx.beginPath();
+      ctx.roundRect(cx - base * 0.9, cy - base * 0.5, base * 1.8, base, base * 0.15);
+      ctx.fill();
+    } else if (s.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, base * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (s.type === 'star') {
+      const r1 = base * 0.62;
+      const r2 = base * 0.27;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const ang = (Math.PI / 5) * i - Math.PI / 2;
+        const r = i % 2 === 0 ? r1 : r2;
+        const px = cx + Math.cos(ang) * r;
+        const py = cy + Math.sin(ang) * r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else if (s.type === 'line') {
+      ctx.beginPath();
+      ctx.roundRect(cx - base * 0.9, cy - base * 0.055, base * 1.8, base * 0.11, base * 0.055);
+      ctx.fill();
+    } else if (s.type === 'arrow') {
+      ctx.beginPath();
+      ctx.moveTo(cx - base * 0.8, cy - base * 0.1);
+      ctx.lineTo(cx + base * 0.2, cy - base * 0.1);
+      ctx.lineTo(cx + base * 0.2, cy - base * 0.38);
+      ctx.lineTo(cx + base * 0.8, cy);
+      ctx.lineTo(cx + base * 0.2, cy + base * 0.38);
+      ctx.lineTo(cx + base * 0.2, cy + base * 0.1);
+      ctx.lineTo(cx - base * 0.8, cy + base * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+};
+// 画布按住形状拖动（坐标存相对值，预览/导出等比缩放）
+const onCanvasPointerDown = (e) => {
+  if (activeTab.value !== 'yazi' || !shapes.value.length) return;
+  const rect = e.target.getBoundingClientRect();
+  const px = (e.clientX - rect.left) / rect.width;
+  const py = (e.clientY - rect.top) / rect.height;
+  const hit = [...shapes.value]
+    .reverse()
+    .find((s) => Math.abs(px - s.x) < 0.17 * s.scale && Math.abs(py - s.y) < 0.14 * s.scale);
+  if (!hit) return;
+  const target = e.target;
+  target.setPointerCapture?.(e.pointerId);
+  const move = (ev) => {
+    const r2 = target.getBoundingClientRect();
+    hit.x = Math.min(0.98, Math.max(0.02, (ev.clientX - r2.left) / r2.width));
+    hit.y = Math.min(0.98, Math.max(0.02, (ev.clientY - r2.top) / r2.height));
+    drawPreview();
+  };
+  const up = () => {
+    target.removeEventListener('pointermove', move);
+    target.removeEventListener('pointerup', up);
+    target.removeEventListener('pointercancel', up);
+  };
+  target.addEventListener('pointermove', move);
+  target.addEventListener('pointerup', up);
+  target.addEventListener('pointercancel', up);
+};
 const poBg = ref('');
 
 const generatePosterBg = async () => {
@@ -472,9 +632,9 @@ const YZ_STYLES = [
 ];
 
 // 特效字：按样式渲染单行文字（坐标为画布单位，预览/导出等比缩放）
-const paintFx = (ctx, str, x, y, size, style, isSub) => {
+const paintFx = (ctx, str, x, y, size, style, isSub, family) => {
   ctx.save();
-  ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.font = fontStr(size, family);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   switch (style) {
@@ -559,11 +719,13 @@ const drawYazi = (ctx, W, H) => {
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, W, H);
   if (img) drawCoverFit(ctx, img, W / 2, H / 2, W, H);
+  drawShapes(ctx, W, H);
   const main = (yzTitle.value || props.title || '').trim().slice(0, 60);
   const sub = yzSub.value.trim().slice(0, 60);
   // 主标题自动换行：超过 4 行自动缩小字号
   let size = W * (main.length > 24 ? 0.062 : main.length > 12 ? 0.072 : 0.082);
-  const font = (s) => `900 ${s}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  const fam = designerFontCss();
+  const font = (s) => fontStr(s, fam);
   ctx.font = font(size);
   let mainLines = wrapByMeasure(ctx, main, W * 0.88);
   if (mainLines.length > 4) {
@@ -572,7 +734,7 @@ const drawYazi = (ctx, W, H) => {
     mainLines = wrapByMeasure(ctx, main, W * 0.88);
   }
   const subSize = size * 0.5;
-  ctx.font = `900 ${subSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.font = fontStr(subSize, fam);
   const subLines = sub ? wrapByMeasure(ctx, sub, W * 0.82) : [];
   const lhM = size * 1.34;
   const lhS = subSize * 1.5;
@@ -612,10 +774,10 @@ const drawYazi = (ctx, W, H) => {
   }
   // 副标题在上、主标题在下
   subLines.forEach((ln, i) => {
-    paintFx(ctx, ln, W / 2, top + lhS * (i + 0.5), subSize, style, true);
+    paintFx(ctx, ln, W / 2, top + lhS * (i + 0.5), subSize, style, true, fam);
   });
   mainLines.forEach((ln, i) => {
-    paintFx(ctx, ln, W / 2, mainTop + lhM * (i + 0.5), size, style, false);
+    paintFx(ctx, ln, W / 2, mainTop + lhM * (i + 0.5), size, style, false, fam);
   });
 };
 
@@ -747,8 +909,9 @@ const drawPoster = (ctx, W, H) => {
   // 顶部主标题（自动换行 ≤3 行）
   const title = (poTitle.value || props.title || '').trim().slice(0, 40);
   if (title) {
+    const fam = designerFontCss();
     let size = W * (title.length > 20 ? 0.07 : title.length > 10 ? 0.082 : 0.094);
-    const font = (s) => `900 ${s}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    const font = (s) => fontStr(s, fam);
     ctx.font = font(size);
     let lines = wrapByMeasure(ctx, title, W * 0.9);
     if (lines.length > 3) {
@@ -758,7 +921,7 @@ const drawPoster = (ctx, W, H) => {
     }
     const lh = size * 1.28;
     const startY = H * 0.06 + size * 0.6;
-    lines.forEach((ln, i) => paintFx(ctx, ln, W / 2, startY + i * lh, size, poFx.value, false));
+    lines.forEach((ln, i) => paintFx(ctx, ln, W / 2, startY + i * lh, size, poFx.value, false, fam));
     // 副标题（默认产品名）
     const sub = (poSub.value || props.productName || '').trim().slice(0, 30);
     if (sub) {
@@ -801,7 +964,7 @@ const drawPoster = (ctx, W, H) => {
 
 watch(
   [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
-    poTitle, poSub, poFx, poPreset, poBg, poTags.value],
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value],
   () => drawPreview(),
   { deep: true },
 );
@@ -995,6 +1158,39 @@ watch(
 
 .ed-field {
   margin-bottom: 14px;
+}
+
+.shape-add-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.shape-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.shape-name {
+  color: #475569;
+  font-size: 12.5px;
+  width: 34px;
+}
+
+.color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #e2e8f0;
+  display: inline-block;
+}
+
+.color-dot.on {
+  border-color: #3456e6;
 }
 
 .ed-label {
