@@ -167,7 +167,18 @@
       <div v-else-if="activeTab === 'poster'" class="ce-body editor">
         <div class="ed-left">
           <div class="ed-section-label">AI 海报</div>
-          <div class="ed-tip">AI 先把产品重绘成海报场景背景（⚡2/次，约 1-2 分钟，失败自动退回算力），标题、副标题、功能标签用本地特效字合成——文字永远清晰可编辑。</div>
+          <div class="ed-field">
+            <div class="ed-label">生成方式</div>
+            <a-radio-group v-model:value="poMode" button-style="solid" size="small">
+              <a-radio-button value="overlay">AI 生图 + 压字（文字清晰可编辑）</a-radio-button>
+              <a-radio-button value="pure">纯 AI 生图（文字画进图里）</a-radio-button>
+            </a-radio-group>
+            <div class="ed-tip" style="margin-top: 8px">
+              {{ poMode === 'pure'
+                ? '标题/副标题/标签将由 AI 直接画进图片（⚡2/次，约 1-2 分钟，失败退回）；中文笔画如有变形，换个说法或重新生成即可。'
+                : 'AI 生成海报背景与产品（⚡2/次），标题/副标题/功能标签用本地特效字合成——文字永远清晰可编辑。' }}
+            </div>
+          </div>
           <div class="ed-field">
             <div class="ed-label">海报场景</div>
             <div class="scene-chips">
@@ -182,14 +193,14 @@
           </div>
           <div class="ed-field">
             <a-button type="primary" block :loading="poBusy" :disabled="!baseImage" @click="generatePosterBg">
-              {{ poBg ? '重新生成海报背景（⚡2）' : 'AI 生成海报背景（⚡2）' }}
+              {{ poBg ? '重新生成海报背景（⚡2）' : poMode === 'pure' ? 'AI 生成整图海报（⚡2）' : 'AI 生成海报背景（⚡2）' }}
             </a-button>
           </div>
           <div class="ed-field">
             <div class="ed-label">主标题</div>
             <a-input v-model:value="poTitle" :maxlength="40" placeholder="默认使用文章标题，过长自动换行" />
           </div>
-          <div class="ed-field">
+          <div class="ed-field" v-if="poMode === 'overlay'">
             <div class="ed-label">标题特效</div>
             <a-radio-group v-model:value="poFx" button-style="solid" size="small">
               <a-radio-button value="gold">金色大字</a-radio-button>
@@ -211,7 +222,7 @@
         </div>
         <div class="ed-right">
           <div class="preview-wrap">
-            <a-spin v-if="poBusy" class="scene-spin" tip="AI 正在绘制海报背景，约 1-2 分钟…" size="large" />
+            <a-spin v-if="poBusy" class="scene-spin" :tip="poMode === 'pure' ? 'AI 正在绘制整图海报（含文字），约 1-2 分钟…' : 'AI 正在绘制海报背景，约 1-2 分钟…'" size="large" />
             <canvas v-show="!poBusy" ref="previewCanvas" width="540" height="720" class="preview-canvas"></canvas>
           </div>
           <div class="ed-actions">
@@ -443,6 +454,7 @@ const POSTER_PRESETS = [
   { name: '红金节日', scene: '红金配色的节日礼盒氛围中，暖色灯带背景' },
 ];
 const poPreset = ref(0);
+const poMode = ref('overlay'); // overlay=AI生图+本地压字 | pure=纯AI生图(文字画进图里)
 const poTitle = ref('');
 const poSub = ref('');
 const poTags = ref(['高能效省电', '全屋舒适', '十年包修']);
@@ -586,7 +598,20 @@ const generatePosterBg = async () => {
   poBg.value = '';
   try {
     const preset = POSTER_PRESETS[poPreset.value];
-    const prompt = `电商风格产品营销海报背景：把这个产品放在${preset.scene}，产品居中偏下完整展示，产品外观保持原样不变，画面顶部三分之一和左侧留出干净区域用于排版标题文字，高清商业广告摄影`;
+    const base = `电商风格产品营销海报：把这个产品放在${preset.scene}，产品居中偏下完整展示，产品外观保持原样不变，高清商业广告摄影`;
+    let prompt = base;
+    if (poMode.value === 'pure') {
+      // 纯 AI 生图：标题/副标题/标签由模型画进图片
+      const title = (poTitle.value || props.title || '').trim();
+      const sub = (poSub.value || props.productName || '').trim();
+      const tags = poTags.value.map((t) => (t ?? '').trim()).filter(Boolean).slice(0, 3);
+      prompt = base + `，画面顶部三分之一绘制大号醒目的金色立体中文大标题「${title}」`;
+      if (sub) prompt += `，标题下方居中一行白色中文副标题「${sub}」`;
+      if (tags.length) prompt += `，左侧竖排${tags.length}个发光圆角胶囊标签框，分别写「${tags.join('」「')}」`;
+      prompt += `，所有中文文字笔画清晰工整、结构正确、无变形无错字`;
+    } else {
+      prompt = base + `，画面顶部三分之一和左侧留出干净区域用于排版标题文字`;
+    }
     const res = await generateCoverScene(
       { imageUrl: baseImage.value, prompt, width: 1080, height: 1440 },
       { brandId: brandId.value },
@@ -887,13 +912,14 @@ const drawPreview = async () => {
   else if (activeTab.value === 'poster') drawPoster(ctx, canvas.width, canvas.height);
 };
 
-// AI 海报排版：顶部标题区 + 左侧功能标签 + AI 背景图
+// AI 海报排版：pure=整图 AI 出（含文字），overlay=顶部标题区 + 左侧功能标签本地合成
 const drawPoster = (ctx, W, H) => {
   const img = poBg.value ? imgCache.get(poBg.value) : null;
   ctx.fillStyle = '#0b1220';
   ctx.fillRect(0, 0, W, H);
   if (img) {
     drawCoverFit(ctx, img, W / 2, H / 2, W, H);
+    if (poMode.value === 'pure') return; // 纯 AI 生图：文字已画进图里，不再叠加
   } else {
     const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, '#0e1a33');
@@ -904,7 +930,8 @@ const drawPoster = (ctx, W, H) => {
     ctx.font = `600 ${W * 0.042}px "PingFang SC", "Microsoft YaHei", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('点左侧「AI 生成海报背景」开始（⚡2/次）', W / 2, H / 2);
+    ctx.fillText(poMode.value === 'pure' ? '点左侧「AI 生成整图海报」开始（⚡2/次）' : '点左侧「AI 生成海报背景」开始（⚡2/次）', W / 2, H / 2);
+    if (poMode.value === 'pure') return; // 纯 AI 生图：文字走模型，本地不排版
   }
   // 顶部主标题（自动换行 ≤3 行）
   const title = (poTitle.value || props.title || '').trim().slice(0, 40);
@@ -964,7 +991,7 @@ const drawPoster = (ctx, W, H) => {
 
 watch(
   [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
-    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value],
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode],
   () => drawPreview(),
   { deep: true },
 );
