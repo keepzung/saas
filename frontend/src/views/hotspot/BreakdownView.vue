@@ -45,28 +45,12 @@
     <a-drawer v-model:open="open_" width="560">
       <template #title>{{ cur?.hotContent?.title || '拆解详情' }}</template>
       <template v-if="cur">
-        <template v-if="cur.status === 'done'">
-          <a-alert v-if="cur.partial" type="warning" show-icon message="视频源不可得，本次为文本降级拆解" class="sec" />
-          <div class="sec"><span class="lab">开头钩子</span><p>{{ cur.hook }}</p></div>
-          <div class="sec">
-            <span class="lab">结构节奏</span>
-            <a-steps direction="vertical" size="small" :current="99" class="steps">
-              <a-step v-for="(s, i) in cur.structure ?? []" :key="i" :title="s.stage" :description="s.summary + (s.voiceover ? `｜口播：${s.voiceover}` : '')" />
-            </a-steps>
-          </div>
-          <div class="sec">
-            <span class="lab">卖点提炼</span>
-            <div><a-tag v-for="p in cur.sellingPoints ?? []" :key="p" color="blue">{{ p }}</a-tag></div>
-          </div>
-          <div class="sec"><span class="lab">行动号召</span><p>{{ cur.cta }}</p></div>
-          <div class="sec">
-            <span class="lab">风格标签</span>
-            <div><a-tag v-for="t in cur.styleTags ?? []" :key="t">{{ t }}</a-tag></div>
-          </div>
-          <div class="sec"><span class="lab">原文案</span><pre class="script">{{ cur.scriptText }}</pre></div>
-          <div class="sec"><span class="lab">复刻建议</span><p>{{ cur.replicateTips }}</p></div>
-        </template>
-        <a-alert v-else type="info" :message="`状态：${statusText(cur.status)}${cur.errorMsg ? `，错误：${cur.errorMsg}` : ''}`" />
+        <HotBreakdownDetail
+          :breakdown="cur"
+          :content-id="cur.hotContent?.id ?? null"
+          :video-url="detailVideoUrl"
+          :cover-url="cur.hotContent?.coverUrl ?? ''"
+        />
         <div class="ops">
           <ProductPickModal v-model:open="pickOpen" :title="pickMode === 'video' ? '生成同款视频·选择产品' : '爆款复刻·选择产品'" :with-strategy="pickMode === 'article'" :show-voice="pickMode === 'video'" @picked="onPicked" />
           <a-button type="primary" @click="startPick('article')">生成复刻文案</a-button>
@@ -83,8 +67,9 @@ import { message } from 'ant-design-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
+import HotBreakdownDetail from './HotBreakdownDetail.vue';
 import { useAuthStore } from '../../stores/auth';
-import { getBreakdowns, generateFromBreakdown, generateVideo } from '../../api/hotspot';
+import { getBreakdowns, generateFromBreakdown, generateVideo, getHotContentDetail } from '../../api/hotspot';
 
 const auth = useAuthStore();
 const brandId = computed(() => auth.currentBrandId ?? 1);
@@ -99,6 +84,7 @@ const status = ref('');
 
 const open_ = ref(false);
 const cur = ref(null);
+const detailVideoUrl = ref('');
 const pickOpen = ref(false);
 const pickMode = ref('article');
 let timer = null;
@@ -132,7 +118,13 @@ const load = async () => {
 
 const open = async (b) => {
   cur.value = b;
+  detailVideoUrl.value = '';
   open_.value = true;
+  // 列表行不带视频直链，拉详情补上用于抽屉内播放
+  if (b.hotContent?.id) {
+    const d = await getHotContentDetail(b.hotContent.id, { brandId: brandId.value }).catch(() => null);
+    if (cur.value === b) detailVideoUrl.value = d?.videoUrl ?? '';
+  }
 };
 
 const startPick = (mode) => {
@@ -140,12 +132,12 @@ const startPick = (mode) => {
   pickOpen.value = true;
 };
 
-const onPicked = async ({ productId, strategyId, voice }) => {
+const onPicked = async ({ productId, strategyId, voice, engine, materialVideoIds, materialImageIds, focusPoints }) => {
   pickOpen.value = false;
   if (pickMode.value === 'article') {
     try {
       await generateFromBreakdown(
-        { brandId: brandId.value, breakdownId: cur.value.id, productId, strategyId },
+        { brandId: brandId.value, breakdownId: cur.value.id, productId, strategyId, focusPoints: focusPoints ?? [] },
         { brandId: brandId.value },
       );
       message.success('文案已生成，可在「内容工厂-历史记录」查看并走审核发布');
@@ -155,7 +147,16 @@ const onPicked = async ({ productId, strategyId, voice }) => {
   } else {
     try {
       await generateVideo(
-        { brandId: brandId.value, productId, breakdownId: cur.value.id, voice: voice ?? undefined },
+        {
+          brandId: brandId.value,
+          productId,
+          breakdownId: cur.value.id,
+          voice: voice ?? undefined,
+          engine: engine ?? 'mixcut',
+          materialVideoIds: materialVideoIds ?? [],
+          materialImageIds: materialImageIds ?? [],
+          focusPoints: focusPoints ?? [],
+        },
         { brandId: brandId.value },
       );
       message.success('视频任务已创建，可到「视频工坊」查看进度');
@@ -183,10 +184,5 @@ onUnmounted(() => clearTimeout(timer));
 .right { text-align: right; }
 .date { margin-top: 8px; font-size: 12px; color: #bbb; }
 .pager { display: flex; justify-content: center; margin-top: 16px; }
-.sec { margin-top: 16px; }
-.sec .lab { font-weight: 600; color: #555; }
-.sec p { margin: 6px 0 0; line-height: 1.7; white-space: pre-wrap; }
-.steps { margin-top: 8px; }
-.script { white-space: pre-wrap; background: #fafafa; padding: 10px; border-radius: 8px; font-size: 12px; margin-top: 6px; }
 .ops { display: flex; gap: 10px; margin-top: 24px; }
 </style>

@@ -9,8 +9,8 @@
     </FilterTopbar>
 
     <a-spin :spinning="loading">
-      <div class="list">
-        <div v-for="t in list" :key="t.id" class="row">
+      <div class="grid">
+        <div v-for="t in list" :key="t.id" class="card">
           <div class="video-wrap">
             <video
               v-if="t.status === 'done' && t.video_url"
@@ -23,19 +23,22 @@
               <a-spin v-if="t.status === 'scripting' || t.status === 'rendering' || t.status === 'queued'" />
               <span v-else-if="t.status === 'failed'" class="fail">✕</span>
               <span v-else>—</span>
+              <div v-if="['queued', 'scripting', 'rendering'].includes(t.status)" class="ph-status">
+                {{ statusText(t.status) }}{{ t.error_msg ? ` · ${t.error_msg}` : '' }}
+              </div>
             </div>
+            <a-tag class="status-badge" :color="statusColor(t.status)">{{ statusText(t.status) }}</a-tag>
           </div>
-          <div class="main">
+          <div class="card-body">
             <div class="title">{{ t.title || `视频任务 #${t.id}` }}</div>
             <div class="meta">
               <a-tag color="blue">{{ t.product || '未关联产品' }}</a-tag>
-              <a-tag :color="statusColor(t.status)">{{ statusText(t.status) }}</a-tag>
               <a-tag v-if="t.engine === 'aigc'" color="volcano">AI成片</a-tag>
               <a-tag v-if="t.duration_sec">{{ t.duration_sec }}s</a-tag>
               <a-tag v-if="t.voice" color="geekblue">🎙 {{ voiceNames[t.voice] ?? t.voice }}</a-tag>
               <a-tag v-if="t.breakdown?.style_tags?.length" color="purple">{{ t.breakdown.style_tags[0] }}</a-tag>
             </div>
-            <div v-if="t.error_msg" class="err">{{ t.error_msg }}</div>
+            <div v-if="t.error_msg && t.status === 'failed'" class="err">{{ t.error_msg }}</div>
             <div v-if="t.script?.length" class="shots">
               <a-collapse ghost size="small">
                 <a-collapse-panel header="分镜脚本">
@@ -47,11 +50,11 @@
                 </a-collapse-panel>
               </a-collapse>
             </div>
-          </div>
-          <div class="ops">
-            <a-button v-if="t.video_url" size="small" :href="t.video_url" download>下载</a-button>
-            <a-button v-if="t.status === 'failed'" size="small" @click="retry(t)">重试</a-button>
-            <a-button v-if="!['queued', 'scripting', 'rendering'].includes(t.status)" size="small" danger @click="remove(t)">删除</a-button>
+            <div class="ops">
+              <a-button v-if="t.video_url" size="small" type="primary" :href="t.video_url" download>下载</a-button>
+              <a-button v-if="t.status === 'failed'" size="small" @click="retry(t)">重试</a-button>
+              <a-button v-if="!['queued', 'scripting', 'rendering'].includes(t.status)" size="small" danger @click="remove(t)">删除</a-button>
+            </div>
           </div>
         </div>
       </div>
@@ -73,7 +76,7 @@
         >
           <a-button type="primary" :loading="matUploading"><UploadOutlined /> 上传视频素材</a-button>
         </a-upload>
-        <span class="mat-hint">支持 mp4/mov/webm，单个 ≤ 500MB；上传后自动用于混剪画面匹配（标签可提升命中）</span>
+        <span class="mat-hint">支持 mp4/mov/webm，单个 ≤ 500MB；上传后自动用于混剪画面匹配（标签可提升命中）。按产品归属管理请去 <a @click="matOpen = false; router.push('/hotspot/materials')">素材库</a></span>
       </div>
       <a-spin :spinning="matLoading">
         <div v-if="materials.length" class="mat-grid">
@@ -229,11 +232,19 @@ const load = async () => {
   }
 };
 
-const create = async ({ productId, voice, engine }) => {
+const create = async ({ productId, voice, engine, materialVideoIds, materialImageIds, focusPoints }) => {
   pickOpen.value = false;
   try {
     await generateVideo(
-      { brandId: brandId.value, productId, voice: voice ?? undefined, engine: engine ?? 'mixcut' },
+      {
+        brandId: brandId.value,
+        productId,
+        voice: voice ?? undefined,
+        engine: engine ?? 'mixcut',
+        materialVideoIds: materialVideoIds ?? [],
+        materialImageIds: materialImageIds ?? [],
+        focusPoints: focusPoints ?? [],
+      },
       { brandId: brandId.value },
     );
     message.success(engine === 'aigc' ? 'AI成片任务已创建，逐段生成画面约 5-10 分钟' : '任务已创建，正在生成分镜与合成');
@@ -281,22 +292,24 @@ onUnmounted(() => clearTimeout(timer));
 
 <style scoped>
 .tip { color: #999; font-size: 12px; }
-.list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-.row { display: flex; gap: 14px; background: #fff; border: 1px solid #f0f0f0; border-radius: 12px; padding: 14px; }
-.video-wrap { width: 135px; }
-.video-wrap video { width: 135px; height: 240px; border-radius: 10px; background: #000; object-fit: contain; }
-.ph { display: flex; align-items: center; justify-content: center; width: 135px; height: 240px; border-radius: 10px; background: #fafafa; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-top: 12px; }
+.card { background: #fff; border: 1px solid #f0f0f0; border-radius: 10px; overflow: hidden; }
+.video-wrap { position: relative; aspect-ratio: 9 / 16; background: #000; }
+.video-wrap video { width: 100%; height: 100%; object-fit: contain; }
+.ph { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; background: #fafafa; color: #bbb; font-size: 13px; padding: 0 12px; text-align: center; }
 .fail { color: #ff4d4f; font-size: 28px; }
-.main { flex: 1; min-width: 0; }
-.title { font-weight: 600; }
-.meta { margin-top: 8px; }
-.meta .ant-tag { margin-bottom: 4px; }
-.err { margin-top: 8px; color: #ff4d4f; font-size: 12px; word-break: break-all; }
+.ph-status { color: #999; font-size: 12px; line-height: 1.5; max-height: 3.2em; overflow: hidden; }
+.status-badge { position: absolute; right: 8px; top: 8px; margin: 0; }
+.card-body { padding: 10px 12px; }
+.title { font-size: 13px; font-weight: 600; line-height: 1.4; height: 36px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.meta .ant-tag { margin: 0; }
+.err { margin-top: 6px; color: #ff4d4f; font-size: 12px; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .shots { margin-top: 4px; }
 .shot { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px dashed #f5f5f5; font-size: 12px; }
 .shot .vo { color: #555; margin-top: 2px; }
 .shot .mq { color: #aaa; margin-top: 2px; }
-.ops { display: flex; flex-direction: column; gap: 8px; }
+.ops { display: flex; gap: 8px; margin-top: 8px; }
 .pager { display: flex; justify-content: center; margin-top: 16px; }
 .mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .mat-cell video { width: 100%; height: 200px; border-radius: 10px; background: #000; object-fit: contain; }

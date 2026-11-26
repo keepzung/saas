@@ -8,6 +8,7 @@ import { SessionStore } from './scraper/session.store';
 import { DESKTOP_UA, launchBrowser, newAuthedContext, sleep } from './scraper/browser.util';
 import { PlatformBlockedError, ScrapedItem, SessionMissingError, parseCount, stripHtml } from './scraper/types';
 import { uploadRoot } from './media.util';
+import { chatJson, llmEnabled } from './llm.util';
 import { scrapeXhsHot, scrapeXhsSearch } from './scraper/xhs.scraper';
 import { scrapeBiliAuthor, scrapeBiliHot, scrapeBiliSearch } from './scraper/bilibili.scraper';
 
@@ -16,6 +17,9 @@ const COMPETITOR_INTERVAL_HOURS = Number(process.env.HOTSPOT_COMPETITOR_INTERVAL
 const ROUND_MAX_TASKS = Number(process.env.HOTSPOT_ROUND_MAX_TASKS ?? 12);
 const ROUND_MAX_COMPETITORS = Number(process.env.HOTSPOT_ROUND_MAX_COMPETITORS ?? 5);
 const ROUND_INTERVAL_MINUTES = Number(process.env.HOTSPOT_SCRAPE_INTERVAL_MINUTES ?? 30);
+
+/** 内容方向固定枚举（前端筛选下拉与 LLM 分类共用） */
+export const VIDEO_GENRES = ['对比评测', '销售引导', '用车测试', '直播切片', '静态展示', '知识科普', '剧情种草', '其他'] as const;
 
 @Injectable()
 export class HotspotService {
@@ -35,6 +39,7 @@ export class HotspotService {
     sourceType?: string;
     keyword?: string;
     breakdown?: string;
+    videoGenre?: string;
     sort?: string;
     page?: number;
     pageSize?: number;
@@ -46,6 +51,7 @@ export class HotspotService {
       ...(q.platform ? { platform: q.platform } : {}),
       ...(q.sourceType ? { sourceType: q.sourceType } : {}),
       ...(q.keyword ? { title: { contains: q.keyword } } : {}),
+      ...(q.videoGenre ? { videoGenre: q.videoGenre } : {}),
       ...(q.breakdown === 'done' ? { breakdownStatus: 'done' } : {}),
       ...(q.breakdown === 'none' ? { breakdownStatus: 'none' } : {}),
     };
@@ -88,6 +94,7 @@ export class HotspotService {
         collect_count: r.collectCount,
         source_type: r.sourceType,
         source_keyword: r.sourceKeyword,
+        video_genre: r.videoGenre,
         brand_id: r.brandId,
         breakdown_status: r.breakdownStatus,
         breakdown: r.breakdown
@@ -106,6 +113,14 @@ export class HotspotService {
     });
     if (!row) throw new NotFoundException('内容不存在');
     return { ...row, breakdown: row.breakdown };
+  }
+
+  /** 公开内容的视频直链（供无鉴权播放流端点用；私有内容不放行） */
+  publicVideoTarget(id: number) {
+    return this.prisma.hotContent.findFirst({
+      where: { id, isPublic: true, videoUrl: { not: null } },
+      select: { videoUrl: true, platform: true },
+    });
   }
 
   // ─── 关键词管理 ─────────────────────────────────────────────────────
@@ -322,6 +337,8 @@ export class HotspotService {
     }
     // 封面本地化（后台执行，不阻塞入库）：平台 CDN 直链数小时即失效
     void this.localizeCovers(items).catch((e) => this.logger.warn(`封面本地化异常: ${(e as Error).message?.split('\n')[0]}`));
+    // 内容方向自动分类（后台执行，不阻塞入库；glm-4-flash 免费模型）
+    void this.classifyNewContents(items).catch((e) => this.logger.warn(`内容方向分类异常: ${(e as Error).message?.split('\n')[0]}`));
     return { inserted, updated };
   }
 
@@ -355,6 +372,77 @@ export class HotspotService {
       } catch {
         /* 单张失败忽略，保留原直链 */
       }
+    }
+  }
+
+  // ─── 内容方向（视频方向）自动分类 ──────────────────────────────────
+  private genreBackfillRunning = false;
+
+  /** 入库后对新内容逐条分类（后台串行；glm-4-flash 免费；失败留空待回填） */
+  private async classifyNewContents(items: ScrapedItem[]) {
+    if (!llmEnabled()) return;
+    for (const it of items) {
+      if (!it.contentId || !it.title) continue;
+      const row = await this.prisma.hotContent.findUnique({
+        where: { platform_contentId: { platform: it.platform, contentId: it.contentId } },
+        select: { id: true, videoGenre: true, title: true, content: true, topics: true },
+      });
+      if (!row || row.videoGenre) continue; // 已有方向（拆解回填更准）不覆盖
+      await this.classifyOne(row.id, row.title, row.content, row.topics);
+    }
+  }
+
+  /** 单条分类：标题+正文+话题 → 固定枚举；LLM 不可用/解析失败时静默留空 */
+  async classifyOne(id: number, title: string, content: string | null, topics: string[]) {
+    try {
+      if (!llmEnabled()) return;
+      const sys = [
+        '你是短视频内容分类器。从固定枚举中选出唯一最匹配的内容方向：',
+        '对比评测（多产品/多车型横评、PK）、销售引导（价格/优惠/政策/到店引导）、用车测试（试驾/续航/空间实测）、',
+        '直播切片（直播画面/录屏剪辑）、静态展示（图文/静态图片展示）、知识科普（参数讲解/购车知识）、',
+        '剧情种草（剧情/场景化软种草）、其他。',
+        '输出严格 JSON：{"genre":"枚举之一"}',
+      ].join('\n');
+      const user = [
+        `标题：${title}`,
+        content ? `正文/描述：\n${content.slice(0, 800)}` : '',
+        topics?.length ? `话题：${topics.join('、')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const parsed = await chatJson<{ genre?: string }>(sys, user, { temperature: 0 });
+      const genre = parsed?.genre?.trim();
+      if (genre && (VIDEO_GENRES as readonly string[]).includes(genre)) {
+        await this.prisma.hotContent.update({ where: { id }, data: { videoGenre: genre } });
+      }
+    } catch (e) {
+      this.logger.warn(`内容 #${id} 方向分类失败: ${(e as Error).message?.split('\n')[0]}`);
+    }
+  }
+
+  /** 历史数据回填：串行补全 videoGenre 为空的内容；防重入，limit 兜底终止 */
+  async backfillGenres(limit = 500) {
+    if (this.genreBackfillRunning) throw new BadRequestException('回填进行中，请稍后再试');
+    this.genreBackfillRunning = true;
+    let done = 0;
+    try {
+      while (done < limit) {
+        // 打上方向的行会移出 where 集，固定从头取自然前进；全批失败时由 limit 终止
+        const rows = await this.prisma.hotContent.findMany({
+          where: { videoGenre: null, title: { not: '' } },
+          orderBy: { id: 'asc' },
+          take: 20,
+          select: { id: true, title: true, content: true, topics: true },
+        });
+        if (!rows.length) break;
+        for (const r of rows) {
+          await this.classifyOne(r.id, r.title, r.content, r.topics);
+          done += 1;
+        }
+      }
+      return { processed: done };
+    } finally {
+      this.genreBackfillRunning = false;
     }
   }
 

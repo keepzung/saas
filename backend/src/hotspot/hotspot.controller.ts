@@ -41,6 +41,7 @@ export class HotspotController {
       sourceType?: string;
       keyword?: string;
       breakdown?: string;
+      videoGenre?: string;
       sort?: string;
       page?: string;
       pageSize?: string;
@@ -52,10 +53,18 @@ export class HotspotController {
       sourceType: q.sourceType,
       keyword: q.keyword,
       breakdown: q.breakdown,
+      videoGenre: q.videoGenre,
       sort: q.sort,
       page: num(q.page, 1),
       pageSize: num(q.pageSize, 24),
     });
+  }
+
+  /** 历史内容方向回填（glm-4-flash 逐条补 videoGenre；仅 ADMIN） */
+  @Post('genre/backfill')
+  backfillGenre(@Req() req: Request) {
+    if (this.me(req).role !== 'ADMIN') throw new ForbiddenException('仅超级管理员可回填内容方向');
+    return this.hotspot.backfillGenres();
   }
 
   @Get('contents/:id')
@@ -175,6 +184,7 @@ export class HotspotController {
       strategyId?: number | null;
       extra?: string;
       wordCount?: string | null;
+      focusPoints?: string[];
     },
   ) {
     return this.creation.generateFromBreakdown({
@@ -185,6 +195,7 @@ export class HotspotController {
       strategyId: body.strategyId ?? null,
       extra: body.extra,
       wordCount: body.wordCount ?? null,
+      focusPoints: Array.isArray(body.focusPoints) ? body.focusPoints.map(String) : [],
     });
   }
 
@@ -241,7 +252,18 @@ export class HotspotController {
   generateVideo(
     @Req() req: Request,
     @Body()
-    body: { brandId?: number; productId: number; breakdownId?: number; hotContentId?: number; title?: string; voice?: string; engine?: string },
+    body: {
+      brandId?: number;
+      productId: number;
+      breakdownId?: number;
+      hotContentId?: number;
+      title?: string;
+      voice?: string;
+      engine?: string;
+      materialVideoIds?: number[];
+      materialImageIds?: number[];
+      focusPoints?: string[];
+    },
   ) {
     return this.video.createTask({
       brandId: Number(body.brandId ?? 1),
@@ -252,6 +274,9 @@ export class HotspotController {
       title: body.title,
       voice: body.voice,
       engine: body.engine,
+      materialVideoIds: Array.isArray(body.materialVideoIds) ? body.materialVideoIds.map(Number).filter(Number.isFinite) : [],
+      materialImageIds: Array.isArray(body.materialImageIds) ? body.materialImageIds.map(Number).filter(Number.isFinite) : [],
+      focusPoints: Array.isArray(body.focusPoints) ? body.focusPoints.map(String) : [],
     });
   }
 
@@ -274,16 +299,18 @@ export class HotspotController {
     return this.video.remove(num(brandId, 1)!, id);
   }
 
-  /** 品牌自有视频素材库（视频工坊预览；混剪/AI成片的素材源，MaterialVideo 表） */
+  /** 品牌自有视频素材库（视频工坊预览；混剪/AI成片的素材源，MaterialVideo 表；支持按产品过滤） */
   @Get('material-videos')
-  materialVideos(@Query() q: { brandId?: string; page?: string; pageSize?: string }) {
+  materialVideos(@Query() q: { brandId?: string; page?: string; pageSize?: string; productNodeId?: string; noProduct?: string }) {
     return this.video.materialVideos(num(brandIdNum(q), 1)!, {
       page: num(q.page, 1),
       pageSize: num(q.pageSize, 24),
+      ...(q.productNodeId ? { productNodeId: Number(q.productNodeId) } : {}),
+      ...(q.noProduct ? { noProduct: q.noProduct } : {}),
     });
   }
 
-  /** 上传品牌视频素材（mp4/mov/webm/m4v，单文件 ≤ 500MB） */
+  /** 上传品牌视频素材（mp4/mov/webm/m4v，单文件 ≤ 500MB；可同时归属产品） */
   @Post('material-videos/upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -297,8 +324,15 @@ export class HotspotController {
     @UploadedFile() file: { path: string; originalname?: string; size?: number } | undefined,
     @Query('brandId') brandId?: string,
     @Query('tags') tags?: string,
+    @Query('productNodeId') productNodeId?: string,
   ) {
-    return this.video.uploadMaterialVideo(num(brandId, 1)!, file, tags);
+    return this.video.uploadMaterialVideo(num(brandId, 1)!, file, tags, productNodeId ? Number(productNodeId) : undefined);
+  }
+
+  /** 批量调整视频素材产品归属 */
+  @Post('material-videos/assign')
+  assignMaterialVideos(@Body() body: { brandId?: number; ids: number[]; productNodeId?: number | null }) {
+    return this.video.assignMaterialVideos(Number(body.brandId ?? 1), (body.ids ?? []).map(Number), body.productNodeId ?? null);
   }
 
   @Delete('material-videos/:id')

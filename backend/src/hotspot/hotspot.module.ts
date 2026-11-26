@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ContentproModule } from '../contentpro/contentpro.module';
 import { HotspotController } from './hotspot.controller';
+import { HotspotPublicController } from './hotspot-public.controller';
 import { HotspotService } from './hotspot.service';
 import { BreakdownService } from './breakdown.service';
 import { VideoService } from './video.service';
@@ -13,7 +14,7 @@ import { HotspotScheduler } from './hotspot.scheduler';
 
 @Module({
   imports: [PrismaModule, ContentproModule],
-  controllers: [HotspotController],
+  controllers: [HotspotController, HotspotPublicController],
   providers: [
     HotspotService,
     BreakdownService,

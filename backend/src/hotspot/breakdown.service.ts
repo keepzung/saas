@@ -8,6 +8,7 @@ import type { HotContent } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HotspotService } from './hotspot.service';
 import { chatJson, chatText, chatVision, llmEnabled, transcribeAudio, type ContentPart } from './llm.util';
+import { VIDEO_GENRES } from './hotspot.service';
 import { fetchXhsNoteDetail } from './scraper/xhs.scraper';
 import { fetchBiliVideoDetail } from './scraper/bilibili.scraper';
 import { runFfmpeg, probeDurationSec, uploadRoot } from './media.util';
@@ -22,6 +23,7 @@ interface BreakdownResult {
   styleTags: string[];
   scriptText: string;
   replicateTips: string;
+  videoGenre: string;
 }
 
 @Injectable()
@@ -190,7 +192,11 @@ export class BreakdownService {
           errorMsg: null,
         },
       });
-      await this.prisma.hotContent.update({ where: { id: row.hotContentId }, data: { breakdownStatus: 'done' } });
+      // 拆解结果含全量上下文，内容方向以拆解为准覆盖入库时的轻量分类
+      await this.prisma.hotContent.update({
+        where: { id: row.hotContentId },
+        data: { breakdownStatus: 'done', ...(result.videoGenre ? { videoGenre: result.videoGenre } : {}) },
+      });
     } catch (e) {
       const msg = (e as Error).message?.slice(0, 500) ?? 'unknown';
       await this.prisma.contentBreakdown.update({ where: { id }, data: { status: 'failed', errorMsg: msg } });
@@ -349,7 +355,7 @@ export class BreakdownService {
     const sys = [
       '你是爆款内容拆解专家。对给定的热门内容输出结构化拆解，帮助品牌方复刻同类爆款。',
       '输出严格 JSON：',
-      '{"hook":"开头钩子(如何在前3秒抓注意力)","structure":[{"stage":"阶段名(如 黄金3秒/痛点共鸣/产品展示/信任背书/行动号召)","summary":"这一段做了什么","voiceover":"若有口播原文摘录"}],"sellingPoints":["提炼出的卖点/爆点"],"cta":"结尾行动号召是什么","styleTags":["内容风格标签，如 口播/测评/剧情/vlog/图文/沉浸式，3-6个"],"scriptText":"完整口播文案或内容文字稿","replicateTips":"给品牌方的复刻建议，2-4句"}',
+      '{"hook":"开头钩子(如何在前3秒抓注意力)","structure":[{"stage":"阶段名(如 黄金3秒/痛点共鸣/产品展示/信任背书/行动号召)","summary":"这一段做了什么","voiceover":"若有口播原文摘录"}],"sellingPoints":["提炼出的卖点/爆点"],"cta":"结尾行动号召是什么","styleTags":["内容风格标签，如 口播/测评/剧情/vlog/图文/沉浸式，3-6个"],"scriptText":"完整口播文案或内容文字稿","replicateTips":"给品牌方的复刻建议，2-4句","videoGenre":"内容方向，从固定枚举中选一个：对比评测/销售引导/用车测试/直播切片/静态展示/知识科普/剧情种草/其他"}',
     ].join('\n');
     const user = [
       `平台：${content.platform}；类型：${content.kind === 'video' ? '视频' : '图文笔记'}`,
@@ -365,6 +371,7 @@ export class BreakdownService {
       .join('\n');
     const parsed = await chatJson<BreakdownResult>(sys, user, { temperature: 0.4 });
     if (!parsed || !Array.isArray(parsed.structure)) throw new Error('拆解 JSON 解析失败');
+    const genre = String(parsed.videoGenre ?? '').trim();
     return {
       hook: String(parsed.hook ?? ''),
       structure: parsed.structure.slice(0, 12).map((s) => ({
@@ -377,6 +384,7 @@ export class BreakdownService {
       styleTags: Array.isArray(parsed.styleTags) ? parsed.styleTags.map(String).slice(0, 8) : [],
       scriptText: String(parsed.scriptText ?? ''),
       replicateTips: String(parsed.replicateTips ?? ''),
+      videoGenre: (VIDEO_GENRES as readonly string[]).includes(genre) ? genre : '其他',
     };
   }
 }

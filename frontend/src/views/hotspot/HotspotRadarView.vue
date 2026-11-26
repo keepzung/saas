@@ -13,6 +13,10 @@
         <a-select-option value="hot_list">热门feed</a-select-option>
         <a-select-option value="competitor">竞品内容</a-select-option>
       </a-select>
+      <a-select v-model:value="videoGenre" style="width: 130px" @change="load">
+        <a-select-option value="">全部方向</a-select-option>
+        <a-select-option v-for="g in GENRES" :key="g" :value="g">{{ g }}</a-select-option>
+      </a-select>
       <a-select v-model:value="sort" style="width: 120px" @change="load">
         <a-select-option value="new">最新入库</a-select-option>
         <a-select-option value="hot">点赞最高</a-select-option>
@@ -64,6 +68,7 @@
             <span class="plt-badge" :class="c.platform">{{ platformName(c.platform) }}</span>
             <span v-if="c.source_type === 'competitor'" class="comp-badge">竞品</span>
             <span v-if="c.kind === 'video'" class="kind-badge">视频</span>
+            <span v-if="c.video_genre" class="genre-badge">{{ c.video_genre }}</span>
           </div>
           <div class="card-body">
             <div class="title">{{ c.title || '（无标题）' }}</div>
@@ -109,29 +114,12 @@
           <div class="s"><b>{{ fmtNum(detail.share_count) }}</b><span>分享</span></div>
         </div>
         <template v-if="detail.breakdown">
-          <a-divider>AI 拆解</a-divider>
-          <template v-if="detail.breakdown.status === 'done'">
-            <a-alert v-if="detail.breakdown.partial" type="warning" show-icon message="视频源不可得，本次为文本降级拆解" class="d-alert" />
-            <div class="d-sec"><span class="lab">开头钩子</span><p>{{ detail.breakdown.hook }}</p></div>
-            <div class="d-sec">
-              <span class="lab">结构节奏</span>
-              <a-steps direction="vertical" size="small" :current="99" class="d-structure">
-                <a-step v-for="(s, i) in detail.breakdown.structure ?? []" :key="i" :title="s.stage" :description="s.summary + (s.voiceover ? `｜口播：${s.voiceover}` : '')" />
-              </a-steps>
-            </div>
-            <div class="d-sec">
-              <span class="lab">卖点提炼</span>
-              <a-tag v-for="p in detail.breakdown.selling_points ?? []" :key="p" color="blue" class="d-tag">{{ p }}</a-tag>
-            </div>
-            <div class="d-sec"><span class="lab">行动号召</span><p>{{ detail.breakdown.cta }}</p></div>
-            <div class="d-sec">
-              <span class="lab">风格标签</span>
-              <a-tag v-for="t in detail.breakdown.style_tags ?? []" :key="t" class="d-tag">{{ t }}</a-tag>
-            </div>
-            <div class="d-sec"><span class="lab">原文案</span><pre class="d-script">{{ detail.breakdown.script_text }}</pre></div>
-            <div class="d-sec"><span class="lab">复刻建议</span><p>{{ detail.breakdown.replicate_tips }}</p></div>
-          </template>
-          <a-alert v-else type="info" :message="`拆解状态：${detail.breakdown.status}`" />
+          <HotBreakdownDetail
+            :breakdown="detail.breakdown"
+            :content-id="detail.id"
+            :video-url="detail.videoUrl ?? ''"
+            :cover-url="detail.coverUrl ?? ''"
+          />
         </template>
         <a-empty v-else description="尚未拆解，点击「AI 拆解」开始" style="margin-top: 24px" />
         <div class="d-ops">
@@ -153,6 +141,7 @@ import { ThunderboltOutlined } from '@ant-design/icons-vue';
 import PageWrapper from '../../components/PageWrapper.vue';
 import FilterTopbar from '../../components/FilterTopbar.vue';
 import ProductPickModal from './ProductPickModal.vue';
+import HotBreakdownDetail from './HotBreakdownDetail.vue';
 import { useAuthStore } from '../../stores/auth';
 import {
   getHotContents,
@@ -178,8 +167,11 @@ const loading = ref(false);
 const scraping = ref(false);
 const platform = ref('bilibili'); // 不设"全部"：明确选平台，避免服务器默认触碰已风控的小红书
 const sourceType = ref('');
+const videoGenre = ref('');
 const sort = ref('new');
 const keyword = ref('');
+
+const GENRES = ['对比评测', '销售引导', '用车测试', '直播切片', '静态展示', '知识科普', '剧情种草', '其他'];
 
 const keywords = ref([]);
 const newKeyword = ref('');
@@ -209,6 +201,7 @@ const load = async () => {
       brandId: brandId.value,
       platform: platform.value || undefined,
       sourceType: sourceType.value || undefined,
+      videoGenre: videoGenre.value || undefined,
       keyword: keyword.value || undefined,
       sort: sort.value,
       page: page.value,
@@ -330,20 +323,20 @@ const createVideo = (detailRow) => {
   pickOpen.value = true;
 };
 
-const onPicked = async ({ productId, strategyId, voice }) => {
+const onPicked = async ({ productId, strategyId, voice, engine, materialVideoIds, materialImageIds, focusPoints }) => {
   const c = pickContent.value;
   pickOpen.value = false;
   if (!c || !productId) return;
   if (pickMode.value === 'article') {
-    const res = await generateFromBreakdownSafe(c.breakdown?.id, productId, strategyId);
+    const res = await generateFromBreakdownSafe(c.breakdown?.id, productId, strategyId, focusPoints);
     if (res) message.success('文案已生成并进入「历史记录」，可去审核发布');
   } else {
-    await createVideoSafe(c.breakdown?.id ?? null, c.id, productId, voice);
+    await createVideoSafe(c.breakdown?.id ?? null, c.id, productId, voice, engine, materialVideoIds, materialImageIds, focusPoints);
     message.success('视频任务已创建，可到「视频工坊」查看进度');
   }
 };
 
-const generateFromBreakdownSafe = async (breakdownId, productId, strategyId) => {
+const generateFromBreakdownSafe = async (breakdownId, productId, strategyId, focusPoints) => {
   if (!breakdownId) {
     message.warning('该内容尚未拆解完成，请先 AI 拆解');
     return null;
@@ -351,7 +344,7 @@ const generateFromBreakdownSafe = async (breakdownId, productId, strategyId) => 
   try {
     const { generateFromBreakdown } = await import('../../api/hotspot');
     return await generateFromBreakdown(
-      { brandId: brandId.value, breakdownId, productId, strategyId: strategyId ?? null },
+      { brandId: brandId.value, breakdownId, productId, strategyId: strategyId ?? null, focusPoints: focusPoints ?? [] },
       { brandId: brandId.value },
     );
   } catch (e) {
@@ -360,11 +353,21 @@ const generateFromBreakdownSafe = async (breakdownId, productId, strategyId) => 
   }
 };
 
-const createVideoSafe = async (breakdownId, hotContentId, productId, voice) => {
+const createVideoSafe = async (breakdownId, hotContentId, productId, voice, engine, materialVideoIds, materialImageIds, focusPoints) => {
   try {
     const { generateVideo } = await import('../../api/hotspot');
     await generateVideo(
-      { brandId: brandId.value, productId, breakdownId: breakdownId ?? undefined, hotContentId, voice: voice ?? undefined },
+      {
+        brandId: brandId.value,
+        productId,
+        breakdownId: breakdownId ?? undefined,
+        hotContentId,
+        voice: voice ?? undefined,
+        engine: engine ?? 'mixcut',
+        materialVideoIds: materialVideoIds ?? [],
+        materialImageIds: materialImageIds ?? [],
+        focusPoints: focusPoints ?? [],
+      },
       { brandId: brandId.value },
     );
   } catch (e) {
@@ -393,6 +396,7 @@ onMounted(() => {
 .plt-badge.bilibili { background: rgba(0, 161, 214, 0.9); }
 .comp-badge { position: absolute; right: 8px; top: 8px; background: rgba(250, 173, 20, 0.95); color: #fff; font-size: 12px; padding: 1px 8px; border-radius: 10px; }
 .kind-badge { position: absolute; right: 8px; bottom: 8px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; padding: 1px 8px; border-radius: 10px; }
+.genre-badge { position: absolute; left: 8px; bottom: 8px; background: rgba(22, 119, 255, 0.85); color: #fff; font-size: 12px; padding: 1px 8px; border-radius: 10px; }
 .card-body { padding: 10px 12px; }
 .title { font-size: 13px; font-weight: 600; line-height: 1.4; height: 36px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .meta { display: flex; gap: 10px; margin-top: 6px; font-size: 12px; color: #888; }
@@ -402,18 +406,13 @@ onMounted(() => {
 .date { margin-left: auto; }
 .ops { display: flex; gap: 8px; margin-top: 8px; }
 .pager { display: flex; justify-content: center; margin-top: 16px; }
+.d-stats b { display: block; font-size: 16px; }
+.d-stats span { font-size: 12px; color: #999; }
 .d-meta { display: flex; align-items: center; gap: 6px; }
 .d-author { color: #888; margin-left: auto; font-size: 13px; }
 .d-stats { display: flex; gap: 12px; margin-top: 12px; }
 .d-stats .s { flex: 1; text-align: center; background: #fafafa; border-radius: 8px; padding: 8px 0; }
 .d-stats b { display: block; font-size: 16px; }
 .d-stats span { font-size: 12px; color: #999; }
-.d-alert { margin-bottom: 12px; }
-.d-sec { margin-top: 14px; }
-.d-sec .lab { font-weight: 600; color: #555; }
-.d-sec p { margin: 6px 0 0; color: #333; line-height: 1.7; white-space: pre-wrap; }
-.d-tag { margin: 6px 6px 0 0; }
-.d-script { white-space: pre-wrap; background: #fafafa; padding: 10px; border-radius: 8px; font-size: 12px; margin-top: 6px; }
-.d-structure { margin-top: 8px; }
 .d-ops { display: flex; gap: 10px; margin-top: 20px; }
 </style>

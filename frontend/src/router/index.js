@@ -396,6 +396,11 @@ const routes = [
         meta: { title: '视频工坊' },
       },
       {
+        path: '/hotspot/materials',
+        component: () => import('../views/hotspot/HotspotMaterialView.vue'),
+        meta: { title: '素材库' },
+      },
+      {
         path: '/hotspot/voices',
         component: () => import('../views/hotspot/VoiceStudioView.vue'),
         meta: { title: '我的音色' },

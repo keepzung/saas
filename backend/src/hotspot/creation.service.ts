@@ -26,6 +26,7 @@ export class CreationService {
     strategyId?: number | null;
     extra?: string;
     wordCount?: string | null;
+    focusPoints?: string[];
   }) {
     if (!llmEnabled()) throw new BadRequestException('LLM_API_KEY 未配置，无法生成');
     const breakdown = await this.prisma.contentBreakdown.findUnique({
@@ -62,6 +63,7 @@ export class CreationService {
           : '',
         strategy?.persona ? `人设：${asArr(strategy.persona).join('；')}` : '',
         strategy?.sellingPoints ? `必须覆盖的卖点：${asArr(strategy.sellingPoints).join('；')}` : '',
+        input.focusPoints?.length ? `本次重点卖点/政策（优先展开写）：${input.focusPoints.slice(0, 10).join('；')}` : '',
         strategy?.audience ? `目标受众：${asArr(strategy.audience).join('、')}` : '',
         `爆款拆解参考（来自 ${breakdown.hotContent.platform} 的「${breakdown.hotContent.title}」）：`,
         `钩子：${breakdown.hook ?? ''}`,

@@ -1909,6 +1909,7 @@ model HotContent {
   collectCount    Int       @default(0)
   sourceType      String    @default("search") // hot_list | search | competitor
   sourceKeyword   String?
+  videoGenre      String? // 内容方向: 对比评测/销售引导/用车测试/直播切片/静态展示/知识科普/剧情种草/其他
   brandId         Int       @default(1)
   isPublic        Boolean   @default(true)
   breakdownStatus String    @default("none") // none | pending | processing | done | failed
@@ -1920,6 +1921,7 @@ model HotContent {
 
   @@unique([platform, contentId])
   @@index([brandId, sourceType])
+  @@index([brandId, videoGenre])
   @@index([platform, sourceType, scrapedAt])
 }
 
@@ -1997,6 +1999,9 @@ model VideoGenTask {
   engine       String           @default("mixcut")
   status       String           @default("queued") // queued | scripting | rendering | done | failed
   voice        String? // 用户挑选的 TTS 音色；空则用 TTS_VOICE 全局默认
+  materialVideoIds Int[]    @default([]) // 用户指定的品牌视频素材（按镜头顺序优先占用；空=AI 自动匹配）
+  materialImageIds Int[]    @default([]) // 用户指定的图片素材（AI 成片优先作首帧；空=自动匹配）
+  focusPoints      String[] @default([]) // 用户勾选的重点卖点/销售政策（注入分镜 prompt）
   audioUrl     String?
   videoUrl     String?
   coverUrl     String?

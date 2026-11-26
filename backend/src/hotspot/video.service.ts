@@ -90,6 +90,9 @@ export class VideoService {
     title?: string;
     voice?: string;
     engine?: string;
+    materialVideoIds?: number[];
+    materialImageIds?: number[];
+    focusPoints?: string[];
   }) {
     if (!llmEnabled()) throw new BadRequestException('LLM_API_KEY 未配置，无法生成分镜');
     const engine = input.engine === 'aigc' ? 'aigc' : 'mixcut';
@@ -120,6 +123,9 @@ export class VideoService {
         voice: input.voice ?? null,
         engine,
         status: 'queued',
+        materialVideoIds: (input.materialVideoIds ?? []).slice(0, 20),
+        materialImageIds: (input.materialImageIds ?? []).slice(0, 20),
+        focusPoints: (input.focusPoints ?? []).map((s) => String(s).slice(0, 200)).slice(0, 20),
       },
     });
     this.enqueue(task.id, engine);
@@ -247,18 +253,25 @@ export class VideoService {
     return { id, status: 'queued' };
   }
 
-  /** 品牌自有视频素材库列表（视频工坊「品牌素材库」预览；混剪/AI成片的素材源） */
-  async materialVideos(brandId: number, q: { page?: number; pageSize?: number }) {
+  /** 品牌自有视频素材库列表（视频工坊「品牌素材库」预览；混剪/AI成片的素材源；支持按产品过滤） */
+  async materialVideos(brandId: number, q: { page?: number; pageSize?: number; productNodeId?: number; noProduct?: string }) {
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 24;
-    const where = { brandId };
+    const where = {
+      brandId,
+      ...(q.noProduct === '1'
+        ? { productNodeId: null }
+        : q.productNodeId
+          ? { productNodeId: q.productNodeId }
+          : {}),
+    };
     const [rows, total] = await Promise.all([
       this.prisma.materialVideo.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: { id: true, url: true, thumbUrl: true, durationSec: true, tags: true, createdAt: true },
+        select: { id: true, url: true, thumbUrl: true, durationSec: true, tags: true, productNodeId: true, createdAt: true },
       }),
       this.prisma.materialVideo.count({ where }),
     ]);
@@ -270,6 +283,7 @@ export class VideoService {
     brandId: number,
     file: { path: string; originalname?: string; size?: number } | undefined,
     tagsCsv?: string,
+    productNodeId?: number,
   ) {
     if (!file?.path) throw new BadRequestException('未收到视频文件');
     const ext = path.extname(file.originalname || '').toLowerCase() || '.mp4';
@@ -283,10 +297,20 @@ export class VideoService {
     const url = `/uploads/materials/brand-videos/${brandId}/${filename}`;
     const durationSec = await probeDurationSec(path.join(dir, filename));
     const row = await this.prisma.materialVideo.create({
-      data: { brandId, url, tags: tags.length ? tags : ['品牌视频'], durationSec: durationSec ?? null },
+      data: { brandId, url, tags: tags.length ? tags : ['品牌视频'], durationSec: durationSec ?? null, ...(productNodeId ? { productNodeId } : {}) },
     });
     this.logger.log(`品牌素材上传 brand=${brandId} -> ${url} (${Math.round((file.size ?? 0) / 1024 / 1024)}MB, ${durationSec ?? '?'}s)`);
     return { id: row.id, url: row.url, tags: row.tags, durationSec: row.durationSec };
+  }
+
+  /** 批量调整视频素材产品归属（素材库页用；productNodeId=null 表示移出产品） */
+  async assignMaterialVideos(brandId: number, ids: number[], productNodeId: number | null) {
+    if (!ids?.length) throw new BadRequestException('未选择素材');
+    const r = await this.prisma.materialVideo.updateMany({
+      where: { id: { in: ids }, brandId },
+      data: { productNodeId: productNodeId ?? null },
+    });
+    return { count: r.count };
   }
 
   /** 删除品牌视频素材（仅删记录与引用，源文件保留在磁盘上） */
@@ -355,11 +379,11 @@ export class VideoService {
       // ── 1. 分镜脚本 ──
       await this.prisma.videoGenTask.update({ where: { id }, data: { status: 'scripting' } });
       const ctx = await this.gatherContext(task.breakdownId, task.hotContentId, task.brandId, task.productId);
-      const board = await this.storyboard(ctx, task.title ?? undefined);
+      const board = await this.storyboard(ctx, task.title ?? undefined, task.focusPoints);
 
-      // ── 2. 素材匹配 ──
+      // ── 2. 素材匹配（用户指定素材按镜头顺序优先占用，其余自动匹配）──
       await this.prisma.videoGenTask.update({ where: { id }, data: { status: 'rendering', script: board as object } });
-      const assigned = await this.assignMedia(task.brandId, board.shots, task.productId);
+      const assigned = await this.assignMedia(task.brandId, board.shots, task.productId, task.materialVideoIds, task.materialImageIds);
 
       // ── 3. TTS 配音（S_ 开头=复刻音色走克隆合成；豆包系走 doubao_tts_2_0；其余 edge-tts）──
       const voice = task.voice || process.env.TTS_VOICE || 'zh-CN-XiaoxiaoNeural';
@@ -544,12 +568,12 @@ export class VideoService {
       // ── 1. 分镜脚本（画面提示词导向）──
       await this.prisma.videoGenTask.update({ where: { id }, data: { status: 'scripting' } });
       const ctx = await this.gatherContext(task.breakdownId, task.hotContentId, task.brandId, task.productId);
-      const board = await this.storyboardAigc(ctx, task.title ?? undefined);
+      const board = await this.storyboardAigc(ctx, task.title ?? undefined, task.focusPoints);
       const shots = board.shots.map((s) => ({ ...s, durSec: AIGC_SEG_SEC }));
       await this.prisma.videoGenTask.update({ where: { id }, data: { status: 'rendering', script: shots as object } });
 
-      // ── 2. 首帧图：品牌素材库按提示词匹配（没有则纯文生视频）──
-      const frames = await this.pickAigcFrames(task.brandId, task.productId, shots);
+      // ── 2. 首帧图：用户指定素材优先，其次素材库匹配（没有则纯文生视频）──
+      const frames = await this.pickAigcFrames(task.brandId, task.productId, shots, task.materialImageIds);
       const provider = videoGenProvider();
       const pubBase = publicBaseUrl();
 
@@ -621,6 +645,7 @@ export class VideoService {
   private async storyboardAigc(
     ctx: Awaited<ReturnType<typeof VideoService.prototype.gatherContext>>,
     titleOverride?: string,
+    focusPoints: string[] = [],
   ): Promise<Storyboard> {
     const asArr = (v: unknown): string[] =>
       Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean).slice(0, 8) : [];
@@ -637,6 +662,7 @@ export class VideoService {
       ctx.product?.knowledge ? `产品知识（节选）：${ctx.product.knowledge.slice(0, 500)}` : '',
       ctx.strategy ? `人设方向：${asArr(ctx.strategy.persona).join('、')}` : '',
       ctx.strategy ? `产品卖点：${asArr(ctx.strategy.sellingPoints).join('；')}` : '',
+      focusPoints.length ? `本次重点卖点/政策（口播与画面提示词围绕这些展开）：${focusPoints.join('；')}` : '',
       ctx.breakdown ? `爆款拆解参考：钩子 ${ctx.breakdown.hook ?? ''}；卖点 ${asArr(ctx.breakdown.sellingPoints).join('；')}` : '',
     ]
       .filter(Boolean)
@@ -654,13 +680,21 @@ export class VideoService {
     return { title: (titleOverride ?? parsed?.title ?? '').slice(0, 40), shots };
   }
 
-  /** AI 成片首帧：素材库图片按提示词/产品名匹配，最多每段一张；素材库为空返回 null（纯文生视频） */
-  private async pickAigcFrames(brandId: number, productId: number, shots: Shot[]): Promise<{ local: string | null; url: string | null }[]> {
+  /** AI 成片首帧：用户指定图片优先按序作首帧；其余按提示词/产品名匹配，最多每段一张；素材库为空返回 null（纯文生视频） */
+  private async pickAigcFrames(
+    brandId: number,
+    productId: number,
+    shots: Shot[],
+    pinnedImageIds: number[] = [],
+  ): Promise<{ local: string | null; url: string | null }[]> {
     const images = await this.prisma.materialImage.findMany({
       where: { brandId, status: 1 },
       include: { type: { select: { name: true } } },
     });
     if (!images.length) return shots.map(() => ({ local: null, url: null }));
+    const orderedPinned = pinnedImageIds
+      .map((id) => images.find((m) => m.id === id))
+      .filter((m): m is (typeof images)[number] => Boolean(m));
     const productName = String(
       (await this.prisma.product.findUnique({ where: { id: productId }, select: { name: true } }))?.name ?? '',
     );
@@ -669,9 +703,12 @@ export class VideoService {
       return tokens.some((t) => haystack.includes(t) || t.includes(haystack));
     };
     const used = new Set<number>();
-    return shots.map((shot) => {
+    return shots.map((shot, i) => {
+      // 用户勾选的图片按镜头顺序优先作首帧（勾选数多于镜头时截断，少于时其余镜头自动匹配）
+      const pinnedImg = i < orderedPinned.length ? orderedPinned[i] : null;
       const query = `${shot.visualPrompt ?? ''} ${productName}`;
       const img =
+        pinnedImg ??
         images.find((m) => !used.has(m.id) && hit(m.name ?? '', query)) ??
         images.find((m) => !used.has(m.id) && m.productNodeId === productId) ??
         images.find((m) => !used.has(m.id));
@@ -717,7 +754,7 @@ export class VideoService {
     } | null;
     hot: { title: string; content: string | null } | null;
     strategy: { persona: unknown; sellingPoints: unknown } | null;
-  }, titleOverride?: string): Promise<Storyboard> {
+  }, titleOverride?: string, focusPoints: string[] = []): Promise<Storyboard> {
     const asArr = (v: unknown): string[] =>
       Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean).slice(0, 8) : [];
     const sys = [
@@ -733,6 +770,7 @@ export class VideoService {
       ctx.product?.knowledge ? `产品知识（节选）：${ctx.product.knowledge.slice(0, 600)}` : '',
       ctx.strategy ? `人设方向：${asArr(ctx.strategy.persona).join('、')}` : '',
       ctx.strategy ? `产品卖点：${asArr(ctx.strategy.sellingPoints).join('；')}` : '',
+      focusPoints.length ? `本次重点卖点/政策（口播围绕这些展开）：${focusPoints.join('；')}` : '',
       ctx.breakdown
         ? `爆款拆解参考：\n钩子：${ctx.breakdown.hook ?? ''}\n结构：${JSON.stringify(ctx.breakdown.structure).slice(0, 600)}\n卖点：${asArr(ctx.breakdown.sellingPoints).join('；')}\nCTA：${ctx.breakdown.cta ?? ''}\n原文案：${(ctx.breakdown.scriptText ?? '').slice(0, 500)}`
         : '',
@@ -754,8 +792,14 @@ export class VideoService {
     return { title: (titleOverride ?? parsed.title ?? '').slice(0, 40), shots };
   }
 
-  /** 镜头素材分配：品牌视频素材 tags 命中 → 图片素材 name/typeTag 命中 → 产品图 → 品牌图随机 */
-  private async assignMedia(brandId: number, shots: Shot[], productId: number): Promise<Shot[]> {
+  /** 镜头素材分配：用户指定素材按镜头顺序优先占用 → 品牌视频素材 tags 命中 → 图片素材 name/typeTag 命中 → 产品图 → 品牌图随机 */
+  private async assignMedia(
+    brandId: number,
+    shots: Shot[],
+    productId: number,
+    pinnedVideoIds: number[] = [],
+    pinnedImageIds: number[] = [],
+  ): Promise<Shot[]> {
     const videos = await this.prisma.materialVideo.findMany({ where: { brandId } });
     const images = await this.prisma.materialImage.findMany({
       where: { brandId, status: 1 },
@@ -764,12 +808,41 @@ export class VideoService {
     const out: Shot[] = [];
     const usedVideo = new Set<number>();
     const usedImage = new Set<number>();
+
+    // 预分配：用户勾选的视频按顺序占用靠前镜头，视频用完再轮到勾选的图片
+    const pinned = new Map<number, { mediaType: 'image' | 'video'; id: number; url: string }>();
+    const orderedVideos = pinnedVideoIds
+      .map((id) => videos.find((v) => v.id === id))
+      .filter((v): v is (typeof videos)[number] => Boolean(v));
+    const orderedImages = pinnedImageIds
+      .map((id) => images.find((m) => m.id === id))
+      .filter((m): m is (typeof images)[number] => Boolean(m));
+    shots.forEach((_, idx) => {
+      if (idx < orderedVideos.length) {
+        pinned.set(idx, { mediaType: 'video', id: orderedVideos[idx].id, url: orderedVideos[idx].url });
+      } else if (idx < orderedVideos.length + orderedImages.length) {
+        const img = orderedImages[idx - orderedVideos.length];
+        pinned.set(idx, { mediaType: 'image', id: img.id, url: img.url });
+      }
+    });
+
     const hit = (haystack: string[], query: string) => {
       const tokens = query.split(/[\s,，、/]+/).filter((t) => t.length >= 2);
       return tokens.some((t) => haystack.some((h) => h && (h.includes(t) || t.includes(h))));
     };
 
     for (const shot of shots) {
+      const idx = out.length;
+      const pre = pinned.get(idx);
+      if (pre) {
+        const mediaUrl = await this.resolveMediaFile(pre.url, brandId);
+        if (mediaUrl && fs.existsSync(mediaUrl)) {
+          (pre.mediaType === 'video' ? usedVideo : usedImage).add(pre.id);
+          out.push({ ...shot, mediaType: pre.mediaType, mediaUrl });
+          continue;
+        }
+      }
+
       let mediaType: 'image' | 'video' | undefined;
       let mediaUrl: string | undefined;
 
