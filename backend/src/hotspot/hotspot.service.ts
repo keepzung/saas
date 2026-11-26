@@ -411,9 +411,14 @@ export class HotspotService {
         .filter(Boolean)
         .join('\n');
       const parsed = await chatJson<{ genre?: string }>(sys, user, { temperature: 0 });
-      const genre = parsed?.genre?.trim();
-      if (genre && (VIDEO_GENRES as readonly string[]).includes(genre)) {
-        await this.prisma.hotContent.update({ where: { id }, data: { videoGenre: genre } });
+      const genre = (parsed?.genre ?? '').trim();
+      if (!genre) return;
+      // LLM 不一定严格按枚举输出（如"汽车评测"），包含关系模糊归一到枚举
+      const matched =
+        (VIDEO_GENRES as readonly string[]).find((g) => genre === g) ??
+        (VIDEO_GENRES as readonly string[]).find((g) => genre.includes(g) || g.includes(genre));
+      if (matched) {
+        await this.prisma.hotContent.update({ where: { id }, data: { videoGenre: matched } });
       }
     } catch (e) {
       this.logger.warn(`内容 #${id} 方向分类失败: ${(e as Error).message?.split('\n')[0]}`);
