@@ -198,12 +198,19 @@
             <div class="ed-label">海报场景</div>
             <div class="scene-chips">
               <a-tag
-                v-for="(s, i) in POSTER_PRESETS"
-                :key="i"
+                v-for="(s, i) in mergedPresets"
+                :key="s.builtin ? `b${i}` : `c${s.id}`"
                 class="scene-chip"
                 :class="{ active: poPreset === i }"
+                :closable="scenesCanManage && s.custom"
                 @click="poPreset = i"
+                @close.prevent="removePosterScene(s)"
               >{{ s.name }}</a-tag>
+            </div>
+            <div v-if="scenesCanManage" class="scene-add-row">
+              <a-input v-model:value="newSceneName" size="small" :maxlength="12" style="width: 110px" placeholder="场景名，如：泳池庭院" />
+              <a-input v-model:value="newSceneText" size="small" style="flex: 1; min-width: 160px" placeholder="场景描述：产品放在什么环境里（写清背景、光线、氛围）" />
+              <a-button size="small" type="primary" @click="addPosterScene">添加场景</a-button>
             </div>
           </div>
           <div class="ed-field">
@@ -332,6 +339,9 @@ import {
   generateCoverScene,
   getCoverSceneLimit,
   setCoverSceneLimit,
+  getPosterScenes,
+  createPosterScene,
+  deletePosterScene,
 } from '../../api/contentpro';
 
 const props = defineProps({
@@ -479,6 +489,51 @@ const POSTER_PRESETS = [
   { name: '原木家居', scene: '浅色原木台面上，米白色简约客厅背景' },
   { name: '红金节日', scene: '红金配色的节日礼盒氛围中，暖色灯带背景' },
 ];
+// 内置 + 设计师自定义（有 ai_poster_limit_set 管理权限者可增删，存库全工作区共享）
+const serverScenes = ref([]);
+const scenesCanManage = ref(false);
+const mergedPresets = computed(() => [
+  ...POSTER_PRESETS.map((p) => ({ ...p, builtin: true })),
+  ...serverScenes.value.map((p) => ({ ...p, custom: true })),
+]);
+const newSceneName = ref('');
+const newSceneText = ref('');
+const addPosterScene = async () => {
+  if (!newSceneName.value.trim() || !newSceneText.value.trim()) return message.warning('请填写场景名和场景描述');
+  try {
+    await createPosterScene(
+      { name: newSceneName.value.trim(), scene: newSceneText.value.trim() },
+      { brandId: brandId.value },
+    );
+    message.success('场景已添加');
+    newSceneName.value = '';
+    newSceneText.value = '';
+    loadPosterScenes();
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '添加失败');
+  }
+};
+const removePosterScene = async (s) => {
+  try {
+    await deletePosterScene(s.id, { brandId: brandId.value });
+    if (poPreset.value >= mergedPresets.value.length - 1) poPreset.value = 0;
+    loadPosterScenes();
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '删除失败');
+  }
+};
+const loadPosterScenes = async () => {
+  try {
+    const [list, can] = await Promise.all([
+      getPosterScenes({ brandId: brandId.value }),
+      getCoverSceneLimit({ brandId: brandId.value }),
+    ]);
+    serverScenes.value = list?.list ?? [];
+    scenesCanManage.value = !!can?.canManage;
+  } catch {
+    /* 场景接口异常回退内置预设 */
+  }
+};
 const poPreset = ref(0);
 const poMode = ref('overlay'); // overlay=AI生图+本地压字 | pure=纯AI生图(文字画进图里)
 const poTitle = ref('');
@@ -653,7 +708,7 @@ const generatePosterBg = async () => {
   poBusy.value = true;
   poBg.value = '';
   try {
-    const preset = POSTER_PRESETS[poPreset.value];
+    const preset = mergedPresets.value[poPreset.value] ?? mergedPresets.value[0];
     const productName = (props.productName || poSub.value || '').trim();
     const base = `电商风格产品营销海报：参考图中的产品是${productName ? `「${productName}」` : '图中所示产品'}，把它放在${preset.scene}，产品居中偏下完整展示。严格保持参考图产品的外形、结构、颜色与品牌标识，不要增删产品的任何部件（如天线、支架），不要把产品变成其他品类，产品外观保持原样不变，高清商业广告摄影`;
     let prompt = base;
@@ -1049,7 +1104,7 @@ const drawPoster = (ctx, W, H) => {
 
 watch(
   [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
-    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode, poRefIdx],
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode, poRefIdx, serverScenes.value],
   () => drawPreview(),
   { deep: true },
 );
@@ -1134,6 +1189,7 @@ watch(
       poFx.value = 'gold';
       loadEditorMeta();
       loadPosterLimit();
+      loadPosterScenes();
       nextTick(() => drawPreview());
     }
   },
@@ -1396,6 +1452,14 @@ watch(
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.scene-add-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  align-items: center;
 }
 
 .scene-chip {

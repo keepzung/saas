@@ -661,6 +661,42 @@ export class ContentproService {
     return this.quota.aiPosterSetLimit(brandId, limit, userId);
   }
 
+  // ─── AI 海报自定义场景预设 ─────────────────────────────────────────
+  async posterScenes(brandId: number) {
+    const list = await this.prisma.posterScene.findMany({
+      where: { brandId, enabled: true },
+      orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+    });
+    return { list: list.map((p) => ({ id: p.id, name: p.name, scene: p.scene })) };
+  }
+
+  async savePosterScene(brandId: number, userId: number, dto: { name?: string; scene?: string }, id?: number) {
+    if (!(await this.quota.aiPosterCanManage(userId))) throw new ForbiddenException('无场景管理权限');
+    if (id) {
+      const data: Prisma.PosterSceneUpdateInput = {};
+      if (dto.name !== undefined) data.name = dto.name;
+      if (dto.scene !== undefined) data.scene = dto.scene;
+      await this.prisma.posterScene.update({ where: { id }, data });
+      return { id };
+    }
+    if (!dto.name?.trim() || !dto.scene?.trim()) throw new BadRequestException('场景名与场景描述不能为空');
+    const row = await this.prisma.posterScene.create({
+      data: {
+        brandId,
+        name: dto.name.trim().slice(0, 12),
+        scene: dto.scene.trim(),
+        createdById: userId,
+      },
+    });
+    return { id: row.id };
+  }
+
+  async deletePosterScene(brandId: number, userId: number, id: number) {
+    if (!(await this.quota.aiPosterCanManage(userId))) throw new ForbiddenException('无场景管理权限');
+    await this.prisma.posterScene.delete({ where: { id } });
+    return { id };
+  }
+
   /** AI 生成图落盘到 /uploads/ai-cover/{brandId}/，返回站内相对路径 */
   private writeAiCoverBuffer(buf: Buffer, brandId: number): string {
     const fsSync = require('fs');

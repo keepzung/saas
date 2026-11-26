@@ -114,6 +114,19 @@ export const getCoverSceneLimit = (params) =>
 export const setCoverSceneLimit = (data, params) =>
   request.put('/content-pro/ai/cover-scene-limit', data, { params });
 
+// AI 海报自定义场景预设（有管理权限者增删）
+export const getPosterScenes = (params) =>
+  request.get('/content-pro/poster-scenes', { params });
+
+export const createPosterScene = (data, params) =>
+  request.post('/content-pro/poster-scenes', data, { params });
+
+export const updatePosterScene = (id, data) =>
+  request.put(`/content-pro/poster-scenes/${id}`, data);
+
+export const deletePosterScene = (id, params) =>
+  request.delete(`/content-pro/poster-scenes/${id}`, { params });
+
 export const getXhsHistory = (params) =>
   request.get('/content-pro/history/xhs', { params });
 

@@ -288,6 +288,40 @@ export class ContentproController {
     return this.service.coverSceneLimitStatus(Number(brandId ?? 1), user.id);
   }
 
+  // ─── AI 海报自定义场景（有管理权限者增删，全工作区可用）──────────
+  @Get('content-pro/poster-scenes')
+  posterScenes(@Query('brandId') brandId?: string) {
+    return this.service.posterScenes(Number(brandId ?? 1));
+  }
+
+  @Post('content-pro/poster-scenes')
+  createPosterScene(
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Body() body?: { name?: string; scene?: string },
+  ) {
+    const user = req.user as { id: number };
+    return this.service.savePosterScene(Number(brandId ?? 1), user.id, body ?? {});
+  }
+
+  @Put('content-pro/poster-scenes/:id')
+  updatePosterScene(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Body() body?: { name?: string; scene?: string; enabled?: boolean },
+  ) {
+    const user = req.user as { id: number };
+    if (body?.enabled === false) return this.service.deletePosterScene(Number(brandId ?? 1), user.id, id);
+    return this.service.savePosterScene(Number(brandId ?? 1), user.id, body ?? {}, id);
+  }
+
+  @Delete('content-pro/poster-scenes/:id')
+  deletePosterScene(@Param('id', ParseIntPipe) id: number, @Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.deletePosterScene(Number(brandId ?? 1), user.id, id);
+  }
+
   @Put('content-pro/ai/cover-scene-limit')
   setCoverSceneLimit(
     @Req() req: Request,

@@ -1246,6 +1246,20 @@ model AiPosterLimit {
   updatedAt    DateTime @updatedAt
 }
 
+// AI 海报自定义场景预设（有管理权限者增删，全工作区可用）
+model PosterScene {
+  id          Int      @id @default(autoincrement())
+  brandId     Int
+  name        String
+  scene       String   @db.Text
+  enabled     Boolean  @default(true)
+  sort        Int      @default(99)
+  createdById Int?
+  createdAt   DateTime @default(now())
+
+  @@index([brandId])
+}
+
 // ─── 内容创作任务（任务分发）───────────────────────────────────────────
 
 model ContentTask {
