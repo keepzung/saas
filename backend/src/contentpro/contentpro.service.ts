@@ -37,9 +37,10 @@ export class ContentproService {
     if (url.startsWith('/uploads/')) {
       const fs = await import('fs');
       const path = await import('path');
-      const target = path.resolve(this.uploadRoot(), url);
       const root = path.resolve(this.uploadRoot());
-      if (!target.startsWith(root)) return null;
+      // 注意：path.resolve(base, '/abs') 会丢弃 base——必须拼相对段（10-12 起的回归即此处）
+      const target = path.join(root, url.replace(/^\/uploads\//, ''));
+      if (target !== root && !target.startsWith(root + path.sep)) return null;
       try {
         return fs.readFileSync(target);
       } catch {

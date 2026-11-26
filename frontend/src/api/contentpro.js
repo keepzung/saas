@@ -254,11 +254,26 @@ export const getMyMobileTasks = (params) =>
   request.get('/content-pro/mobile/my-tasks', { params });
 
 // 配图打包下载：服务端抓图打 zip，绕开浏览器跨域/多文件下载限制
-export const downloadImagesZip = (data) =>
-  request.post('/content-pro/images/download-zip', data, {
-    responseType: 'blob',
-    timeout: 120000,
-  });
+// blob 响应的错误体也是 Blob，需解析出真实 msg（否则永远显示笼统"请求失败"）
+export const downloadImagesZip = async (data) => {
+  try {
+    return await request.post('/content-pro/images/download-zip', data, {
+      responseType: 'blob',
+      timeout: 120000,
+    });
+  } catch (e) {
+    if (e?.response?.data instanceof Blob) {
+      let msg = '请求失败';
+      try {
+        msg = JSON.parse(await e.response.data.text()).msg || msg;
+      } catch {
+        /* 非 JSON 错误体保持默认 */
+      }
+      throw new Error(msg);
+    }
+    throw e;
+  }
+};
 
 // 任务示例文档上传（仅 PDF，≤20MB）
 export const uploadTaskDoc = (file, brandId) => {
