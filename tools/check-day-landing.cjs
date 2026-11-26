@@ -53,11 +53,10 @@ const outJson = process.argv.includes('--json');
     result.push(row);
   }
   // 底表核对
-  const q = async (sql) => (await p.$queryRawUnsafe(sql))[0] ?? {};
-  const camp = await q(`SELECT count(*)::int c, COALESCE(round(sum("fee")),0)::int f FROM "KoxCampaignDailyStat" WHERE "statDate"='${DAY}' GROUP BY "brandId"`) ?? [];
-  const rowNotes = await q(`SELECT "brandId" b, count(*)::int c FROM "KoxNote" WHERE "publishTime">='${DAY}' AND "publishTime"<'${DAY}'::date + 1 GROUP BY 1`);
-  const nds = await q(`SELECT "brandId" b, count(*)::int c FROM "KoxNoteDailyStat" WHERE "day"='${DAY}' GROUP BY 1`);
-  const clue = await q(`SELECT "brandId" b, count(*)::int c FROM "ClueAnalysisDaily" WHERE "day"='${DAY}' GROUP BY 1`);
+  const camp = await p.$queryRawUnsafe(`SELECT "brandId" b, count(*)::int c, COALESCE(round(sum("fee")),0)::int f FROM "KoxCampaignDailyStat" WHERE "statDate"='${DAY}' GROUP BY 1`);
+  const rowNotes = await p.$queryRawUnsafe(`SELECT "brandId" b, count(*)::int c FROM "KoxNote" WHERE "publishTime">='${DAY}' AND "publishTime"<'${DAY}'::date + 1 GROUP BY 1`);
+  const nds = await p.$queryRawUnsafe(`SELECT "brandId" b, count(*)::int c FROM "KoxNoteDailyStat" WHERE "day"='${DAY}' GROUP BY 1`);
+  const clue = await p.$queryRawUnsafe(`SELECT "brandId" b, count(*)::int c FROM "ClueAnalysisDaily" WHERE "day"='${DAY}' GROUP BY 1`);
   const cmap = new Map(camp.map((x) => [Number(x.b), x]));
   const nmap = new Map(rowNotes.map((x) => [Number(x.b), x.c]));
   const dmap = new Map(nds.map((x) => [Number(x.b), x.c]));
