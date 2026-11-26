@@ -180,6 +180,21 @@
             </div>
           </div>
           <div class="ed-field">
+            <div class="ed-label">AI 参考图（建议选整机清晰、无文字水印的图；封面位易致 AI 认错产品）</div>
+            <div class="pick-grid" style="grid-template-columns: repeat(6, 1fr)">
+              <div
+                v-for="(img, i) in images"
+                :key="img.url"
+                class="pick-cell"
+                :class="{ selected: poRefIdx === i }"
+                @click="poRefIdx = i"
+              >
+                <img :src="img.url" />
+                <span v-if="poRefIdx === i" class="pick-idx">✓</span>
+              </div>
+            </div>
+          </div>
+          <div class="ed-field">
             <div class="ed-label">海报场景</div>
             <div class="scene-chips">
               <a-tag
@@ -602,6 +617,9 @@ const onCanvasPointerDown = (e) => {
   target.addEventListener('pointercancel', up);
 };
 const poBg = ref('');
+// AI 参考图：默认封面位（第1张），可换任意已选图——整机图做参考才不易认错产品
+const poRefIdx = ref(0);
+const poRefUrl = computed(() => images.value[poRefIdx.value]?.url ?? baseImage.value);
 
 // ── AI 生图每日限额（AI 海报/场景共用）
 const posterLimit = ref({ limit: 20, used: 0, remaining: 20, canManage: false });
@@ -636,7 +654,8 @@ const generatePosterBg = async () => {
   poBg.value = '';
   try {
     const preset = POSTER_PRESETS[poPreset.value];
-    const base = `电商风格产品营销海报：把这个产品放在${preset.scene}，产品居中偏下完整展示，产品外观保持原样不变，高清商业广告摄影`;
+    const productName = (props.productName || poSub.value || '').trim();
+    const base = `电商风格产品营销海报：参考图中的产品是${productName ? `「${productName}」` : '图中所示产品'}，把它放在${preset.scene}，产品居中偏下完整展示。严格保持参考图产品的外形、结构、颜色与品牌标识，不要增删产品的任何部件（如天线、支架），不要把产品变成其他品类，产品外观保持原样不变，高清商业广告摄影`;
     let prompt = base;
     if (poMode.value === 'pure') {
       // 纯 AI 生图：标题/副标题/标签由模型画进图片
@@ -651,7 +670,7 @@ const generatePosterBg = async () => {
       prompt = base + `，画面顶部三分之一和左侧留出干净区域用于排版标题文字`;
     }
     const res = await generateCoverScene(
-      { imageUrl: baseImage.value, prompt, width: 1080, height: 1440 },
+      { imageUrl: poRefUrl.value, prompt, width: 1080, height: 1440 },
       { brandId: brandId.value },
     );
     poBg.value = res?.url ?? '';
@@ -1030,7 +1049,7 @@ const drawPoster = (ctx, W, H) => {
 
 watch(
   [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
-    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode],
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode, poRefIdx],
   () => drawPreview(),
   { deep: true },
 );
@@ -1110,6 +1129,7 @@ watch(
       poSub.value = props.productName ?? '';
       poBg.value = '';
       poBusy.value = false;
+      poRefIdx.value = 0;
       poPreset.value = 0;
       poFx.value = 'gold';
       loadEditorMeta();
