@@ -697,6 +697,27 @@ export class ContentproService {
     return { id };
   }
 
+  // ─── 特效配色（压字/AI海报标题特效的颜色参数）────────────────────
+  /** 未配置时返回 null 让前端走默认；canManage 供前端显隐配色编辑器 */
+  async effectTheme(brandId: number, userId: number) {
+    const [row, canManage] = await Promise.all([
+      this.prisma.effectTheme.findUnique({ where: { brandId } }),
+      this.quota.aiPosterCanManage(userId),
+    ]);
+    return { config: row?.config ?? null, canManage };
+  }
+
+  async saveEffectTheme(brandId: number, userId: number, config: Record<string, unknown>) {
+    if (!(await this.quota.aiPosterCanManage(userId))) throw new ForbiddenException('无配色管理权限');
+    if (!config || typeof config !== 'object') throw new BadRequestException('配色配置无效');
+    const row = await this.prisma.effectTheme.upsert({
+      where: { brandId },
+      create: { brandId, config: config as Prisma.InputJsonValue, updatedById: userId },
+      update: { config: config as Prisma.InputJsonValue, updatedById: userId },
+    });
+    return { brandId: row.brandId, config: row.config };
+  }
+
   /** AI 生成图落盘到 /uploads/ai-cover/{brandId}/，返回站内相对路径 */
   private writeAiCoverBuffer(buf: Buffer, brandId: number): string {
     const fsSync = require('fs');

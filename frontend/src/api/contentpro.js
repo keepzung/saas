@@ -127,6 +127,13 @@ export const updatePosterScene = (id, data) =>
 export const deletePosterScene = (id, params) =>
   request.delete(`/content-pro/poster-scenes/${id}`, { params });
 
+// 特效配色（压字/AI海报标题特效颜色参数，按工作区配置）
+export const getEffectTheme = (params) =>
+  request.get('/content-pro/effect-theme', { params });
+
+export const setEffectTheme = (data, params) =>
+  request.put('/content-pro/effect-theme', data, { params });
+
 export const getXhsHistory = (params) =>
   request.get('/content-pro/history/xhs', { params });
 

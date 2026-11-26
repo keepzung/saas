@@ -322,6 +322,23 @@ export class ContentproController {
     return this.service.deletePosterScene(Number(brandId ?? 1), user.id, id);
   }
 
+  // ─── 特效配色（压字/AI海报标题特效）───────────────────────────────
+  @Get('content-pro/effect-theme')
+  effectTheme(@Req() req: Request, @Query('brandId') brandId?: string) {
+    const user = req.user as { id: number };
+    return this.service.effectTheme(Number(brandId ?? 1), user.id);
+  }
+
+  @Put('content-pro/effect-theme')
+  saveEffectTheme(
+    @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Body() body?: { config?: Record<string, unknown> },
+  ) {
+    const user = req.user as { id: number };
+    return this.service.saveEffectTheme(Number(brandId ?? 1), user.id, body?.config ?? {});
+  }
+
   @Put('content-pro/ai/cover-scene-limit')
   setCoverSceneLimit(
     @Req() req: Request,

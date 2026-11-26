@@ -1238,6 +1238,15 @@ model AiPosterUsage {
   @@index([brandId, day])
 }
 
+// 特效配色（压字/AI海报标题特效的颜色参数，按工作区配置；有管理权限者可调）
+model EffectTheme {
+  id          Int      @id @default(autoincrement())
+  brandId     Int      @unique
+  config      Json
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+}
+
 model AiPosterLimit {
   id           Int      @id @default(autoincrement())
   brandId      Int      @unique

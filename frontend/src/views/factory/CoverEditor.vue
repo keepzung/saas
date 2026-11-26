@@ -48,6 +48,29 @@
               <a-radio-button v-for="s in YZ_STYLES" :key="s.value" :value="s.value">{{ s.label }}</a-radio-button>
             </a-radio-group>
           </div>
+          <div class="ed-field" v-if="fxCanManage">
+            <div class="ed-label">特效配色（全工作区共享，改色实时预览）</div>
+            <div class="fx-color-row">
+              <span class="fx-label">荧光高亮色块</span>
+              <input type="color" v-model="fxTheme.highlight" class="fx-color" />
+            </div>
+            <div class="fx-color-row">
+              <span class="fx-label">霓虹光色</span>
+              <input type="color" v-model="fxTheme.neon" class="fx-color" />
+            </div>
+            <div class="fx-color-row">
+              <span class="fx-label">金色渐变（顶/中/底）</span>
+              <input type="color" v-model="fxTheme.gold[0]" class="fx-color" />
+              <input type="color" v-model="fxTheme.gold[1]" class="fx-color" />
+              <input type="color" v-model="fxTheme.gold[2]" class="fx-color" />
+              <span class="fx-label">描边</span>
+              <input type="color" v-model="fxTheme.goldStroke" class="fx-color" />
+            </div>
+            <a-space style="margin-top: 8px">
+              <a-button size="small" type="primary" @click="saveFxTheme()">保存配色</a-button>
+              <a-button size="small" @click="resetFxTheme">恢复默认</a-button>
+            </a-space>
+          </div>
           <div class="ed-field">
             <div class="ed-label">字体</div>
             <a-select v-model:value="designerFont" :options="FONT_OPTIONS" />
@@ -342,6 +365,8 @@ import {
   getPosterScenes,
   createPosterScene,
   deletePosterScene,
+  getEffectTheme,
+  setEffectTheme,
 } from '../../api/contentpro';
 
 const props = defineProps({
@@ -534,6 +559,64 @@ const loadPosterScenes = async () => {
     /* 场景接口异常回退内置预设 */
   }
 };
+
+// ── 特效配色（荧光块/霓虹光/金色渐变，按工作区配置；有管理权限者可调）
+const FX_DEFAULTS = {
+  highlight: '#fde047',
+  neon: '#22d3ee',
+  gold: ['#fff8d6', '#fbbf24', '#d97706'],
+  goldStroke: '#78350f',
+};
+const hexToRgba = (hex, a) => {
+  const m = String(hex ?? '').replace('#', '');
+  const full = m.length === 3 ? m.split('').map((c) => c + c).join('') : m;
+  const n = parseInt(full || '000000', 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+const fxTheme = ref({
+  highlight: FX_DEFAULTS.highlight,
+  neon: FX_DEFAULTS.neon,
+  gold: [...FX_DEFAULTS.gold],
+  goldStroke: FX_DEFAULTS.goldStroke,
+});
+const fxCanManage = ref(false);
+const loadFxTheme = async () => {
+  try {
+    const r = await getEffectTheme({ brandId: brandId.value });
+    fxCanManage.value = !!r?.canManage;
+    const cfg = r?.config;
+    if (cfg) {
+      fxTheme.value = {
+        highlight: cfg.highlight || FX_DEFAULTS.highlight,
+        neon: cfg.neon || FX_DEFAULTS.neon,
+        gold: Array.isArray(cfg.gold) && cfg.gold.length === 3 ? cfg.gold : [...FX_DEFAULTS.gold],
+        goldStroke: cfg.goldStroke || FX_DEFAULTS.goldStroke,
+      };
+    }
+  } catch {
+    /* 配色接口异常走默认 */
+  }
+};
+const saveFxTheme = async (cfg) => {
+  const config = cfg ?? JSON.parse(JSON.stringify(fxTheme.value));
+  try {
+    await setEffectTheme({ config }, { brandId: brandId.value });
+    message.success('特效配色已保存，全工作区生效');
+    fxTheme.value = {
+      highlight: config.highlight,
+      neon: config.neon,
+      gold: [...config.gold],
+      goldStroke: config.goldStroke,
+    };
+  } catch (e) {
+    message.error(e?.response?.data?.msg ?? '保存失败');
+  }
+};
+const resetFxTheme = () => {
+  fxTheme.value = { highlight: FX_DEFAULTS.highlight, neon: FX_DEFAULTS.neon, gold: [...FX_DEFAULTS.gold], goldStroke: FX_DEFAULTS.goldStroke };
+  saveFxTheme(JSON.parse(JSON.stringify(fxTheme.value)));
+};
+
 const poPreset = ref(0);
 const poMode = ref('overlay'); // overlay=AI生图+本地压字 | pure=纯AI生图(文字画进图里)
 const poTitle = ref('');
@@ -899,7 +982,7 @@ const drawYazi = (ctx, W, H) => {
     const drawBlock = (ln, y, s) => {
       const w = ctx.measureText(ln).width + s * 0.9;
       ctx.save();
-      ctx.fillStyle = 'rgba(253,224,71,0.92)';
+      ctx.fillStyle = hexToRgba(fxTheme.value.highlight, 0.92);
       ctx.beginPath();
       ctx.roundRect(W / 2 - w / 2, y - s * 0.58, w, s * 1.16, s * 0.16);
       ctx.fill();
@@ -1104,7 +1187,7 @@ const drawPoster = (ctx, W, H) => {
 
 watch(
   [activeTab, yzTitle, yzSub, yzPos, yzStyle, dzTitle, dzSub, dzTheme, dzShowProduct, pickSet.value, ptLayout, ptTitle,
-    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode, poRefIdx, serverScenes.value],
+    poTitle, poSub, poFx, poPreset, poBg, poTags.value, shapes.value, poMode, poRefIdx, serverScenes.value, fxTheme],
   () => drawPreview(),
   { deep: true },
 );
@@ -1190,6 +1273,7 @@ watch(
       loadEditorMeta();
       loadPosterLimit();
       loadPosterScenes();
+      loadFxTheme();
       nextTick(() => drawPreview());
     }
   },
