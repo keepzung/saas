@@ -5,6 +5,8 @@ const { createRequire } = require('module');
 const path = require('path');
 const backendRequire = createRequire(path.join(__dirname, '..', 'backend', 'package.json'));
 const { PrismaClient } = backendRequire('@prisma/client');
+// 家宽代理(2026-11-27): 本文件 fetch 均为 xiaohongshu 域名,统一走 MCC_PROXY_URL 代理
+try { if (process.env.MCC_PROXY_URL) { const { ProxyAgent, setGlobalDispatcher } = backendRequire('undici'); setGlobalDispatcher(new ProxyAgent(process.env.MCC_PROXY_URL.trim())); } } catch {}
 const p = new PrismaClient();
 const mk = (l) => ({ selected: 1, labelValue: l, labelName: l });
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';

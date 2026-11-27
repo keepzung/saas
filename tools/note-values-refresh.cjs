@@ -18,6 +18,8 @@ for (const l of fs.readFileSync(path.join(BACKEND_DIR, '.env'), 'utf8').split(/\
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
 const p = new PrismaClient();
+// 家宽代理(2026-11-27): 服务器IP被风控标记,本文件所有 fetch 均为 xiaohongshu 域名,统一走 MCC_PROXY_URL 代理
+if (process.env.MCC_PROXY_URL) { try { const { ProxyAgent, setGlobalDispatcher } = backendRequire('undici'); setGlobalDispatcher(new ProxyAgent(process.env.MCC_PROXY_URL.trim())); console.log('[proxy] xhs via', process.env.MCC_PROXY_URL.trim()); } catch (e) { console.log('[proxy] off:', e.message.slice(0,60)); } }
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
 const argOf = (k, d) => { const i = process.argv.indexOf(k); if (i > -1) return process.argv[i + 1]; const eq = process.argv.find((a) => a.startsWith(k + '=')); return eq ? eq.slice(k.length + 1) : d; };
 const BRAND = Number(argOf('--brand', '7'));

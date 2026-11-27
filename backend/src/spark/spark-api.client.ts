@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SparkOrgCtx } from './spark-org.registry';
+import { withXhsProxy } from '../common/xhs-fetch';
 
 export interface RtbAccountMetrics {
   virtualSellerId: string;
@@ -94,7 +95,7 @@ export class SparkApiClient {
     }
     let res: Response;
     try {
-      res = await fetch(`${MCC_BASE}${path}`, {
+      res = await fetch(`${MCC_BASE}${path}`, withXhsProxy(`${MCC_BASE}${path}`, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -105,7 +106,7 @@ export class SparkApiClient {
           'Accept-Language': 'zh-CN,zh;q=0.9',
         },
         body: method === 'POST' ? (body === null ? '{}' : JSON.stringify(body)) : undefined,
-      });
+      }) as Parameters<typeof fetch>[1]);
     } catch (error) {
       // cause 透传（undici fetch failed 的真实原因如 ECONNRESET/EAI_AGAIN 藏在 cause 里）
       const cause = (error as { cause?: unknown })?.cause;

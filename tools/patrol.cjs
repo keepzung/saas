@@ -18,6 +18,17 @@ const backendRequire = createRequire(path.join(BACKEND_DIR, 'package.json'));
 const { PrismaClient } = backendRequire('@prisma/client');
 const yaml = backendRequire('js-yaml');
 
+// 家宽代理(2026-11-27): 服务器IP被小红书风控标记期间,xiaohongshu 域名的探活/同步走
+// MCC_PROXY_URL 代理(本机代理经 ssh 反向隧道映射为 127.0.0.1:13128);其余域名不受影响
+let xhsProxyAgent = null;
+function xhsDispatch(url) {
+  if (!process.env.MCC_PROXY_URL || !/xiaohongshu\.com/i.test(url)) return undefined;
+  try {
+    if (!xhsProxyAgent) xhsProxyAgent = new (backendRequire('undici').ProxyAgent)(process.env.MCC_PROXY_URL.trim());
+    return xhsProxyAgent;
+  } catch { return undefined; }
+}
+
 function loadEnv(file) {
   if (!fs.existsSync(file)) return {};
   const out = {};
@@ -149,6 +160,7 @@ async function main() {
       try {
         const method = (req.method || 'GET').toUpperCase();
         const res = await fetch(req.url, {
+          ...xhsDispatch(req.url) ? { dispatcher: xhsDispatch(req.url) } : {},
           method,
           headers: req.headers,
           body: method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,

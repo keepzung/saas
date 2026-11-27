@@ -77,6 +77,9 @@ const startIdx = argv.indexOf('--start');
 const endIdx = argv.indexOf('--end');
 
 const envPath = path.join(__dirname, '.env');
+// 家宽代理(2026-11-27): 服务器IP被风控标记,本文件 fetch 均为 xiaohongshu 域名,统一走代理
+const { ProxyAgent, setGlobalDispatcher } = require('undici');
+if (process.env.MCC_PROXY_URL) { try { setGlobalDispatcher(new ProxyAgent(process.env.MCC_PROXY_URL.trim())); console.log('[proxy] xhs via', process.env.MCC_PROXY_URL.trim()); } catch (e) { console.log('[proxy] off:', e.message.slice(0, 60)); } }
 if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
     const m = line.match(/^\s*([\w.]+)\s*=\s*"?([^"\r\n]*)"?\s*$/);
