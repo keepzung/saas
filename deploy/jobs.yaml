@@ -94,6 +94,10 @@ jobs:
       desc: "周日特斯拉聚光全窗校准(月段深分页缺半的周度补)",
       line: "cd /opt/saas/tools/spark && flock -n /tmp/juguang-weekly.lock /usr/local/bin/node sync-juguang.cjs >> /opt/saas/logs/juguang-weekly.log 2>&1" }
 
+  - { id: check-day-landing,  user: root,  schedule: ["35 14 * * *"], category: ops,
+      desc: "每日单日落库自检(默认查昨日;cookie活则自动触发同步自愈,死则报告需登录)",
+      line: "/bin/bash /opt/saas/deploy/check-day-landing.sh >> /opt/saas/logs/check-day-landing.log 2>&1" }
+
 # ── soft 类(非 crontab,登记备查,verify 不校验) ────────────────────
 soft:
   - { id: backend-safesync, where: "saas-api 进程内部定时器", schedule: "每 60 分钟(SPARK_SYNC_INTERVAL_MINUTES)",
