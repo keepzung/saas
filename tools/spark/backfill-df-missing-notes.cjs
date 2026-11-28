@@ -84,7 +84,7 @@ async function pullAll(cookie) {
   for (const r of rows) {
     const noteId = String(pick(r, 'note_id') ?? '').trim();
     if (!noteId) { noId++; continue; }
-    const found = await p.koxNote.findFirst({ where: { brandId: BRAND, noteId }, select: { id: true } });
+    const found = await p.koxNote.findFirst({ where: { noteId }, select: { id: true } });
     if (found) { exist++; continue; }
     const authorName = String(pick(r, 'author_name') ?? '').trim();
     const authorUid2 = String(pick(r, 'author_id') ?? '').trim();
@@ -120,7 +120,7 @@ async function pullAll(cookie) {
       rawJson: r,
       ...(fid ? { coverUrl: `https://sns-img-hw.xhscdn.com/${fid}?imageView2/2/w/480/format/jpeg` } : {}),
     };
-    if (APPLY) await p.koxNote.create({ data: { noteId, ...data } });
+    if (APPLY) { try { await p.koxNote.create({ data: { noteId, ...data } }); } catch (e) { console.log('  create err ' + noteId + ': ' + e.message.slice(0, 60)); skipped++; continue; } }
     inserted++;
     if (inserted <= 5) console.log(`  缺失样例: ${noteId} pub=${pubRaw || '?'} author=${authorName || '?'} views=${data.views}`);
   }
