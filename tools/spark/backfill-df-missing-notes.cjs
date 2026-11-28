@@ -11,8 +11,11 @@ const backendRequire = createRequire(path.join(ROOT, 'backend', 'package.json'))
 const { PrismaClient } = backendRequire('@prisma/client');
 const p = new PrismaClient();
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
-const BRAND = Number((process.argv.find((a) => a.startsWith('--brand=')) || '--brand=7').split('=')[1]);
+const argOf = (k, d) => { const i = process.argv.indexOf(k); if (i > -1) return process.argv[i + 1]; const eq = process.argv.find((a) => a.startsWith(k + '=')); return eq ? eq.slice(k.length + 1) : d; };
+const BRAND = Number(argOf('--brand', '7'));
 const APPLY = process.argv.includes('--apply');
+const SOURCES = (argOf('--source', '') || '').split(',').map(x => x.trim()).filter(Boolean);
+const MONITOR_SCOPE = process.argv.includes('--monitor-scope'); // 格力等监控口径品牌:只收录基线账号(authorId 命中 kosAccount)的笔记
 const mk = (label) => ({ selected: 1, labelValue: label, labelName: label });
 const TARGETS = ['note_id', 'note_title', 'note_publish_time', 'author_name', 'author_id', 'note_link', 'first_file_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
 const dayStr = (offsetDays) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -41,6 +44,7 @@ async function pullAll(cookie) {
         { filterField: 'note_publish_date', filterFieldName: '笔记发布日期', filterType: 10, timeFilter: { pattern: 10, timeShowType: 11, disableRange: 1, limitMax: 366, quickDates: [6], values: [dayStr(-365), dayStr(0)] } },
         { filterField: 'is_rtb_adver', filterFieldName: '推广状态', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [mk('全部')] } },
         { filterField: 'note_type', filterFieldName: '笔记类型', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: [mk('全部')] } },
+        ...(SOURCES.length ? [{ filterField: 'content_type', filterFieldName: '笔记来源', filterType: 20, selectFilter: { selectType: 20, selectShowType: 0, valueSource: 1, selectLabels: SOURCES.map(mk) } }] : []),
       ],
     };
     const res = await fetch('https://mcc.xiaohongshu.com/api/vision/mcc_dashboard/target_detail_list', {
@@ -72,16 +76,19 @@ async function pullAll(cookie) {
     where: { brandId: BRAND },
     select: { id: true, authorId: true, nickname: true },
   });
+  const monitorUids = MONITOR_SCOPE ? new Set(accounts.filter((a) => /^[0-9a-f]{24}$/.test(a.authorId)).map((a) => a.authorId)) : null;
   const byUid = new Map(accounts.filter((a) => /^[0-9a-f]{24}$/.test(a.authorId)).map((a) => [a.authorId, a.id]));
   const todayKey = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 
-  let exist = 0, inserted = 0, noId = 0;
+  let exist = 0, inserted = 0, noId = 0, skipped = 0;
   for (const r of rows) {
     const noteId = String(pick(r, 'note_id') ?? '').trim();
     if (!noteId) { noId++; continue; }
     const found = await p.koxNote.findFirst({ where: { brandId: BRAND, noteId }, select: { id: true } });
     if (found) { exist++; continue; }
     const authorName = String(pick(r, 'author_name') ?? '').trim();
+    const authorUid2 = String(pick(r, 'author_id') ?? '').trim();
+    if (MONITOR_SCOPE && (!authorUid2 || !monitorUids.has(authorUid2))) { skipped++; continue; }
     const authorUid = String(pick(r, 'author_id') ?? '').trim();
     const title = String(pick(r, 'note_title') ?? '').trim() || '(无标题)';
     const pubRaw = String(pick(r, 'note_publish_time') ?? '').trim();
