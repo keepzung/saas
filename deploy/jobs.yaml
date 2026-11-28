@@ -6,6 +6,7 @@
 #   soft(备查类):  非 crontab 的调度源(backend 内部定时器/登录钩子/本机例程),仅登记
 # 规则(2026-11-24 起):
 #   1. 改任何 cron 必须**先改本文件再 install/手工同步**,禁止只改 crontab;
+#   0. 登录时刻 2026-11-28 起由 21:30 改为每天上午 ~08:00(人工): MCC 会话新鲜期与平台 T-1 分区发布期(上午~中午)重叠, 9:30-14:10 各同步槽全部落在会话有效期内;
 #   2. verify-cron.cjs 漂移≠0 视为异常;
 #   3. P2.2 将用 install-crontab.sh 从本清单生成两份 crontab,届时本文件即安装源。
 # 注意: line 字段 = crontab 里第 6 列起的**原样命令**(校验按空白归一化比对,双空格无碍);
@@ -31,7 +32,7 @@ jobs:
   - { id: db-backup,          user: root,  schedule: "0 3 * * *", category: ops,
       desc: "数据库/文件备份(deploy/backup.sh)",
       line: "/bin/bash /opt/saas/deploy/backup.sh >> /var/log/saas-backup.log 2>&1" }
-  - { id: spark-all,          user: root,  schedule: "30 5 * * *", category: sync, needs_cookie: all,
+  - { id: spark-all,          user: root,  schedule: ["30 5 * * *", "30 11 * * *"], category: sync, needs_cookie: all,
       desc: "全品牌星火晨间全量(spark/sync all,campaign+notes 各品牌 T-1)",
       line: "/bin/bash /opt/saas/deploy/cron-sync-spark-all.sh" }
   - { id: mdd-covers,         user: root,  schedule: "24 * * * *", category: sync,
@@ -51,16 +52,16 @@ jobs:
       line: "cd /opt/saas/tools && /usr/local/bin/node patrol.cjs --push >> /var/log/saas-patrol-0630.log 2>&1" }
 
   # ── deploy crontab:数据同步波次(运营时刻表 2026-11-08 定版) ──────────
-  - { id: pro-clue,           user: deploy, schedule: ["0 4 * * *", "0 9 * * *"], category: sync, needs_cookie: [2],
+  - { id: pro-clue,           user: deploy, schedule: ["30 9 * * *", "30 14 * * *"], category: sync, needs_cookie: [2],
       desc: "荣威专业号线索(pro_clue_tool 权威漏斗口径)",
       line: "/opt/saas/deploy/cron-sync-pro-clue.sh" }
   - { id: pro-clue-mdd,       user: deploy, schedule: ["5 4 * * *"], category: sync, needs_cookie: [5],
       desc: "MDD 专业号线索",
       line: "/opt/saas/deploy/cron-sync-pro-clue-mdd.sh" }
-  - { id: mdd-notes,          user: deploy, schedule: ["40 5 * * *"], category: sync, needs_cookie: [5],
+  - { id: mdd-notes,          user: deploy, schedule: ["45 11 * * *"], category: sync, needs_cookie: [5],
       desc: "MDD 笔记链四步(notes/notes_daily/clue_analysis/clue_acq_tool)",
       line: "/opt/saas/deploy/cron-sync-brand-notes.sh 5 >> /opt/saas/logs/brand-notes-sync-5.log 2>&1" }
-  - { id: df-notes,           user: deploy, schedule: ["50 5 * * *"], category: sync, needs_cookie: [7],
+  - { id: df-notes,           user: deploy, schedule: ["50 11 * * *"], category: sync, needs_cookie: [7],
       desc: "奕境笔记链四步(同 MDD;线索两槽 11-24 新增)",
       line: "/opt/saas/deploy/cron-sync-brand-notes.sh 7 >> /opt/saas/logs/brand-notes-sync-7.log 2>&1" }
   - { id: kos-daytier,        user: deploy, schedule: ["0 8 * * *", "0 10 * * *"], category: sync, needs_cookie: all,

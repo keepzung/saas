@@ -3,6 +3,8 @@ rem The old GBK Chinese version was destroyed by sed on 11-15 (4 nights of broke
 rem ASCII bytes are identical in GBK and UTF-8, so this file can never be mangled by encoding again.
 rem
 rem Order: partner -> pro -> RW(brand2) -> MDD(brand5) -> DF(brand7) -> GREE(brand8)
+rem Run time: ~08:00 daily since 2026-11-28 (was 21:30). Fresh session then covers
+rem the morning T-1 partition publication window (09:00-14:00 slots all land).
 rem Before each MCC login window opens, a topmost confirm popup shows the brand + account.
 rem Each login window shows a RED brand banner and its window title carries the brand name.
 rem Credentials are auto-filled - a human only needs to finish the slider.
