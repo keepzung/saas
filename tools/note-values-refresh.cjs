@@ -45,6 +45,7 @@ const pickDeep = (r, code) => {
   return hit ? String(hit.targetValue ?? hit.targetOriginValue ?? '').trim() : undefined;
 };
 const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };
+const PAGES = Number(argOf('--pages', '200')); // 平台支持长分页;荣威 5.9 万篇需 ~118 页
 const TARGETS = ['note_id', 'imp_num', 'read_feed_num', 'like_num', 'cmt_num', 'fav_num', 'share_num', 'follow_num', 'ziran_imp_cnt', 'ziran_read_cnt', 'ads_rtb_engage_cnt', 'message_open_cnt', 'message_driving_open_cnt', 'msg_leads_num'];
 const dayStr = (offsetDays) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 // SparkSyncLog.statDate 是 String 列,传 Date 对象会被 Prisma 拒绝且静默失败
@@ -52,7 +53,7 @@ const todayKey = () => dayStr(0);
 
 async function pullAll(cookie) {
   const rows = [];
-  for (let page = 1; page <= 10; page++) {
+  for (let page = 1; page <= PAGES; page++) {
     const body = {
       viewAlias: 'mcc_assets_creativityContent_noteAnalysisView', chart: 'noteList', sorts: [],
       dynamicTargets: TARGETS,

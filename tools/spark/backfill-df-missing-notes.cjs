@@ -34,7 +34,7 @@ const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); re
 
 async function pullAll(cookie) {
   const rows = [];
-  for (let page = 1; page <= 10; page++) {
+  for (let page = 1; page <= 200; page++) {
     const body = {
       viewAlias: 'mcc_assets_creativityContent_noteAnalysisView', chart: 'noteList', sorts: [],
       dynamicTargets: TARGETS,
